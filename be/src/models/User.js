@@ -9,7 +9,7 @@ const userSchema = new mongoose.Schema(
     displayName: { type: String, required: true, trim: true },
     bio: { type: String },
     avatarUrl: { type: String },
-    roleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Role' },
+    roleId: { type: String, enum: ['user', 'admin'], default: 'user', required: true },
     isActive: { type: Boolean, default: true, required: true },
     verifiedEmail: { type: Boolean, default: false, required: true },
     totalLikesReceived: { type: Number, default: 0, required: true },

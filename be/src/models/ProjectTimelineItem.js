@@ -3,8 +3,7 @@ import mongoose from 'mongoose';
 const projectTimelineItemSchema = new mongoose.Schema(
   {
     trackId: { type: mongoose.Schema.Types.ObjectId, ref: 'ProjectTrack', required: true },
-    lickId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lick' },
-    backingTrackId: { type: mongoose.Schema.Types.ObjectId, ref: 'BackingTrack' },
+    lickId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lick', required: true },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     startTime: { type: Number, required: true },
     duration: { type: Number, required: true },

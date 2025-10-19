@@ -8,6 +8,7 @@ const postSchema = new mongoose.Schema(
     contentId: { type: mongoose.Schema.Types.ObjectId },
     contentType: { type: String, enum: ['lick', 'project'] },
     originalPostId: { type: mongoose.Schema.Types.ObjectId, ref: 'Post' },
+    moderationStatus: { type: String, enum: ['approved', 'banned'], default: 'approved', required: true },
   },
   { timestamps: true }
 );
