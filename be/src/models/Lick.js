@@ -11,6 +11,7 @@ const lickSchema = new mongoose.Schema(
     tabNotation: { type: String },
     key: { type: String },
     tempo: { type: Number },
+    status: { type: String, enum: ['active', 'inactive'], default: 'draft', required: true },
     difficulty: { type: String, enum: ['beginner', 'intermediate', 'advanced'] },
     isPublic: { type: Boolean, default: true, required: true },
     isFeatured: { type: Boolean, default: false, required: true },
