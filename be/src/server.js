@@ -38,6 +38,9 @@ import './models/RoomChat.js';
 import './models/Tag.js';
 import './models/UserFollow.js';
 
+// Import routes
+import authRoutes from './routes/authRoutes.js';
+import postRoutes from './routes/postRoutes.js';
 
 const app = express();
 
@@ -56,6 +59,10 @@ app.use('/static', express.static(path.join(__dirname, '..', uploadDir)));
 app.get('/health', (req, res) => {
   res.json({ ok: true, service: 'melodyhub-be', timestamp: new Date().toISOString() });
 });
+
+// API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/posts', postRoutes);
 
 const port = Number(process.env.PORT) || 9999;
 
