@@ -42,6 +42,7 @@ import './models/UserFollow.js';
 import authRoutes from './routes/authRoutes.js';
 import postRoutes from './routes/postRoutes.js';
 
+
 const app = express();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -63,6 +64,7 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/posts', postRoutes);
+app.use('/api/upload', uploadRoutes);
 
 const port = Number(process.env.PORT) || 9999;
 
