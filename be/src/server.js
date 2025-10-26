@@ -41,6 +41,7 @@ import './models/Tag.js';
 import './models/UserFollow.js';
 
 // Import routes
+import authRoutes from './routes/authRoutes.js';
 
 import postRoutes from './routes/postRoutes.js';
 import liveroomRoutes from './routes/user/liveroomRoutes.js';
@@ -57,6 +58,9 @@ app.use(helmet());
 app.use(corsMiddleware());
 app.use(morgan('dev'));
 app.use(express.json({ limit: '2mb' }));
+
+// API Routes
+app.use('/api/auth', authRoutes);
 app.use(express.urlencoded({ extended: true }));
 
 const uploadDir = process.env.UPLOAD_DIR || 'uploads';
