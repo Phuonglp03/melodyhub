@@ -1,6 +1,7 @@
-import React from 'react';
-import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload } from 'antd';
 import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined } from '@ant-design/icons';
+import { listPosts, createPost } from '../../../services/user/post';
 
 const { Title, Text } = Typography;
 
@@ -103,7 +104,232 @@ const LeaderboardItem = ({ name, icon, iconColor = '#111' }) => (
   </Space>
 );
 
+const formatTime = (isoString) => {
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleString();
+  } catch {
+    return '';
+  }
+};
+
 const NewsFeed = () => {
+  const [items, setItems] = useState([]);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [hasMore, setHasMore] = useState(true);
+  const loaderRef = React.useRef(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [newText, setNewText] = useState('');
+  const [files, setFiles] = useState([]);
+  const [posting, setPosting] = useState(false);
+  const [maxChars] = useState(300);
+  const [linkPreview, setLinkPreview] = useState(null);
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [previewCache, setPreviewCache] = useState({}); // url -> {title, thumbnailUrl}
+
+  const extractFirstUrl = (text) => {
+    if (!text) return null;
+    const urlRegex = /(https?:\/\/[^\s]+)/i;
+    const match = text.match(urlRegex);
+    return match ? match[0] : null;
+  };
+
+  const getYoutubeId = (urlString) => {
+    try {
+      const u = new URL(urlString);
+      if (u.hostname.includes('youtu.be')) {
+        return u.pathname.replace('/', '');
+      }
+      if (u.hostname.includes('youtube.com')) {
+        return u.searchParams.get('v');
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const deriveThumbnail = (urlString) => {
+    const ytId = getYoutubeId(urlString);
+    if (ytId) {
+      return `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
+    }
+    return '';
+  };
+
+  const fetchProviderOEmbed = async (url) => {
+    const tryFetch = async (endpoint) => {
+      const res = await fetch(`${endpoint}${encodeURIComponent(url)}`);
+      if (!res.ok) throw new Error('oEmbed failed');
+      return res.json();
+    };
+    // Ordered list of oEmbed providers to try
+    const endpoints = [
+      'https://noembed.com/embed?url=',
+      'https://soundcloud.com/oembed?format=json&url=',
+      'https://vimeo.com/api/oembed.json?url=',
+      'https://open.spotify.com/oembed?url=',
+    ];
+    for (const ep of endpoints) {
+      try {
+        const data = await tryFetch(ep);
+        return {
+          title: data.title || url,
+          thumbnailUrl: data.thumbnail_url || deriveThumbnail(url),
+          provider: data.provider_name || '',
+          author: data.author_name || '',
+          type: data.type || 'link',
+        };
+      } catch (_) {
+        // continue
+      }
+    }
+    return null;
+  };
+
+  const fetchOgTags = async (url) => {
+    try {
+      const proxied = `https://r.jina.ai/http://${url.replace(/^https?:\/\//, '')}`;
+      const res = await fetch(proxied);
+      if (!res.ok) return null;
+      const text = await res.text();
+      const ogImageMatch = text.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+      const titleMatch = text.match(/<title>([^<]+)<\/title>/i);
+      return {
+        title: (titleMatch && titleMatch[1]) || url,
+        thumbnailUrl: (ogImageMatch && ogImageMatch[1]) || deriveThumbnail(url),
+        provider: '',
+        author: '',
+        type: 'link',
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const resolvePreview = async (url) => {
+    // cache first
+    if (previewCache[url]) return previewCache[url];
+    const fromOembed = await fetchProviderOEmbed(url);
+    const data = fromOembed || (await fetchOgTags(url)) || { title: url, thumbnailUrl: deriveThumbnail(url) };
+    setPreviewCache((prev) => ({ ...prev, [url]: data }));
+    return data;
+  };
+
+  useEffect(() => {
+    const url = extractFirstUrl(newText);
+    if (!url) {
+      setLinkPreview(null);
+      return;
+    }
+    let aborted = false;
+    setLinkLoading(true);
+    resolvePreview(url)
+      .then((data) => { if (!aborted) setLinkPreview({ url, ...data }); })
+      .finally(() => { if (!aborted) setLinkLoading(false); });
+    return () => { aborted = true; };
+  }, [newText]);
+
+  const fetchData = async (p = page, l = limit) => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await listPosts({ page: p, limit: l });
+      const posts = res?.data?.posts || [];
+      const totalPosts = res?.data?.pagination?.totalPosts || 0;
+      if (p === 1) {
+        setItems(posts);
+      } else {
+        setItems((prev) => [...prev, ...posts]);
+      }
+      setTotal(totalPosts);
+      const totalPages = Math.ceil(totalPosts / l);
+      setHasMore(p < totalPages);
+    } catch (e) {
+      setError(e.message || 'Lỗi tải bài viết');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData(1, limit);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Enrich loaded posts with preview thumbnails if missing
+  useEffect(() => {
+    const enrich = async () => {
+      const urls = items
+        .map((p) => p?.linkPreview?.url)
+        .filter((u) => u && !previewCache[u]);
+      for (const url of urls) {
+        await resolvePreview(url);
+      }
+    };
+    if (items && items.length) enrich();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && !loading && hasMore) {
+        const next = page + 1;
+        setPage(next);
+        fetchData(next, limit);
+      }
+    }, { rootMargin: '200px' });
+    const el = loaderRef.current;
+    if (el) observer.observe(el);
+    return () => { if (el) observer.unobserve(el); };
+  }, [loading, hasMore, page, limit]);
+
+  const handleCreatePost = async () => {
+    if (!newText.trim()) {
+      message.warning('Vui lòng nhập nội dung');
+      return;
+    }
+    try {
+      setPosting(true);
+      // eslint-disable-next-line no-console
+      console.log('[UI] Click Đăng, preparing payload...');
+      // Không chặn khi thiếu userId ở UI; service sẽ tự chèn từ localStorage
+      // và BE sẽ trả lỗi rõ ràng nếu thiếu
+      if (files.length > 0) {
+        const form = new FormData();
+        form.append('postType', 'status_update');
+        form.append('textContent', newText.trim());
+        if (linkPreview) {
+          form.append('linkPreview', JSON.stringify(linkPreview));
+        }
+        files.forEach((f) => {
+          if (f.originFileObj) form.append('media', f.originFileObj);
+        });
+        // eslint-disable-next-line no-console
+        console.log('[UI] Sending multipart createPost...', { fileCount: files.length });
+        await createPost(form);
+      } else {
+        // eslint-disable-next-line no-console
+        console.log('[UI] Sending JSON createPost...');
+        await createPost({ postType: 'status_update', textContent: newText.trim(), linkPreview });
+      }
+      setNewText('');
+      setFiles([]);
+      setIsModalOpen(false);
+      message.success('Đăng bài thành công');
+      fetchData(1, limit);
+      setPage(1);
+    } catch (e) {
+      message.error(e.message || 'Đăng bài thất bại');
+    } finally {
+      setPosting(false);
+    }
+  };
+
   return (
     <div style={{ 
       maxWidth: 1680, 
@@ -123,7 +349,7 @@ const NewsFeed = () => {
             display: 'flex',
             alignItems: 'center',
             gap: 16
-          }}>
+          }} onClick={() => setIsModalOpen(true)}>
             <Avatar size={40} style={{ backgroundColor: '#722ed1' }}>T</Avatar>
             <Input.TextArea 
               placeholder="Có gì mới ?" 
@@ -136,19 +362,108 @@ const NewsFeed = () => {
                 minHeight: 56,
                 fontSize: 16
               }}
+              readOnly
             />
-            <Button type="primary" size="large" style={{ borderRadius: 999, background: '#1890ff', padding: '0 22px', height: 44 }}>Post</Button>
+            <Button type="primary" size="large" style={{ borderRadius: 999, background: '#1890ff', padding: '0 22px', height: 44 }} onClick={(e) => { e.stopPropagation(); setIsModalOpen(true); }}>Post</Button>
           </div>
 
-          {MOCK_FEEDS.map((post) => (
-            <Card key={post.id} style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
+          <Modal
+            open={isModalOpen}
+            title={<span style={{ color: '#fff', fontWeight: 600 }}>Tạo bài đăng</span>}
+            onCancel={() => { if (!posting) { setIsModalOpen(false); } }}
+            footer={
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <Button onClick={() => { if (!posting) setIsModalOpen(false); }}>Hủy</Button>
+                <Button type="primary" loading={posting} onClick={handleCreatePost}>Đăng</Button>
+              </div>
+            }
+            styles={{ 
+              content: { background: '#0f0f10' },
+              header: { background: '#0f0f10', borderBottom: '1px solid #1f1f1f' }
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <Input.TextArea
+                placeholder="Chia sẻ điều gì đó..."
+                autoSize={{ minRows: 3, maxRows: 8 }}
+                value={newText}
+                onChange={(e) => setNewText(e.target.value)}
+                maxLength={maxChars}
+                showCount
+              />
+              <Upload.Dragger
+                multiple
+                fileList={files}
+                accept="audio/*,video/*"
+                beforeUpload={() => false}
+                onChange={({ fileList }) => setFiles(fileList)}
+                listType="text"
+                style={{ padding: 8, borderColor: '#303030', background: '#0f0f10', color: '#e5e7eb', minHeight: 150 }}
+                itemRender={(originNode, file, fileList, actions) => (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', color: '#e5e7eb', padding: '6px 8px', borderBottom: '1px dashed #303030' }}>
+                    <span style={{ color: '#e5e7eb', fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 12 }}>{file.name}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Button danger size="small" onClick={actions.remove}>Xóa</Button>
+                    </div>
+                  </div>
+                )}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                  <p style={{ margin: 0, color: '#e5e7eb' }}>Kéo thả hoặc bấm để chọn file (audio/video)</p>
+                  <Text style={{ color: '#bfbfbf' }}>Hỗ trợ tối đa 10 file, 100MB mỗi file</Text>
+                </div>
+              </Upload.Dragger>
+              {extractFirstUrl(newText) && (
+                <div style={{ border: '1px solid #303030', borderRadius: 8, padding: 12, background: '#111', color: '#e5e7eb' }}>
+                  {linkLoading ? (
+                    <Text style={{ color: '#bfbfbf' }}>Đang tải preview…</Text>
+                  ) : (
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                      {linkPreview?.thumbnailUrl ? (
+                        <img src={linkPreview.thumbnailUrl} alt="preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6 }} />
+                      ) : (
+                        <div style={{ width: 64, height: 64, borderRadius: 6, background: '#1f1f1f' }} />
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{linkPreview?.title || extractFirstUrl(newText)}</div>
+                        <div style={{ color: '#9ca3af', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{extractFirstUrl(newText)}</div>
+                      </div>
+                      <Button size="small" onClick={() => setLinkPreview(null)}>Ẩn</Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Modal>
+
+          {loading && (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+              <Spin />
+            </div>
+          )}
+          {!loading && error && (
+            <Card style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
+              <Text style={{ color: '#fff' }}>{error}</Text>
+            </Card>
+          )}
+          {!loading && !error && items.length === 0 && (
+            <Empty description={<span style={{ color: '#9ca3af' }}>Chưa có bài đăng</span>} />
+          )}
+          {!loading && !error && items.map((post) => (
+            <Card key={post._id} style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <Space align="start" size={14}>
-                  <Avatar size={40} style={{ background: post.user.color }}>{post.user.name[0]}</Avatar>
+                  <Avatar size={40} style={{ background: '#2db7f5' }}>
+                    {post?.userId?.displayName?.[0] || post?.userId?.username?.[0] || 'U'}
+                  </Avatar>
                   <div>
                     <Space style={{ marginBottom: 4 }}>
-                      <Text strong style={{ color: '#fff', fontSize: 16 }}>{post.user.name}</Text>
-                      <Text type="secondary" style={{ color: '#9ca3af', fontSize: 13 }}>{post.time}</Text>
+                      <Text strong style={{ color: '#fff', fontSize: 16 }}>
+                        {post?.userId?.displayName || post?.userId?.username || 'Người dùng'}
+                      </Text>
+                      <Text type="secondary" style={{ color: '#9ca3af', fontSize: 13 }}>
+                        {formatTime(post?.createdAt)}
+                      </Text>
                     </Space>
                   </div>
                 </Space>
@@ -156,13 +471,33 @@ const NewsFeed = () => {
                   Follow
                 </Button>
               </div>
-              <div style={{ marginBottom: 10, color: '#fff', fontSize: 15, lineHeight: 1.6 }}>{post.content}</div>
-              <Space wrap style={{ marginBottom: 14 }}>
-                {post.tags.map((t) => (
-                  <Tag key={t} color="purple" style={{ background: '#722ed1', border: 'none', color: '#fff' }}>#{t}</Tag>
-                ))}
-              </Space>
-              <WavePlaceholder />
+              {post?.textContent && (
+                <div style={{ marginBottom: 10, color: '#fff', fontSize: 15, lineHeight: 1.6 }}>
+                  {post.textContent}
+                </div>
+              )}
+              {post?.media?.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <WavePlaceholder />
+                </div>
+              )}
+              {post?.linkPreview && (
+                <a href={post.linkPreview?.url || '#'} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                  <div style={{ border: '1px solid #303030', borderRadius: 8, padding: 12, background: '#111', color: '#e5e7eb', marginTop: 8 }}>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                      {(post.linkPreview?.thumbnailUrl || (previewCache[post.linkPreview?.url]?.thumbnailUrl)) ? (
+                        <img src={(post.linkPreview?.thumbnailUrl || previewCache[post.linkPreview?.url]?.thumbnailUrl)} alt="preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6 }} />
+                      ) : (
+                        <div style={{ width: 64, height: 64, borderRadius: 6, background: '#1f1f1f' }} />
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{post.linkPreview?.title || previewCache[post.linkPreview?.url]?.title || post.linkPreview?.url}</div>
+                        <div style={{ color: '#9ca3af', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{post.linkPreview?.url}</div>
+                      </div>
+                    </div>
+                  </div>
+                </a>
+              )}
               <Space style={{ marginTop: 14 }}>
                 <Button icon={<LikeOutlined />} style={{ background: 'transparent', border: 'none', color: '#fff' }}>
                   Thích
@@ -173,6 +508,13 @@ const NewsFeed = () => {
               </Space>
             </Card>
           ))}
+
+          <div ref={loaderRef} style={{ height: 1 }} />
+          {loading && (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}>
+              <Spin />
+            </div>
+          )}
         </div>
 
         <div>

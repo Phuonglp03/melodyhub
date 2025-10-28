@@ -40,7 +40,7 @@ const Register = () => {
       
       console.log('Sending registration data:', requestData);
       
-      const response = await axios.post('http://localhost:5000/api/auth/register', requestData);
+      const response = await axios.post('http://localhost:9999/api/auth/register', requestData);
       
       console.log('Registration response:', response.data);
       message.success('Registration successful! Please login.');

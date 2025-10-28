@@ -171,8 +171,15 @@ export const getPosts = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    // Include legacy posts that may not have moderationStatus field
+    const visibilityFilter = {
+      $or: [
+        { moderationStatus: 'approved' },
+        { moderationStatus: { $exists: false } },
+      ],
+    };
 
-    const posts = await Post.find({ moderationStatus: 'approved' })
+    const posts = await Post.find(visibilityFilter)
       .populate('userId', 'username displayName avatarUrl')
       .populate('originalPostId')
       .sort({ createdAt: -1 })
@@ -180,7 +187,7 @@ export const getPosts = async (req, res) => {
       .limit(limit)
       .lean();
 
-    const totalPosts = await Post.countDocuments({ moderationStatus: 'approved' });
+    const totalPosts = await Post.countDocuments(visibilityFilter);
     const totalPages = Math.ceil(totalPosts / limit);
 
     res.status(200).json({
@@ -224,9 +231,16 @@ export const getPostsByUser = async (req, res) => {
       });
     }
 
+    const visibilityFilter = {
+      $or: [
+        { moderationStatus: 'approved' },
+        { moderationStatus: { $exists: false } },
+      ],
+    };
+
     const posts = await Post.find({ 
-      userId, 
-      moderationStatus: 'approved' 
+      userId,
+      ...visibilityFilter,
     })
       .populate('userId', 'username displayName avatarUrl')
       .populate('originalPostId')
@@ -236,8 +250,8 @@ export const getPostsByUser = async (req, res) => {
       .lean();
 
     const totalPosts = await Post.countDocuments({ 
-      userId, 
-      moderationStatus: 'approved' 
+      userId,
+      ...visibilityFilter,
     });
     const totalPages = Math.ceil(totalPosts / limit);
 

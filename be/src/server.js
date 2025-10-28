@@ -41,9 +41,7 @@ import './models/Tag.js';
 import './models/UserFollow.js';
 
 // Import routes
-// import authRoutes from './routes/authRoutes.js';
 import authRoutes from './routes/authRoutes.js';
-
 import postRoutes from './routes/postRoutes.js';
 import liveroomRoutes from './routes/user/liveroomRoutes.js';
 
