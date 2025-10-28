@@ -39,19 +39,19 @@ const projectStorage = new CloudinaryStorage({
   }
 });
 
-// // Cấu hình storage cho images (nếu cần)
-// const imageStorage = new CloudinaryStorage({
-//   cloudinary: cloudinary,
-//   params: {
-//     folder: 'melodyhub/images',
-//     resource_type: 'image',
-//     allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
-//     transformation: [
-//       { quality: 'auto' },
-//       { fetch_format: 'auto' }
-//     ]
-//   }
-// });
+// Cấu hình storage cho images
+const imageStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'melodyhub/images',
+    resource_type: 'image',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+    transformation: [
+      { quality: 'auto' },
+      { fetch_format: 'auto' }
+    ]
+  }
+});
 
 // Multer upload middleware cho audio
 export const uploadAudio = multer({
@@ -104,28 +104,120 @@ export const uploadProjectAudio = multer({
   }
 });
 
+// Cấu hình storage cho videos
+const videoStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'melodyhub/videos',
+    resource_type: 'video',
+    allowed_formats: ['mp4', 'mov', 'avi', 'wmv', 'flv', 'webm'],
+    transformation: [
+      { quality: 'auto' },
+      { format: 'mp4' }
+    ]
+  }
+});
+
 // Multer upload middleware cho images
-// export const uploadImage = multer({
-//   storage: imageStorage,
-//   limits: {
-//     fileSize: 10 * 1024 * 1024, // 10MB limit cho images
-//   },
-//   fileFilter: (req, file, cb) => {
-//     const allowedMimes = [
-//       'image/jpeg',
-//       'image/jpg',
-//       'image/png',
-//       'image/gif',
-//       'image/webp'
-//     ];
+export const uploadImage = multer({
+  storage: imageStorage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit cho images
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = [
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/gif',
+      'image/webp'
+    ];
     
-//     if (allowedMimes.includes(file.mimetype)) {
-//       cb(null, true);
-//     } else {
-//       cb(new Error('Chỉ cho phép file hình ảnh (jpg, jpeg, png, gif, webp)'), false);
-//     }
-//   }
-// });
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Chỉ cho phép file hình ảnh (jpg, jpeg, png, gif, webp)'), false);
+    }
+  }
+});
+
+// Multer upload middleware cho videos
+export const uploadVideo = multer({
+  storage: videoStorage,
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB limit cho video files
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = [
+      'video/mp4',
+      'video/mpeg',
+      'video/quicktime',
+      'video/x-msvideo',
+      'video/x-ms-wmv',
+      'video/x-flv',
+      'video/webm'
+    ];
+    
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Chỉ cho phép file video (mp4, mov, avi, wmv, flv, webm)'), false);
+    }
+  }
+});
+
+// Combined upload cho post media (video, audio) - không cho phép hình ảnh
+export const uploadPostMedia = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Chỉ cho phép video và audio
+    const allowedMimes = [
+      // Videos
+      'video/mp4',
+      'video/mpeg',
+      'video/quicktime',
+      'video/x-msvideo',
+      'video/x-ms-wmv',
+      'video/x-flv',
+      'video/webm',
+      // Audio
+      'audio/mpeg',
+      'audio/wav',
+      'audio/mp4',
+      'audio/aac',
+      'audio/ogg',
+      'audio/flac',
+      'audio/x-ms-wma',
+      'audio/aiff'
+    ];
+    
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Chỉ cho phép file media (video, audio)'), false);
+    }
+  }
+});
+
+// Utility function để upload file lên Cloudinary
+export const uploadToCloudinary = async (fileBuffer, folder, resourceType = 'auto') => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: folder,
+        resource_type: resourceType,
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+    uploadStream.end(fileBuffer);
+  });
+};
 
 // Utility function để xóa file từ Cloudinary
 export const deleteFromCloudinary = async (publicId, resourceType = 'video') => {
