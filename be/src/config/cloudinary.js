@@ -167,40 +167,83 @@ export const uploadVideo = multer({
 });
 
 // Combined upload cho post media (video, audio) - không cho phép hình ảnh
+// export const uploadPostMedia = multer({
+//   storage: multer.memoryStorage(),
+//   limits: {
+//     fileSize: 100 * 1024 * 1024, // 100MB limit
+//   },
+//   fileFilter: (req, file, cb) => {
+//     // Chỉ cho phép video và audio
+//     const allowedMimes = [
+//       // Videos
+//       'video/mp4',
+//       'video/mpeg',
+//       'video/quicktime',
+//       'video/x-msvideo',
+//       'video/x-ms-wmv',
+//       'video/x-flv',
+//       'video/webm',
+//       // Audio
+//       'audio/mpeg',
+//       'audio/wav',
+//       'audio/mp4',
+//       'audio/aac',
+//       'audio/ogg',
+//       'audio/flac',
+//       'audio/x-ms-wma',
+//       'audio/aiff'
+//     ];
+    
+//     if (allowedMimes.includes(file.mimetype)) {
+//       cb(null, true);
+//     } else {
+//       cb(new Error('Chỉ cho phép file media (video, audio)'), false);
+//     }
+//   }
+// });
 export const uploadPostMedia = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 100 * 1024 * 1024, // 100MB limit
   },
   fileFilter: (req, file, cb) => {
+    console.log('👉 MIME TYPE:', file.mimetype);
     // Chỉ cho phép video và audio
     const allowedMimes = [
       // Videos
-      'video/mp4',
-      'video/mpeg',
-      'video/quicktime',
-      'video/x-msvideo',
-      'video/x-ms-wmv',
-      'video/x-flv',
-      'video/webm',
-      // Audio
-      'audio/mpeg',
-      'audio/wav',
-      'audio/mp4',
-      'audio/aac',
-      'audio/ogg',
-      'audio/flac',
-      'audio/x-ms-wma',
-      'audio/aiff'
+    'video/mp4',
+  'video/mpeg',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/x-ms-wmv',
+  'video/x-flv',
+  'video/webm',
+  // Audio
+  'audio/mpeg',
+  'audio/wav',
+  'audio/wave',
+  'audio/x-wav',
+  'audio/x-pn-wav',
+  'audio/vnd.wave',
+  'audio/mp4',
+  'audio/aac',
+  'audio/ogg',
+  'audio/flac',
+  'audio/x-ms-wma',
+  'audio/aiff',
+  // Một số trình duyệt/Postman gửi kiểu generic
+  'application/octet-stream'
     ];
     
     if (allowedMimes.includes(file.mimetype)) {
       cb(null, true);
     } else {
+      console.log('❌ MIME type bị từ chối:', file.mimetype); // thêm log debug
       cb(new Error('Chỉ cho phép file media (video, audio)'), false);
     }
   }
 });
+
 
 // Utility function để upload file lên Cloudinary
 export const uploadToCloudinary = async (fileBuffer, folder, resourceType = 'auto') => {
