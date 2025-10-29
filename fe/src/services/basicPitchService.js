@@ -5,8 +5,9 @@
 
 import axios from "axios";
 import { generateTabFromAudio as generateWithYIN } from "./aiTabGenerator";
+import { getApiBaseUrl } from "../config/api";
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || "http://localhost:5000";
+const API_BASE_URL = getApiBaseUrl().replace("/api", ""); // Remove /api suffix if present
 
 /**
  * Check if Basic-Pitch API is available

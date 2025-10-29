@@ -30,6 +30,10 @@ router.get("/user/:userId", getMyLicks);
 // IMPORTANT: This route must come BEFORE /:lickId routes
 router.post("/", uploadAudio, createLick);
 
+// POST /api/licks/generate-tab - Generate guitar tab from audio using AI
+// IMPORTANT: Must come BEFORE /:lickId routes to avoid being caught by them
+router.post("/generate-tab", uploadAudio, generateTab);
+
 // GET /api/licks/:lickId/play - Play/stream lick audio
 router.get("/:lickId/play", playLickAudio);
 
@@ -38,9 +42,6 @@ router.get("/:lickId", getLickById);
 
 // POST /api/licks/:lickId/like - Like/Unlike a lick
 router.post("/:lickId/like", jsonParser, toggleLickLike);
-
-// POST /api/licks/generate-tab - Generate guitar tab from audio using AI
-router.post("/generate-tab", uploadAudio, generateTab);
 
 console.log("[LICK ROUTES] All routes registered successfully");
 
