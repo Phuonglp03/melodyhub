@@ -8,11 +8,14 @@ export const http = axios.create({
 });
 
 http.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
   try {
-    // Basic client-side logging to help diagnose when requests don't fire
-    // eslint-disable-next-line no-console
     console.log('[HTTP]', config.method?.toUpperCase(), config.baseURL + config.url, config.params || '', config.headers['Content-Type']);
   } catch {}
+  
   return config;
 });
 

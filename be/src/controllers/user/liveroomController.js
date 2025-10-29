@@ -1,12 +1,11 @@
 import { v4 as uuidv4 } from 'uuid';
 import LiveRoom from '../../models/LiveRoom.js';
+import UserFollow from '../../models/UserFollow.js';
 import { getSocketIo } from '../../config/socket.js';
 
 export const createLiveStream = async (req, res) => {
-  const { title, description } = req.body;
-  // const hostId = req.user.id;
-  const tempHostId = "68f4c1e698eb9dde067d4856"; 
-  const hostId = tempHostId; 
+  const { title, description, privacyType } = req.body;
+  const hostId = req.userId;
 
 
   try {
@@ -18,6 +17,7 @@ export const createLiveStream = async (req, res) => {
       description: description || null,
       streamKey,
       status: 'waiting',
+      privacyType: privacyType || 'public',
     });
 
     await newRoom.save();
@@ -35,11 +35,91 @@ export const createLiveStream = async (req, res) => {
   }
 };
 
+export const getLiveStreamById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const currentUserId = req.query.userId;
+    const stream = await LiveRoom.findById(id)
+      .populate('hostId', 'displayName username avatarUrl');
 
+    if (!stream || stream.status === 'ended') {
+      return res.status(404).json({ message: 'Không tìm thấy phòng live hoặc phòng đã kết thúc.' });
+    }
+    
+    const hostId = stream.hostId._id.toString();
+    const isHost = currentUserId && currentUserId === hostId;
+    if (!isHost) {
+      if (stream.privacyType === 'follow_only') {
+        if (!currentUserId) {
+          return res.status(401).json({ message: 'Vui lòng đăng nhập để xem stream này.' });
+        }
+
+        const isFollowing = await UserFollow.findOne({ 
+          followerId: currentUserId, 
+          followingId: hostId 
+        });
+        
+        if (!isFollowing) {
+          return res.status(403).json({ message: 'Stream này chỉ dành cho người theo dõi.' });
+        }
+
+      }
+      if (!['live', 'ended'].includes(stream.status)) {
+        return res.status(404).json({ message: 'Livestream không hoạt động hoặc đã kết thúc.' });
+      }
+    }
+
+    const playbackBaseUrl = process.env.MEDIA_SERVER_HTTP_URL || 'http://localhost:8000';
+
+    res.status(200).json({
+      ...stream.toObject(),
+      playbackUrls: {
+        hls: `${playbackBaseUrl}/live/${stream.streamKey}/index.m3u8`,
+        flv: `${playbackBaseUrl}/live/${stream.streamKey}.flv`
+      }
+    });
+
+  } catch (err) {
+    console.error('Lỗi khi lấy stream by id:', err);
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
+
+export const updatePrivacy = async (req, res) => {
+  const hostId = req.userId;
+  const { id } = req.params;
+  const { privacyType } = req.body; 
+
+  if (!['public', 'follow_only'].includes(privacyType)) {
+    return res.status(400).json({ message: 'Trạng thái riêng tư không hợp lệ.' });
+  }
+
+  try {
+    const room = await LiveRoom.findOne({ _id: id, hostId: hostId });
+
+    if (!room) {
+      return res.status(404).json({ message: 'Không tìm thấy phòng hoặc bạn không có quyền.' });
+    }
+
+    if (!['waiting', 'preview', 'live'].includes(room.status)) {
+      return res.status(400).json({ message: 'Chỉ có thể đổi trạng thái khi đang chuẩn bị hoặc đang live.' });
+    }
+
+    room.privacyType = privacyType;
+    await room.save();
+    const io = getSocketIo();
+    io.to(room._id.toString()).emit('stream-privacy-updated', { privacyType: room.privacyType });
+
+    res.status(200).json({ message: 'Cập nhật quyền riêng tư thành công.', privacyType: room.privacyType });
+
+  } catch (err) {
+    console.error('Lỗi khi cập nhật privacy:', err);
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
 
 export const goLive = async (req, res) => {
-  const hostId = "68f4c1e698eb9dde067d4856"; 
-  
+  const hostId = req.userId; 
   try {
     const { id } = req.params;
     const room = await LiveRoom.findOne({ _id: id, hostId: hostId });
@@ -74,7 +154,7 @@ export const goLive = async (req, res) => {
 
 
 export const endLiveStream = async (req, res) => {
-  const hostId = "68f4c1e698eb9dde067d4856"; 
+  const hostId = req.userId;
   
   try {
     const { id } = req.params;
@@ -113,7 +193,7 @@ export const endLiveStream = async (req, res) => {
 };
 
 export const updateLiveStreamDetails = async (req, res) => {
-  const hostId = "68f4c1e698eb9dde067d4856"; 
+  const hostId = req.userId;
   const { id } = req.params;
   const { title, description } = req.body;
 
@@ -124,7 +204,7 @@ export const updateLiveStreamDetails = async (req, res) => {
       return res.status(404).json({ message: 'Không tìm thấy phòng live hoặc bạn không có quyền.' });
     }
     
-    if (room.status !== 'live' && room.status !== 'preview') {
+    if (room.status !== 'live' && room.status !== 'preview' && room.status !== 'waiting') {
       return res.status(400).json({ message: 'Chỉ có thể cập nhật khi đang ở chế độ xem trước hoặc đang live.' });
     }
     
