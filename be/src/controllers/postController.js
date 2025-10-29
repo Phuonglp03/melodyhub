@@ -1,10 +1,35 @@
 import Post from '../models/Post.js';
 import User from '../models/User.js';
+import { uploadToCloudinary } from '../middleware/file.js';
+
+// Helper function to detect media type from mimetype
+const detectMediaType = (mimetype) => {
+  if (mimetype.startsWith('image/')) return 'image';
+  if (mimetype.startsWith('video/')) return 'video';
+  if (mimetype.startsWith('audio/')) return 'audio';
+  return 'unknown';
+};
+
+// Parse JSON only when input is a JSON string; otherwise return as-is
+const parseJsonIfString = (value) => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch (e) {
+    return value;
+  }
+};
 
 // Create a new post
 export const createPost = async (req, res) => {
   try {
-    const { userId, postType, textContent, contentId, contentType, originalPostId } = req.body;
+    const { userId, postType, textContent } = req.body;
+    const linkPreviewInput = parseJsonIfString(req.body.linkPreview);
+    
+    // Parse originalPostId if it's a string
+    const originalPostId = req.body.originalPostId;
 
     // Validate required fields
     if (!userId || !postType) {
@@ -15,11 +40,11 @@ export const createPost = async (req, res) => {
     }
 
     // Validate postType enum
-    const validPostTypes = ['status_update', 'new_lick', 'new_project', 'shared_post'];
+    const validPostTypes = ['status_update', 'shared_post'];
     if (!validPostTypes.includes(postType)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid postType. Must be one of: status_update, new_lick, new_project, shared_post'
+        message: 'Invalid postType. Must be one of: status_update, shared_post'
       });
     }
 
@@ -32,20 +57,77 @@ export const createPost = async (req, res) => {
       });
     }
 
-    // Validate contentId and contentType for specific post types
-    if ((postType === 'new_lick' || postType === 'new_project') && (!contentId || !contentType)) {
+    // Validate originalPostId exists if provided (for shared_post)
+    if (postType === 'shared_post' && !originalPostId) {
       return res.status(400).json({
         success: false,
-        message: 'contentId and contentType are required for new_lick and new_project posts'
+        message: 'originalPostId is required for shared_post type'
       });
     }
 
-    // Validate contentType enum if provided
-    if (contentType && !['lick', 'project'].includes(contentType)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid contentType. Must be one of: lick, project'
-      });
+    if (originalPostId) {
+      const originalPost = await Post.findById(originalPostId);
+      if (!originalPost) {
+        return res.status(404).json({
+          success: false,
+          message: 'Original post not found'
+        });
+      }
+    }
+
+    // Handle uploaded files
+    let mediaArray = [];
+    if (req.files && req.files.length > 0) {
+      // Upload each file to Cloudinary
+      for (const file of req.files) {
+        const mediaType = detectMediaType(file.mimetype);
+        if (mediaType === 'image') {
+          return res.status(400).json({
+            success: false,
+            message: 'Không cho phép upload hình ảnh cho bài đăng này'
+          });
+        }
+        const folder = `melodyhub/posts/${mediaType}`;
+        const resourceType = mediaType === 'video' ? 'video' : 'video'; // audio dùng resource_type 'video' trên Cloudinary
+        
+        let result;
+        try {
+          result = await uploadToCloudinary(file.buffer, folder, resourceType);
+        } catch (e) {
+          return res.status(400).json({ success: false, message: 'Upload media thất bại', error: e.message });
+        }
+        
+        mediaArray.push({
+          url: result.secure_url,
+          type: mediaType
+        });
+      }
+    } else if (req.body.media) {
+      // If media is provided as array in body (for external URLs)
+      const mediaBody = parseJsonIfString(req.body.media);
+      if (Array.isArray(mediaBody)) {
+        for (const item of mediaBody) {
+          if (!item.url || !item.type) {
+            return res.status(400).json({
+              success: false,
+              message: 'Each media item must have url and type'
+            });
+          }
+          if (!['video', 'audio'].includes(item.type)) {
+            return res.status(400).json({
+              success: false,
+              message: 'Media type must be one of: video, audio'
+            });
+          }
+          if (item.type === 'image') {
+            return res.status(400).json({
+              success: false,
+              message: 'Không cho phép ảnh trong media'
+            });
+          }
+          mediaArray.push(item);
+        }
+      }
     }
 
     // Create new post
@@ -53,8 +135,8 @@ export const createPost = async (req, res) => {
       userId,
       postType,
       textContent,
-      contentId,
-      contentType,
+      linkPreview: linkPreviewInput,
+      media: mediaArray.length > 0 ? mediaArray : undefined,
       originalPostId,
       moderationStatus: 'approved' // Default to approved
     });
@@ -64,7 +146,7 @@ export const createPost = async (req, res) => {
     // Populate user information for response
     const populatedPost = await Post.findById(savedPost._id)
       .populate('userId', 'username displayName avatarUrl')
-      .populate('originalPostId', 'textContent postType')
+      .populate('originalPostId')
       .lean();
 
     res.status(201).json({
@@ -89,16 +171,23 @@ export const getPosts = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    // Include legacy posts that may not have moderationStatus field
+    const visibilityFilter = {
+      $or: [
+        { moderationStatus: 'approved' },
+        { moderationStatus: { $exists: false } },
+      ],
+    };
 
-    const posts = await Post.find({ moderationStatus: 'approved' })
+    const posts = await Post.find(visibilityFilter)
       .populate('userId', 'username displayName avatarUrl')
-      .populate('originalPostId', 'textContent postType')
+      .populate('originalPostId')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
 
-    const totalPosts = await Post.countDocuments({ moderationStatus: 'approved' });
+    const totalPosts = await Post.countDocuments(visibilityFilter);
     const totalPages = Math.ceil(totalPosts / limit);
 
     res.status(200).json({
@@ -142,20 +231,27 @@ export const getPostsByUser = async (req, res) => {
       });
     }
 
+    const visibilityFilter = {
+      $or: [
+        { moderationStatus: 'approved' },
+        { moderationStatus: { $exists: false } },
+      ],
+    };
+
     const posts = await Post.find({ 
-      userId, 
-      moderationStatus: 'approved' 
+      userId,
+      ...visibilityFilter,
     })
       .populate('userId', 'username displayName avatarUrl')
-      .populate('originalPostId', 'textContent postType')
+      .populate('originalPostId')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
 
     const totalPosts = await Post.countDocuments({ 
-      userId, 
-      moderationStatus: 'approved' 
+      userId,
+      ...visibilityFilter,
     });
     const totalPages = Math.ceil(totalPosts / limit);
 
@@ -190,7 +286,7 @@ export const getPostById = async (req, res) => {
 
     const post = await Post.findById(postId)
       .populate('userId', 'username displayName avatarUrl')
-      .populate('originalPostId', 'textContent postType')
+      .populate('originalPostId')
       .lean();
 
     if (!post) {
@@ -219,7 +315,7 @@ export const getPostById = async (req, res) => {
 export const updatePost = async (req, res) => {
   try {
     const { postId } = req.params;
-    const { textContent, postType } = req.body;
+    const { textContent, linkPreview, postType } = req.body;
 
     const post = await Post.findById(postId);
     if (!post) {
@@ -231,12 +327,68 @@ export const updatePost = async (req, res) => {
 
     // Update allowed fields
     if (textContent !== undefined) post.textContent = textContent;
+    if (linkPreview !== undefined) {
+      post.linkPreview = typeof linkPreview === 'string' ? JSON.parse(linkPreview) : linkPreview;
+    }
+    
+    // Handle uploaded files
+    if (req.files && req.files.length > 0) {
+      let mediaArray = [];
+      // Upload each file to Cloudinary
+      for (const file of req.files) {
+        const mediaType = detectMediaType(file.mimetype);
+        if (mediaType === 'image') {
+          return res.status(400).json({
+            success: false,
+            message: 'Không cho phép upload hình ảnh cho bài đăng này'
+          });
+        }
+        const folder = `melodyhub/posts/${mediaType}`;
+        const resourceType = mediaType === 'video' ? 'video' : 'video'; // audio dùng resource_type 'video' trên Cloudinary
+        
+        const result = await uploadToCloudinary(file.buffer, folder, resourceType);
+        
+        mediaArray.push({
+          url: result.secure_url,
+          type: mediaType
+        });
+      }
+      post.media = mediaArray;
+    } else if (req.body.media !== undefined) {
+      // Validate media array if provided
+      if (Array.isArray(req.body.media)) {
+        for (const item of req.body.media) {
+          if (!item.url || !item.type) {
+            return res.status(400).json({
+              success: false,
+              message: 'Each media item must have url and type'
+            });
+          }
+          if (!['video', 'audio'].includes(item.type)) {
+            return res.status(400).json({
+              success: false,
+              message: 'Media type must be one of: video, audio'
+            });
+          }
+          if (item.type === 'image') {
+            return res.status(400).json({
+              success: false,
+              message: 'Không cho phép ảnh trong media'
+            });
+          }
+        }
+        post.media = req.body.media;
+      } else if (req.body.media === null) {
+        post.media = [];
+      }
+    }
+    
     if (postType !== undefined) {
-      const validPostTypes = ['status_update', 'new_lick', 'new_project', 'shared_post'];
+      const validPostTypes = ['status_update', 'shared_post'];
       if (!validPostTypes.includes(postType)) {
         return res.status(400).json({
           success: false,
-          message: 'Invalid postType'
+          message: 'Invalid postType. Must be one of: status_update, shared_post'
         });
       }
       post.postType = postType;
@@ -246,7 +398,7 @@ export const updatePost = async (req, res) => {
 
     const populatedPost = await Post.findById(updatedPost._id)
       .populate('userId', 'username displayName avatarUrl')
-      .populate('originalPostId', 'textContent postType')
+      .populate('originalPostId')
       .lean();
 
     res.status(200).json({

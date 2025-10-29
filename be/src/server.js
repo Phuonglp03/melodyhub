@@ -5,11 +5,19 @@ import morgan from "morgan";
 import "express-async-errors";
 import path from "path";
 import { fileURLToPath } from "url";
+import "dotenv/config";
+import express from "express";
+import helmet from "helmet";
+import morgan from "morgan";
+import "express-async-errors";
+import path from "path";
+import { fileURLToPath } from "url";
+import http from "http";
 
 import { connectToDatabase } from "./config/db.js";
 import { corsMiddleware } from "./config/cors.js";
-import "./config/cloudinary.js"; // Initialize Cloudinary configuration
-
+import { socketServer } from "./config/socket.js";
+import { nodeMediaServer } from "./config/media.js";
 // Import all models to ensure they are registered with Mongoose
 import "./models/User.js";
 import "./models/Role.js";
@@ -40,12 +48,15 @@ import "./models/Tag.js";
 import "./models/UserFollow.js";
 
 // Import routes
-// import authRoutes from './routes/authRoutes.js';
+import authRoutes from "./routes/authRoutes.js";
 import postRoutes from "./routes/postRoutes.js";
-import lickRoutes from "./routes/lickRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
+import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 
 const app = express();
+const httpServer = http.createServer(app);
 
+socketServer(httpServer);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -57,11 +68,17 @@ app.use(
 );
 app.use(corsMiddleware());
 app.use(morgan("dev"));
-// Add urlencoded parser for form-data (needed for multer to work properly)
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(express.json({ limit: "2mb" }));
+
+// API Routes
+app.use("/api/auth", authRoutes);
+app.use(express.urlencoded({ extended: true }));
 
 const uploadDir = process.env.UPLOAD_DIR || "uploads";
 app.use("/static", express.static(path.join(__dirname, "..", uploadDir)));
+const uploadDir = process.env.UPLOAD_DIR || "uploads";
+app.use("/static", express.static(path.join(__dirname, "..", uploadDir)));
+app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.get("/health", (req, res) => {
   res.json({
@@ -72,16 +89,18 @@ app.get("/health", (req, res) => {
 });
 
 // API Routes
-// app.use('/api/auth', authRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
-app.use("/api/licks", lickRoutes);
+app.use("/api/livestreams", liveroomRoutes);
 
 const port = Number(process.env.PORT) || 9999;
 
 async function start() {
   await connectToDatabase();
-  app.listen(port, () => {
+  httpServer.listen(port, () => {
     console.log(`melodyhub-be listening on port ${port}`);
+    nodeMediaServer();
   });
 }
 

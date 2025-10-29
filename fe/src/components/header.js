@@ -1,1 +1,36 @@
-//
+import React from 'react';
+import { Layout, Input, Button, Space, Typography } from 'antd';
+import { FireOutlined, BellOutlined, MessageOutlined, SearchOutlined, UserOutlined } from '@ant-design/icons';
+
+const { Header } = Layout;
+const { Text } = Typography;
+
+const AppHeader = () => {
+  return (
+    <Header style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100, padding: '0 64px', background: '#0b0b0c', borderBottom: '1px solid #1f1f1f', height: 72 }}>
+      <div style={{ display: 'flex', alignItems: 'center', height: '100%', gap: 32, maxWidth: 1680, margin: '0 auto' }}>
+        <Text style={{ color: '#fff', fontWeight: 800, fontSize: 22 }}>MelodyHub</Text>
+        <Space size={28} style={{ color: '#d1d5db' }}>
+          <Text style={{ color: '#d1d5db', fontSize: 16 }}>Join Live</Text>
+          <Text style={{ color: '#d1d5db', fontSize: 16 }}>Library</Text>
+        </Space>
+        <div style={{ flex: 1 }} />
+        <Input
+          placeholder="Tìm kiếm"
+          allowClear
+          prefix={<SearchOutlined style={{ color: '#9ca3af' }} />}
+          style={{ maxWidth: 600, background: '#111213', borderColor: '#1f1f1f', color: '#e5e7eb', borderRadius: 999, height: 40 }}
+        />
+        <Space size={24}>
+          <BellOutlined style={{ color: '#e5e7eb', fontSize: 20 }} />
+          <MessageOutlined style={{ color: '#e5e7eb', fontSize: 20 }} />
+          <UserOutlined style={{ color: '#e5e7eb', fontSize: 20 }} />
+          <Button style={{ color: '#fff', background: '#ef4444', borderColor: '#ef4444', borderRadius: 999, height: 40, padding: '0 20px', fontSize: 14 }} icon={<FireOutlined />}>LiveSteam</Button>
+          <Button style={{ color: '#fff', background: '#ef4444', borderColor: '#ef4444', borderRadius: 999, height: 40, padding: '0 20px', fontSize: 14 }}>Creat project</Button>
+        </Space>
+      </div>
+    </Header>
+  );
+};
+
+export default AppHeader;
