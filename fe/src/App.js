@@ -1,3 +1,4 @@
+import 'antd/dist/reset.css';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import React from 'react';
 import { Provider } from 'react-redux';
@@ -6,7 +7,6 @@ import { store, persistor } from './redux/store';
 import AppRoutes from './routes/appRoutes';
 import { PersistGate } from 'redux-persist/integration/react';
 
-import 'antd/dist/reset.css';
 const App = () => (
   <Provider store={store}>
     <PersistGate loading={null} persistor={persistor}>

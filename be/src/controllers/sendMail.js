@@ -12,7 +12,7 @@ const sendMail = async({email, subject, html}) => {
         }
 
         if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-            console.error('Email credentials not configured');
+            console.error('Email credentials not configured');ư
             return { success: false, error: 'Email service not configured' };
         }
 
