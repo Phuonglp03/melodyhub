@@ -12,6 +12,8 @@ import ForgotPassword from '../pages/auth/ForgotPassword';
 import ResetPassword from '../pages/auth/ResetPassword';
 import ProtectedRoute from '../components/common/ProtectedRoute';
 
+import LiveStreamCreate from '../pages/user/LiveRoomCreate';
+import LiveStreamLive from '../pages/user/LiveRoomLive';
 const AppRoutes = () => {
   const dispatch = useDispatch();
   const { user, isLoading } = useSelector((state) => state.auth);
@@ -96,7 +98,8 @@ const AppRoutes = () => {
           }
         >
           <Route index element={<NewsFeed />} />
-          {/* Add other protected routes here */}
+          <Route path="livestream/setup/:roomId" element={<LiveStreamCreate />} />
+          <Route path="livestream/live/:roomId" element={<LiveStreamLive />} />
         </Route>
 
         {/* 404 - Not Found */}

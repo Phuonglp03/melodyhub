@@ -44,8 +44,8 @@ import './models/UserFollow.js';
 
 // Import routes
 import authRoutes from './routes/authRoutes.js';
-
 import postRoutes from './routes/postRoutes.js';
+import userRoutes from './routes/userRoutes.js';
 import liveroomRoutes from './routes/user/liveroomRoutes.js';
 
 const app = express();
@@ -87,6 +87,13 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/health', (req, res) => {
   res.json({ ok: true, service: 'melodyhub-be', timestamp: new Date().toISOString() });
 });
+
+// API Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/posts', postRoutes);
+app.use('/api/livestreams', liveroomRoutes);
+
 
 const port = Number(process.env.PORT) || 9999;
 

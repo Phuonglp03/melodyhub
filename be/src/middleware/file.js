@@ -1,5 +1,5 @@
 import multer from 'multer';
-import { uploadAudio, uploadImage, deleteFromCloudinary } from '../config/cloudinary.js';
+import { uploadAudio, uploadImage, uploadPostMedia, deleteFromCloudinary, uploadToCloudinary } from '../config/cloudinary.js';
 
 // Middleware để xử lý upload audio
 export const handleAudioUpload = uploadAudio.single('audio');
@@ -19,13 +19,16 @@ export const handleMixedUpload = uploadAudio.fields([
   { name: 'image', maxCount: 1 }
 ]);
 
+// Middleware để xử lý post media uploads (multiple files)
+export const handlePostMediaUpload = uploadPostMedia.array('media', 10);
+
 // Error handling middleware cho upload
 export const handleUploadError = (error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     if (error.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
         success: false,
-        message: 'File quá lớn. Kích thước tối đa cho audio là 100MB, cho image là 10MB.'
+        message: 'File quá lớn. Kích thước tối đa là 100MB.'
       });
     }
     if (error.code === 'LIMIT_FILE_COUNT') {
@@ -47,4 +50,4 @@ export const handleUploadError = (error, req, res, next) => {
 };
 
 // Utility function để xóa file
-export { deleteFromCloudinary };
+export { deleteFromCloudinary, uploadToCloudinary };
