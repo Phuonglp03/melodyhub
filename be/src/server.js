@@ -6,6 +6,8 @@ import 'express-async-errors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
+import cookieParser from 'cookie-parser';
+import cors from 'cors';
 
 import { connectToDatabase } from './config/db.js';
 import { corsMiddleware } from './config/cors.js';
@@ -46,22 +48,37 @@ import authRoutes from './routes/authRoutes.js';
 import postRoutes from './routes/postRoutes.js';
 import liveroomRoutes from './routes/user/liveroomRoutes.js';
 
-
 const app = express();
 const httpServer = http.createServer(app);
 
+// Connect to MongoDB
+connectToDatabase();
+
+// Middleware
+app.use(helmet());
+app.use(cors({
+  origin: 'http://localhost:3000', // URL của frontend
+  credentials: true
+}));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+// Logging in development
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+}
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/posts', postRoutes);
+app.use('/api/livestreams', liveroomRoutes);
+
+// Socket.io setup
 socketServer(httpServer);
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-app.use(helmet());
-app.use(corsMiddleware());
-app.use(morgan('dev'));
-app.use(express.json({ limit: '2mb' }));
-
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use(express.urlencoded({ extended: true }));
 
 const uploadDir = process.env.UPLOAD_DIR || 'uploads';
 app.use('/static', express.static(path.join(__dirname, '..', uploadDir)));
@@ -71,27 +88,9 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, service: 'melodyhub-be', timestamp: new Date().toISOString() });
 });
 
-// API Routes
-
-app.use('/api/posts', postRoutes);
-app.use('/api/livestreams', liveroomRoutes);
-
-
 const port = Number(process.env.PORT) || 9999;
 
-async function start() {
-  await connectToDatabase();
-  httpServer.listen(port, () => {
-    console.log(`melodyhub-be listening on port ${port}`);
-    nodeMediaServer(); 
-  });
-}
-
-start().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
+httpServer.listen(port, () => {
+  console.log(`melodyhub-be listening on port ${port}`);
+  nodeMediaServer(); 
 });
-
-
-
-
