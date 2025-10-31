@@ -5,6 +5,9 @@ import { refreshUser } from '../redux/features/auth/authSlice';
 import MainLayout from '../layouts/userLayout';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import NewsFeed from '../pages/user/NewFeed';
+import PersonalFeed from '../pages/user/NewFeed/Personal';
+import UserFeed from '../pages/user/NewFeed/UserFeed';
+import ProfilePage from '../pages/user/Profile';
 import Login from '../pages/auth/Login';
 import Register from '../pages/auth/Register';
 import VerifyOTP from '../pages/auth/VerifyOTP';
@@ -100,6 +103,9 @@ const AppRoutes = () => {
           <Route index element={<NewsFeed />} />
           <Route path="livestream/setup/:roomId" element={<LiveStreamCreate />} />
           <Route path="livestream/live/:roomId" element={<LiveStreamLive />} />
+          <Route path="newfeedspersonal" element={<PersonalFeed />} />
+          <Route path="users/:userId/newfeeds" element={<UserFeed />} />
+          <Route path="profile" element={<ProfilePage />} />
         </Route>
 
         {/* 404 - Not Found */}
