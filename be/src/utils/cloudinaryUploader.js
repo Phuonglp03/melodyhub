@@ -11,18 +11,26 @@ import streamifier from "streamifier";
  */
 export const uploadFromBuffer = (fileBuffer, folder, resourceType = "auto") => {
   return new Promise((resolve, reject) => {
+    console.log(
+      `[CLOUDINARY] Uploading to folder: ${folder}, resource_type: ${resourceType}`
+    );
+
     // Create an upload stream to Cloudinary
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: folder,
         resource_type: resourceType,
+        // Don't apply transformations during upload to avoid codec issues
+        // Cloudinary will store the original file format
       },
       (error, result) => {
         if (error) {
           // If there's an error, reject the promise
+          console.error("[CLOUDINARY] Upload error:", error);
           return reject(error);
         }
         // If successful, resolve the promise with the result
+        console.log("[CLOUDINARY] Upload successful:", result.public_id);
         resolve(result);
       }
     );

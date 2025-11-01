@@ -5,13 +5,6 @@ import morgan from "morgan";
 import "express-async-errors";
 import path from "path";
 import { fileURLToPath } from "url";
-import "dotenv/config";
-import express from "express";
-import helmet from "helmet";
-import morgan from "morgan";
-import "express-async-errors";
-import path from "path";
-import { fileURLToPath } from "url";
 import http from "http";
 
 import { connectToDatabase } from "./config/db.js";
@@ -50,6 +43,7 @@ import "./models/UserFollow.js";
 // Import routes
 import authRoutes from "./routes/authRoutes.js";
 import postRoutes from "./routes/postRoutes.js";
+import lickRoutes from "./routes/lickRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 
@@ -69,17 +63,14 @@ app.use(
 app.use(corsMiddleware());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "2mb" }));
-
-// API Routes
-app.use("/api/auth", authRoutes);
 app.use(express.urlencoded({ extended: true }));
 
-const uploadDir = process.env.UPLOAD_DIR || "uploads";
-app.use("/static", express.static(path.join(__dirname, "..", uploadDir)));
+// Static file serving
 const uploadDir = process.env.UPLOAD_DIR || "uploads";
 app.use("/static", express.static(path.join(__dirname, "..", uploadDir)));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
+// Health check
 app.get("/health", (req, res) => {
   res.json({
     ok: true,
@@ -92,7 +83,46 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
+app.use("/api/licks", lickRoutes);
 app.use("/api/livestreams", liveroomRoutes);
+
+// 404 handler - must be after all routes
+app.use((req, res, next) => {
+  res.status(404).json({
+    success: false,
+    message: `Route ${req.method} ${req.originalUrl} not found`,
+  });
+});
+
+// Global error handler - must be last
+app.use((err, req, res, next) => {
+  console.error("Global error handler:", err);
+
+  // Multer errors
+  if (err.name === "MulterError") {
+    return res.status(400).json({
+      success: false,
+      message: err.message,
+      error: err.code,
+    });
+  }
+
+  // Mongoose validation errors
+  if (err.name === "ValidationError") {
+    return res.status(400).json({
+      success: false,
+      message: "Validation error",
+      error: err.message,
+    });
+  }
+
+  // Default error response
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Internal server error",
+    error: process.env.NODE_ENV === "development" ? err.stack : undefined,
+  });
+});
 
 const port = Number(process.env.PORT) || 9999;
 

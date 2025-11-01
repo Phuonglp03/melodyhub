@@ -11,7 +11,7 @@ import {
   FaFilter,
 } from "react-icons/fa";
 import axios from "axios";
-import { playLickAudio } from "../../../services/user/lickService";
+import { playLickAudio, deleteLick, updateLick as apiUpdateLick } from "../../../services/user/lickService";
 
 // --- MyLickCard Component ---
 const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
@@ -305,6 +305,22 @@ const MyLicksPage = () => {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState(null);
 
+  // Edit modal state
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingLick, setEditingLick] = useState(null);
+  const [editForm, setEditForm] = useState({
+    title: "",
+    description: "",
+    tabNotation: "",
+    key: "",
+    tempo: "",
+    difficulty: "",
+    status: "",
+    isPublic: false,
+    isFeatured: false,
+  });
+  const [saving, setSaving] = useState(false);
+
   // Fetch user's licks from API
   const fetchMyLicks = async () => {
     try {
@@ -372,7 +388,22 @@ const MyLicksPage = () => {
 
   // Handle edit
   const handleEdit = (lickId) => {
-    window.location.href = `/lick/edit/${lickId}`;
+    const lick = licks.find((l) => l.lick_id === lickId);
+    if (!lick) return;
+
+    setEditingLick(lick);
+    setEditForm({
+      title: lick.title || "",
+      description: lick.description || "",
+      tabNotation: lick.tab_notation || "",
+      key: lick.key || "",
+      tempo: lick.tempo || "",
+      difficulty: lick.difficulty || "",
+      status: lick.status || "",
+      isPublic: !!lick.is_public,
+      isFeatured: !!lick.is_featured,
+    });
+    setIsEditOpen(true);
   };
 
   // Handle delete
@@ -383,10 +414,8 @@ const MyLicksPage = () => {
       )
     ) {
       try {
-        // TODO: Implement delete API call
-        // await axios.delete(`http://localhost:9999/api/licks/${lickId}`);
-        alert("Delete functionality not yet implemented");
-        // fetchMyLicks(); // Refresh list
+        await deleteLick(lickId);
+        setLicks((prevLicks) => prevLicks.filter((lick) => lick.lick_id !== lickId));
       } catch (err) {
         console.error("Error deleting lick:", err);
         alert("Failed to delete lick");
@@ -397,6 +426,71 @@ const MyLicksPage = () => {
   // Handle upload
   const handleUpload = () => {
     window.location.href = "/licks/upload";
+  };
+
+  const handleEditChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setEditForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingLick) return;
+    setSaving(true);
+    try {
+      const payload = {
+        title: editForm.title,
+        description: editForm.description,
+        tabNotation: editForm.tabNotation,
+        key: editForm.key,
+        tempo: editForm.tempo,
+        difficulty: editForm.difficulty,
+        status: editForm.status,
+        isPublic: editForm.isPublic,
+        isFeatured: editForm.isFeatured,
+      };
+
+      const res = await apiUpdateLick(editingLick.lick_id, payload);
+      if (res?.success) {
+        const updated = res.data || {};
+        setLicks((prev) =>
+          prev.map((l) =>
+            l.lick_id === editingLick.lick_id
+              ? {
+                  ...l,
+                  title: updated.title ?? editForm.title,
+                  description: updated.description ?? editForm.description,
+                  tab_notation: updated.tabNotation ?? editForm.tabNotation,
+                  key: updated.key ?? editForm.key,
+                  tempo: updated.tempo ?? editForm.tempo,
+                  difficulty: updated.difficulty ?? editForm.difficulty,
+                  status: updated.status ?? editForm.status,
+                  is_public:
+                    typeof updated.isPublic === "boolean"
+                      ? updated.isPublic
+                      : editForm.isPublic,
+                  is_featured:
+                    typeof updated.isFeatured === "boolean"
+                      ? updated.isFeatured
+                      : editForm.isFeatured,
+                }
+              : l
+          )
+        );
+        setIsEditOpen(false);
+        setEditingLick(null);
+      } else {
+        alert(res?.message || "Failed to update lick");
+      }
+    } catch (err) {
+      console.error("Error updating lick:", err);
+      alert(err?.message || "Failed to update lick");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -544,6 +638,161 @@ const MyLicksPage = () => {
           >
             Next
           </button>
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {isEditOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => {
+              if (!saving) {
+                setIsEditOpen(false);
+                setEditingLick(null);
+              }
+            }}
+          />
+          <div className="relative z-10 w-full max-w-2xl mx-4 bg-gray-900 border border-gray-800 rounded-lg shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white">Edit Lick</h2>
+              <button
+                className="text-gray-400 hover:text-white"
+                onClick={() => {
+                  if (!saving) {
+                    setIsEditOpen(false);
+                    setEditingLick(null);
+                  }
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Title</label>
+                <input
+                  name="title"
+                  value={editForm.title}
+                  onChange={handleEditChange}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Description</label>
+                <textarea
+                  name="description"
+                  value={editForm.description}
+                  onChange={handleEditChange}
+                  rows={3}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Key</label>
+                  <input
+                    name="key"
+                    value={editForm.key}
+                    onChange={handleEditChange}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Tempo (BPM)</label>
+                  <input
+                    name="tempo"
+                    value={editForm.tempo}
+                    onChange={handleEditChange}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Difficulty</label>
+                  <select
+                    name="difficulty"
+                    value={editForm.difficulty}
+                    onChange={handleEditChange}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="">Select</option>
+                    <option value="beginner">Beginner</option>
+                    <option value="intermediate">Intermediate</option>
+                    <option value="advanced">Advanced</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Status</label>
+                  <select
+                    name="status"
+                    value={editForm.status}
+                    onChange={handleEditChange}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="">Select</option>
+                    <option value="active">Active</option>
+                    <option value="draft">Draft</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Tab Notation (optional)</label>
+                <textarea
+                  name="tabNotation"
+                  value={editForm.tabNotation}
+                  onChange={handleEditChange}
+                  rows={4}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+              </div>
+              <div className="flex items-center gap-6">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+                  <input
+                    type="checkbox"
+                    name="isPublic"
+                    checked={editForm.isPublic}
+                    onChange={handleEditChange}
+                    className="form-checkbox h-4 w-4 text-orange-500 bg-gray-800 border-gray-700"
+                  />
+                  Public
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-gray-300">
+                  <input
+                    type="checkbox"
+                    name="isFeatured"
+                    checked={editForm.isFeatured}
+                    onChange={handleEditChange}
+                    className="form-checkbox h-4 w-4 text-orange-500 bg-gray-800 border-gray-700"
+                  />
+                  Featured
+                </label>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  className="px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-700"
+                  onClick={() => {
+                    if (!saving) {
+                      setIsEditOpen(false);
+                      setEditingLick(null);
+                    }
+                  }}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md disabled:opacity-50"
+                  disabled={saving}
+                >
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

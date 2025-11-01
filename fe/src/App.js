@@ -12,7 +12,10 @@ import LickCommunityPage from "./pages/user/LickCommunity/LickCommunityPage";
 import MyLicksPage from "./pages/user/MyLicks/MyLicksPage";
 import LickDetailPage from "./pages/user/LickDetail/index";
 import LickUploadPage from "./pages/user/LickUpload/LickUploadPage";
+import EditLickPage from './pages/user/MyLicks/EditLickPage';
 import { preloadBasicPitch } from "./services/basicPitchService";
+import { Provider } from "react-redux";
+import { store } from "./store";
 
 // --- Header Component ---
 const Header = () => {
@@ -92,6 +95,7 @@ function App() {
   }, []);
 
   return (
+    <Provider store={store}>
     <Router>
       <div className="flex flex-col h-screen bg-gray-950 text-white">
         <Header />
@@ -108,6 +112,9 @@ function App() {
 
           {/* Lick Detail Page (Full Screen - No Layout) */}
           <Route path="/licks/:lickId" element={<LickDetailPage />} />
+
+          {/* Edit Lick Page */}
+          <Route path="/lick/edit/:lickId" element={<EditLickPage />} />
 
           {/* Library Routes with Layout */}
           <Route
@@ -128,6 +135,7 @@ function App() {
         </Routes>
       </div>
     </Router>
+    </Provider>
   );
 }
 

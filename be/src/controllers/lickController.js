@@ -228,7 +228,14 @@ export const getCommunityLicks = async (req, res) => {
 export const getMyLicks = async (req, res) => {
   try {
     const { userId } = req.params; // or req.user.id from auth middleware
-    const { search, tags, status, page = 1, limit = 20 } = req.query;
+    const {
+      search,
+      tags,
+      status,
+      sortBy = "newest",
+      page = 1,
+      limit = 20,
+    } = req.query;
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
@@ -694,14 +701,55 @@ export const playLickAudio = async (req, res) => {
   }
 };
 
+// Delete a lick and its related data
+export const deleteLick = async (req, res) => {
+  try {
+    const { lickId } = req.params;
+
+    const lick = await Lick.findById(lickId);
+    if (!lick) {
+      return res.status(404).json({
+        success: false,
+        message: "Lick not found",
+      });
+    }
+
+    // Remove related records
+    await Promise.all([
+      LickLike.deleteMany({ lickId }),
+      LickComment.deleteMany({ lickId }),
+      LickTag.deleteMany({ lickId }),
+    ]);
+
+    await Lick.findByIdAndDelete(lickId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Lick deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting lick:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 // Create a lick
 export const createLick = async (req, res) => {
   try {
+    console.log("[CREATE LICK] Request received");
+    console.log("[CREATE LICK] Body:", req.body);
+    console.log("[CREATE LICK] File:", req.file ? "Present" : "Missing");
+
     // 1. Check if a file was uploaded by multer
     // With .single('audio'), file is in req.file
     const audioFile = req.file;
 
     if (!audioFile) {
+      console.error("[CREATE LICK] No audio file in request");
       return res
         .status(400)
         .json({ success: false, message: "No audio file uploaded." });
@@ -768,14 +816,77 @@ export const createLick = async (req, res) => {
 
     await newLick.save();
 
+    console.log("[CREATE LICK] Lick saved successfully:", newLick._id);
+
     res.status(201).json({
       success: true,
       message: "Lick created successfully!",
       data: newLick,
     });
   } catch (error) {
-    console.error("Error creating lick:", error);
+    console.error("[CREATE LICK] Error:", error.message);
+    console.error("[CREATE LICK] Stack:", error.stack);
+
     res.status(500).json({
+      success: false,
+      message: "Failed to create lick",
+      error: error.message,
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    });
+  }
+};
+
+// Update a lick
+export const updateLick = async (req, res) => {
+  try {
+    const { lickId } = req.params;
+
+    const allowedFields = [
+      "title",
+      "description",
+      "tabNotation",
+      "key",
+      "tempo",
+      "difficulty",
+      "status",
+      "isPublic",
+      "isFeatured",
+    ];
+
+    const update = {};
+    for (const field of allowedFields) {
+      if (field in req.body) {
+        update[field] = req.body[field];
+      }
+    }
+
+    // Normalize booleans if sent as strings
+    if ("isPublic" in update && typeof update.isPublic === "string") {
+      update.isPublic = update.isPublic === "true";
+    }
+    if ("isFeatured" in update && typeof update.isFeatured === "string") {
+      update.isFeatured = update.isFeatured === "true";
+    }
+
+    const updated = await Lick.findByIdAndUpdate(lickId, update, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Lick not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Lick updated successfully",
+      data: updated,
+    });
+  } catch (error) {
+    console.error("Error updating lick:", error);
+    return res.status(500).json({
       success: false,
       message: "Internal server error",
       error: error.message,
@@ -838,5 +949,92 @@ export const generateTab = async (req, res) => {
       message: "Failed to generate tab",
       error: error.message,
     });
+  }
+};
+
+// Get comments for a lick with pagination
+export const getLickComments = async (req, res) => {
+  try {
+    const { lickId } = req.params;
+    const page = parseInt(req.query.page ?? 1);
+    const limit = parseInt(req.query.limit ?? 10);
+    const skip = (page - 1) * limit;
+
+    const [comments, total] = await Promise.all([
+      LickComment.find({ lickId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      LickComment.countDocuments({ lickId }),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: comments.map((c) => ({
+        comment_id: c._id,
+        lick_id: c.lickId,
+        user_id: c.userId,
+        comment: c.comment,
+        parent_comment_id: c.parentCommentId,
+        timestamp: c.timestamp ?? 0,
+        created_at: c.createdAt,
+        updated_at: c.updatedAt,
+      })),
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
+        hasNextPage: skip + comments.length < total,
+        hasPrevPage: page > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching lick comments:", error);
+    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+  }
+};
+
+// Add a comment to a lick
+export const addLickComment = async (req, res) => {
+  try {
+    const { lickId } = req.params;
+    const { userId, comment, parentCommentId, timestamp } = req.body;
+
+    if (!userId || !comment) {
+      return res.status(400).json({ success: false, message: "userId and comment are required" });
+    }
+
+    const lick = await Lick.findById(lickId);
+    if (!lick) {
+      return res.status(404).json({ success: false, message: "Lick not found" });
+    }
+
+    const newComment = new LickComment({
+      lickId,
+      userId,
+      comment,
+      parentCommentId: parentCommentId || null,
+      timestamp: typeof timestamp === "number" ? timestamp : 0,
+    });
+    await newComment.save();
+
+    res.status(201).json({
+      success: true,
+      message: "Comment added successfully",
+      data: {
+        comment_id: newComment._id,
+        lick_id: newComment.lickId,
+        user_id: newComment.userId,
+        comment: newComment.comment,
+        parent_comment_id: newComment.parentCommentId,
+        timestamp: newComment.timestamp,
+        created_at: newComment.createdAt,
+        updated_at: newComment.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Error adding lick comment:", error);
+    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
   }
 };

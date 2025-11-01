@@ -36,7 +36,28 @@ const extractAudioFeatures = async (audioBuffer) => {
       reader.onload = async (e) => {
         try {
           const arrayBuffer = e.target.result;
-          const audioData = await audioContext.decodeAudioData(arrayBuffer);
+          let audioData = await audioContext.decodeAudioData(arrayBuffer);
+
+          // Convert stereo to mono if needed
+          if (audioData.numberOfChannels > 1) {
+            console.log(
+              `Converting ${audioData.numberOfChannels} channels to mono...`
+            );
+
+            const monoCtx = new OfflineAudioContext(
+              1, // Mono output
+              audioData.length,
+              audioData.sampleRate
+            );
+
+            const source = monoCtx.createBufferSource();
+            source.buffer = audioData;
+            source.connect(monoCtx.destination);
+            source.start(0);
+
+            audioData = await monoCtx.startRendering();
+            console.log("Converted to mono");
+          }
 
           const duration = audioData.duration;
           const sampleRate = audioData.sampleRate;
@@ -549,7 +570,9 @@ export const detectTempo = async (audioFile) => {
   try {
     const audioFeatures = await extractAudioFeatures(audioFile);
 
-    const { channelData, sampleRate } = audioFeatures;
+    const { channelData, sampleRate, numberOfChannels } = audioFeatures;
+
+    console.log(`Tempo detection using ${numberOfChannels} channel audio`);
     const windowSize = Math.floor(sampleRate * 0.05); // 50ms windows
     const hopSize = Math.floor(sampleRate * 0.01); // 10ms hop
     const energies = [];
@@ -635,7 +658,9 @@ export const detectKey = async (audioFile) => {
     const audioFeatures = await extractAudioFeatures(audioFile);
 
     // Simple key detection based on pitch histogram
-    const { channelData, sampleRate } = audioFeatures;
+    const { channelData, sampleRate, numberOfChannels } = audioFeatures;
+
+    console.log(`Key detection using ${numberOfChannels} channel audio`);
     const chunkSize = Math.floor(sampleRate * 0.1);
     const pitchHistogram = new Array(12).fill(0);
 

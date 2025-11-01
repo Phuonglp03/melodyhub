@@ -370,3 +370,67 @@ export const createLick = async (formData) => {
     throw error;
   }
 };
+
+// Update a lick
+export const updateLick = async (lickId, lickData) => {
+  if (USE_MOCK_DATA) {
+    // Simulate API delay
+    await new Promise((resolve) => setTimeout(resolve, API_CONFIG.MOCK_DELAY));
+    return {
+      success: true,
+      message: "Lick updated successfully",
+    };
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/licks/${lickId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(lickData),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(
+        errorData.message || `HTTP error! status: ${response.status}`
+      );
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error updating lick:", error);
+    throw error;
+  }
+};
+
+// Delete a lick
+export const deleteLick = async (lickId) => {
+  if (USE_MOCK_DATA) {
+    // Simulate API delay
+    await new Promise((resolve) => setTimeout(resolve, API_CONFIG.MOCK_DELAY));
+    return {
+      success: true,
+      message: "Lick deleted successfully",
+    };
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/licks/${lickId}`, {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(
+        errorData.message || `HTTP error! status: ${response.status}`
+      );
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error deleting lick:", error);
+    throw error;
+  }
+};

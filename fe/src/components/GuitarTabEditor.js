@@ -25,6 +25,51 @@ const GuitarTabEditor = ({ initialTab = "", onSave, tempo = 120 }) => {
     };
   }
 
+  // Parse incoming tab text into measures grid (16 columns per measure)
+  const importFromText = (tabText) => {
+    if (!tabText || tabText.trim() === "") return [createEmptyMeasure()];
+
+    const lines = tabText.split("\n").filter((l) => l.includes("|"));
+    const grouped = [];
+    let current = [];
+    for (const line of lines) {
+      current.push(line);
+      if (current.length === 6) {
+        grouped.push(current);
+        current = [];
+      }
+    }
+    if (current.length > 0) grouped.push(current);
+
+    const toGrid = (measureLines) => {
+      const grid = Array(6)
+        .fill(null)
+        .map(() => Array(16).fill("-"));
+      for (let s = 0; s < 6; s++) {
+        const parts = (measureLines[s] || "").split("|");
+        const notes = parts.slice(1, -1).join("");
+        for (let i = 0; i < 16; i++) {
+          grid[s][i] = notes[i] ? notes[i] : "-";
+        }
+      }
+      return {
+        id: Date.now() + Math.random(),
+        strings: grid,
+      };
+    };
+
+    return grouped.length > 0 ? grouped.map(toGrid) : [createEmptyMeasure()];
+  };
+
+  // Load initialTab when provided/changed
+  React.useEffect(() => {
+    const imported = importFromText(initialTab);
+    setMeasures(imported);
+    setSelectedCell(null);
+    setHistory([]);
+    setHistoryIndex(-1);
+  }, [initialTab]);
+
   // Handle cell click
   const handleCellClick = (measureIdx, stringIdx, cellIdx) => {
     setSelectedCell({ measureIdx, stringIdx, cellIdx });
@@ -316,6 +361,19 @@ const GuitarTabEditor = ({ initialTab = "", onSave, tempo = 120 }) => {
 };
 
 export default GuitarTabEditor;
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

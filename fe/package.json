@@ -5,6 +5,7 @@
   "dependencies": {
     "@coderline/alphatab": "^1.6.3",
     "@reduxjs/toolkit": "^2.9.0",
+    "@spotify/basic-pitch": "^1.0.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",

@@ -139,6 +139,8 @@ const LickPlayer = ({
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  const progress = duration > 0 ? currentTime / duration : 0;
+
   const renderWaveform = () => {
     if (!showWaveform || !lick?.waveform_data) return null;
 
@@ -155,18 +157,23 @@ const LickPlayer = ({
           gap: "2px",
         }}
       >
-        {lick.waveform_data.map((amplitude, index) => (
-          <div
-            key={index}
-            style={{
-              height: `${amplitude * 100}%`,
-              backgroundColor: isPlaying ? "#ff6b35" : "#666",
-              width: "4px",
-              borderRadius: "2px",
-              transition: "background-color 0.3s ease",
-            }}
-          />
-        ))}
+        {lick.waveform_data.map((amplitude, index) => {
+          const barProgress = index / lick.waveform_data.length;
+          const isPlayed = barProgress <= progress;
+          return (
+            <div
+              key={index}
+              style={{
+                height: `${amplitude * 100}%`,
+                backgroundColor: isPlayed ? "#ff6b35" : "#666",
+                width: "4px",
+                borderRadius: "2px",
+                transition: "background-color 0.2s, opacity 0.2s",
+                opacity: isPlayed ? 1 : 0.7 + amplitude * 0.3,
+              }}
+            />
+          );
+        })}
       </div>
     );
   };

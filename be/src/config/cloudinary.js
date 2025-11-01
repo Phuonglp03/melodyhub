@@ -16,12 +16,7 @@ const audioStorage = new CloudinaryStorage({
     folder: "melodyhub/audio",
     resource_type: "video", // Cloudinary sử dụng 'video' cho audio files
     allowed_formats: ["mp3", "wav", "m4a", "aac", "ogg", "flac", "wma", "aiff"],
-    transformation: [
-      { quality: "auto" },
-      { format: "mp3" }, // Convert tất cả audio về mp3 để tối ưu
-      { audio_codec: "mp3" },
-      { audio_quality: "high" },
-    ],
+    // Remove transformation to avoid codec issues - let Cloudinary handle it automatically
   },
 });
 const projectStorage = new CloudinaryStorage({
@@ -30,12 +25,7 @@ const projectStorage = new CloudinaryStorage({
     folder: "melodyhub/audio",
     resource_type: "video", // Cloudinary sử dụng 'video' cho audio files
     allowed_formats: ["mp3", "wav", "m4a", "aac", "ogg", "flac", "wma", "aiff"],
-    transformation: [
-      { quality: "auto" },
-      { format: "mp3" }, // Convert tất cả audio về mp3 để tối ưu
-      { audio_codec: "mp3" },
-      { audio_quality: "high" },
-    ],
+    // Remove transformation to avoid codec issues - let Cloudinary handle it automatically
   },
 });
 
@@ -50,22 +40,33 @@ const imageStorage = new CloudinaryStorage({
   },
 });
 
-// Multer upload middleware cho audio
+// Multer upload middleware cho audio - using memory storage
+// Controller will handle Cloudinary upload manually
 export const uploadAudio = multer({
-  storage: audioStorage,
+  storage: multer.memoryStorage(), // Use memory storage for buffer access
   limits: {
     fileSize: 100 * 1024 * 1024, // 100MB limit cho audio files
   },
   fileFilter: (req, file, cb) => {
+    console.log(
+      "[MULTER] File received:",
+      file.originalname,
+      "Type:",
+      file.mimetype
+    );
+
     const allowedMimes = [
       "audio/mpeg",
       "audio/wav",
+      "audio/wave",
+      "audio/x-wav",
       "audio/mp4",
       "audio/aac",
       "audio/ogg",
       "audio/flac",
       "audio/x-ms-wma",
       "audio/aiff",
+      "audio/x-aiff",
     ];
 
     if (allowedMimes.includes(file.mimetype)) {
@@ -73,7 +74,7 @@ export const uploadAudio = multer({
     } else {
       cb(
         new Error(
-          "Chỉ cho phép file âm thanh (mp3, wav, m4a, aac, ogg, flac, wma, aiff)"
+          `Chỉ cho phép file âm thanh (mp3, wav, m4a, aac, ogg, flac, wma, aiff). Received: ${file.mimetype}`
         ),
         false
       );
@@ -82,7 +83,7 @@ export const uploadAudio = multer({
 });
 
 export const uploadProjectAudio = multer({
-  storage: projectStorage,
+  storage: multer.memoryStorage(), // Use memory storage for buffer access
   limits: {
     fileSize: 100 * 1024 * 1024, // 100MB limit cho audio files
   },
@@ -90,12 +91,15 @@ export const uploadProjectAudio = multer({
     const allowedMimes = [
       "audio/mpeg",
       "audio/wav",
+      "audio/wave",
+      "audio/x-wav",
       "audio/mp4",
       "audio/aac",
       "audio/ogg",
       "audio/flac",
       "audio/x-ms-wma",
       "audio/aiff",
+      "audio/x-aiff",
     ];
 
     if (allowedMimes.includes(file.mimetype)) {

@@ -3,10 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Button, Spin, Empty, message } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import LickDetail from "../../../components/LickDetail";
-import {
-  getLickById,
-  toggleLickLike,
-} from "../../../services/user/lickService";
+import { getLickById } from "../../../services/user/lickService";
 
 const LickDetailPage = () => {
   const navigate = useNavigate();
@@ -39,17 +36,9 @@ const LickDetailPage = () => {
     if (lickId) fetchData();
   }, [lickId]);
 
-  const handleLike = async (id) => {
-    try {
-      // For now, optimistically update UI
-      setLikesCount((c) => (typeof c === "number" ? c + 1 : 1));
-      await toggleLickLike(id, null);
-      // No need to refetch immediately; rely on optimistic update
-    } catch (e) {
-      message.error("Failed to like lick");
-      // Revert optimistic update on failure
-      setLikesCount((c) => (typeof c === "number" && c > 0 ? c - 1 : 0));
-    }
+  const handleLike = () => {
+    // LickDetail handles API + Redux; this optional handler can keep a separate count if needed
+    setLikesCount((c) => (typeof c === "number" ? Math.max(0, c + 0) : 0));
   };
 
   if (loading) {

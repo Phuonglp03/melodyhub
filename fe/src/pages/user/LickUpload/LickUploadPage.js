@@ -151,7 +151,32 @@ const LickUploadPage = () => {
     setError(null);
 
     try {
-      // Step 1: Try ML-powered generation with fallback
+      // Step 1: Detect tempo FIRST (needed for BPM-aware tab generation)
+      setAiProgress("🥁 Detecting tempo...");
+      let detectedTempo = formData.tempo || 120; // Default to 120 BPM
+      try {
+        const tempo = await detectTempo(audioFile);
+        detectedTempo = tempo;
+        setFormData((prev) => ({ ...prev, tempo: tempo }));
+        console.log(`✅ Tempo detected: ${tempo} BPM`);
+      } catch (err) {
+        console.error("Tempo detection failed:", err);
+        console.log(`⚠️ Using default tempo: ${detectedTempo} BPM`);
+      }
+
+      // Step 2: Detect key
+      setAiProgress("🎼 Detecting key...");
+      let detectedKey = formData.key;
+      try {
+        const key = await detectKey(audioFile);
+        detectedKey = key;
+        setFormData((prev) => ({ ...prev, key: key }));
+        console.log(`✅ Key detected: ${key}`);
+      } catch (err) {
+        console.error("Key detection failed:", err);
+      }
+
+      // Step 3: Generate tab with detected BPM
       const mlAvailable = getBasicPitchStatus().available;
 
       if (mlAvailable) {
@@ -163,15 +188,11 @@ const LickUploadPage = () => {
       const tabResult = await generateTabWithML(audioFile, {
         useML: true, // Try ML first
         allowFallback: true, // Fall back to YIN if ML fails
+        bpm: detectedTempo, // !!! PASS DETECTED BPM !!!
+        tempo: detectedTempo, // Also pass as 'tempo' for compatibility
       });
 
       if (tabResult.success) {
-        setFormData({
-          ...formData,
-          tabNotation: tabResult.tab,
-        });
-        setAiResult(tabResult.metadata);
-
         // Update progress based on which method was used
         if (tabResult.metadata.mlUsed) {
           setAiProgress("✨ ML-powered detection complete!");
@@ -180,24 +201,40 @@ const LickUploadPage = () => {
         }
       }
 
-      // Step 2: Detect tempo
-      if (!formData.tempo) {
-        setAiProgress("🥁 Detecting tempo...");
-        const tempo = await detectTempo(audioFile);
-        setFormData((prev) => ({ ...prev, tempo: tempo }));
+      if (
+        tabResult.success &&
+        tabResult.tab &&
+        typeof tabResult.tab === "string" &&
+        tabResult.tab.trim() !== ""
+      ) {
+        setFormData((prev) => ({
+          ...prev,
+          tabNotation: tabResult.tab,
+          tempo: detectedTempo,
+          key: detectedKey,
+        }));
+
+        setAiResult({
+          ...tabResult.metadata,
+          detectedTempo: detectedTempo,
+          detectedKey: detectedKey,
+        });
+
+        setAiProgress("✅ Tab generated! Preparing playback...");
+
+        // Ensure an audio element exists for playback mode
+        if (!audioRef.current && audioPreview) {
+          const audio = new Audio(audioPreview);
+          audio.addEventListener("ended", () => setIsPlaying(false));
+          audioRef.current = audio;
+        }
+        setTabEditorMode("playback");
+      } else {
+        setError("Tab generation failed or AI returned no notes. Try a different audio file or check your input.");
+        setAiProgress("❌ Tab generation failed.");
+        setTabEditorMode("visual");
+        return; // Abort rest of the flow if failure
       }
-
-      // Step 3: Detect key
-      if (!formData.key) {
-        setAiProgress("🎼 Detecting key...");
-        const key = await detectKey(audioFile);
-        setFormData((prev) => ({ ...prev, key: key }));
-      }
-
-      setAiProgress("✅ Tab generated! Switching to playback mode...");
-
-      // Auto-switch to playback mode
-      setTabEditorMode("playback");
 
       // Highlight tab section
       setShowTabHighlight(true);
@@ -445,6 +482,7 @@ const LickUploadPage = () => {
                     </div>
                   </div>
 
+                  {/* Main metrics */}
                   <div className="grid grid-cols-3 gap-4 text-sm mb-3">
                     <div>
                       <span className="text-gray-400">Duration:</span>
@@ -465,6 +503,43 @@ const LickUploadPage = () => {
                       </p>
                     </div>
                   </div>
+
+                  {/* Tempo and Key (ML Detected) */}
+                  {(aiResult.detectedTempo || aiResult.detectedKey) && (
+                    <div className="mt-3 pt-3 border-t border-green-700/30">
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        {aiResult.detectedTempo && (
+                          <div className="bg-blue-900/30 border border-blue-700/50 rounded-lg p-3">
+                            <div className="flex items-center space-x-2 mb-1">
+                              <span className="text-lg">🥁</span>
+                              <span className="text-blue-300 text-xs font-semibold">
+                                ML-Detected Tempo
+                              </span>
+                            </div>
+                            <p className="text-white text-xl font-bold">
+                              {aiResult.detectedTempo} BPM
+                            </p>
+                          </div>
+                        )}
+                        {aiResult.detectedKey && (
+                          <div className="bg-purple-900/30 border border-purple-700/50 rounded-lg p-3">
+                            <div className="flex items-center space-x-2 mb-1">
+                              <span className="text-lg">🎼</span>
+                              <span className="text-purple-300 text-xs font-semibold">
+                                ML-Detected Key
+                              </span>
+                            </div>
+                            <p className="text-white text-xl font-bold">
+                              {aiResult.detectedKey}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-400 mt-2 text-center">
+                        ✨ Values automatically synced to form fields below
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -542,14 +617,23 @@ const LickUploadPage = () => {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* Key */}
                 <div>
-                  <label className="block text-gray-400 text-sm mb-2">
+                  <label className="block text-gray-400 text-sm mb-2 flex items-center">
                     Key
+                    {aiResult?.detectedKey && (
+                      <span className="ml-2 text-xs bg-purple-600 text-white px-2 py-0.5 rounded">
+                        🎼 ML
+                      </span>
+                    )}
                   </label>
                   <select
                     name="key"
                     value={formData.key}
                     onChange={handleInputChange}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className={`w-full bg-gray-800 border rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500 ${
+                      aiResult?.detectedKey
+                        ? "border-purple-500 ring-1 ring-purple-500/30"
+                        : "border-gray-700"
+                    }`}
                   >
                     <option value="">Select Key</option>
                     <option value="C Major">C Major</option>
@@ -567,8 +651,13 @@ const LickUploadPage = () => {
 
                 {/* Tempo */}
                 <div>
-                  <label className="block text-gray-400 text-sm mb-2">
+                  <label className="block text-gray-400 text-sm mb-2 flex items-center">
                     Tempo (BPM)
+                    {aiResult?.detectedTempo && (
+                      <span className="ml-2 text-xs bg-blue-600 text-white px-2 py-0.5 rounded">
+                        🥁 ML
+                      </span>
+                    )}
                   </label>
                   <input
                     type="number"
@@ -578,7 +667,11 @@ const LickUploadPage = () => {
                     placeholder="120"
                     min="40"
                     max="300"
-                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    className={`w-full bg-gray-800 border rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500 ${
+                      aiResult?.detectedTempo
+                        ? "border-blue-500 ring-1 ring-blue-500/30"
+                        : "border-gray-700"
+                    }`}
                   />
                 </div>
 
@@ -675,9 +768,16 @@ const LickUploadPage = () => {
                 />
               ) : (
                 <div className="bg-gray-900 rounded-lg p-6 border border-gray-800 text-center">
+                  {formData.tabNotation ? (
+                    <div className="flex items-center justify-center text-gray-400">
+                      <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white mr-2"></div>
+                      Preparing audio...
+                    </div>
+                  ) : (
                   <p className="text-gray-400">
                     Enter tab notation to use playback mode
                   </p>
+                  )}
                 </div>
               )
             ) : tabEditorMode === "visual" ? (

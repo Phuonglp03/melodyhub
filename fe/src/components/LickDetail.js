@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import {
   Card,
   Tag,
@@ -12,11 +12,16 @@ import {
 } from "antd";
 import {
   HeartOutlined,
-  EyeOutlined,
+  CommentOutlined,
   ShareAltOutlined,
 } from "@ant-design/icons";
+import { useDispatch, useSelector } from "react-redux";
+import { setLikeState, toggleLikeLocal } from "../store/likesSlice";
+import { toggleLickLike } from "../services/user/lickService";
+import { getStoredUserId } from "../services/user/post";
 import LickPlayer from "./LickPlayer";
 import GuitarTabNotation from "./GuitarTabNotation";
+import CommentSection from "./CommentSection";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -31,6 +36,12 @@ const LickDetail = ({
 }) => {
   // Create audio ref for syncing player with tab notation
   const audioRef = useRef(null);
+  const dispatch = useDispatch();
+  const likeState = useSelector((s) => s.likes.byId[lick.lick_id]);
+  const isLiked = likeState?.liked || false;
+  const localLikesCount = likeState?.count ?? lick.likes_count;
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString("vi-VN", {
       year: "numeric",
@@ -39,6 +50,39 @@ const LickDetail = ({
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  React.useEffect(() => {
+    if (!likeState) {
+      dispatch(
+        setLikeState({
+          id: lick.lick_id,
+          liked: false,
+          count: lick.likes_count,
+        })
+      );
+    }
+  }, [dispatch, likeState, lick.lick_id, lick.likes_count]);
+
+  const handleLike = async () => {
+    const userId = getStoredUserId() || currentUserId;
+    if (!userId || userId === "current-user-id") {
+      alert("You need to be logged in to like licks.");
+      return;
+    }
+    dispatch(toggleLikeLocal({ id: lick.lick_id }));
+    try {
+      const res = await toggleLickLike(lick.lick_id, userId);
+      if (res.success && typeof res.data?.liked === "boolean") {
+        if (res.data.liked !== isLiked) {
+          dispatch(toggleLikeLocal({ id: lick.lick_id }));
+        }
+      }
+      if (onLike) onLike(lick.lick_id);
+    } catch (e) {
+      dispatch(toggleLikeLocal({ id: lick.lick_id }));
+      console.error("Error toggling lick like:", e);
+    }
   };
 
   if (!lick) {
@@ -68,6 +112,8 @@ const LickDetail = ({
                 lick={lick}
                 style={{ marginBottom: "16px" }}
                 audioRef={audioRef}
+                onPlayStateChange={setIsPlaying}
+                onProgress={setProgress}
               />
             </div>
           )}
@@ -110,17 +156,20 @@ const LickDetail = ({
               <Button
                 type="text"
                 icon={<HeartOutlined />}
-                onClick={() => onLike && onLike(lick.lick_id)}
-                style={{ color: "#ff4757" }}
+                onClick={handleLike}
+                style={{ color: isLiked ? "#ff4757" : "#fff" }}
               >
-                {lick.likes_count} likes
+                {localLikesCount} likes
               </Button>
               <Button
                 type="text"
-                icon={<EyeOutlined />}
+                icon={<CommentOutlined />}
                 style={{ color: "#3742fa" }}
               >
-                {lick.comments_count} comments
+                {typeof lick.comments_count === "number"
+                  ? lick.comments_count
+                  : lick.commentsCount ?? 0}{" "}
+                comments
               </Button>
               <Button
                 type="text"
@@ -187,6 +236,15 @@ const LickDetail = ({
           </div>
 
           <Divider style={{ borderColor: "#333" }} />
+
+          {showComments && (
+            <div style={{ marginTop: "16px" }}>
+              <CommentSection
+                lickId={lick.lick_id}
+                currentUser={{ id: currentUserId }}
+              />
+            </div>
+          )}
         </Card>
       </Col>
 
@@ -231,30 +289,37 @@ const LickDetail = ({
                 <Text style={{ color: "#ccc", fontSize: "12px" }}>
                   Waveform Data:
                 </Text>
-                <div
-                  style={{
-                    backgroundColor: "#1a1a1a",
-                    padding: "8px",
-                    borderRadius: "4px",
-                    marginTop: "8px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "2px",
-                    height: "40px",
-                  }}
-                >
-                  {lick.waveform_data &&
-                    lick.waveform_data.map((amplitude, index) => (
-                      <div
-                        key={index}
-                        style={{
-                          height: `${amplitude * 100}%`,
-                          backgroundColor: "#ff6b35",
-                          width: "3px",
-                          borderRadius: "1px",
-                        }}
-                      />
-                    ))}
+                {/* New: Match LickCard.js waveform visualization */}
+                <div className="relative h-28 bg-gradient-to-b from-orange-800 to-orange-900 rounded-lg overflow-hidden mt-2">
+                  {lick.waveform_data && lick.waveform_data.length > 0 ? (
+                    <div className="flex items-center justify-center h-full px-4">
+                      <div className="flex items-center justify-center space-x-0.5 h-full w-full">
+                        {lick.waveform_data.map((amplitude, index) => {
+                          const barProgress = index / lick.waveform_data.length;
+                          const isPlayed = isPlaying && barProgress <= progress;
+                          return (
+                            <div
+                              key={index}
+                              className="w-1 transition-all duration-100"
+                              style={{
+                                backgroundColor: isPlayed
+                                  ? "#fbbf24"
+                                  : "#fdba74",
+                                height: `${Math.max(amplitude * 100, 2)}%`,
+                                opacity: isPlayed ? 1 : 0.7 + amplitude * 0.3,
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center h-full">
+                      <span className="text-orange-300 opacity-30 text-sm">
+                        No waveform data
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 

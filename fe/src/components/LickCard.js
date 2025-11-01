@@ -1,6 +1,11 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { FaHeart, FaPlay, FaPause } from "react-icons/fa";
 import { playLickAudio } from "../services/user/lickService";
+import { toggleLickLike } from "../services/user/lickService";
+import { getStoredUserId } from "../services/user/post";
+import { useDispatch, useSelector } from "react-redux";
+import { setLikeState, toggleLikeLocal } from "../store/likesSlice";
+import { CommentOutlined } from "@ant-design/icons";
 
 const LickCard = ({ lick, onClick }) => {
   const {
@@ -19,6 +24,16 @@ const LickCard = ({ lick, onClick }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0); // Track playback progress (0-1)
   const audioRef = useRef(null);
+  const dispatch = useDispatch();
+  const likeState = useSelector((s) => s.likes.byId[lick_id]);
+  const isLiked = likeState?.liked || false;
+  const localLikesCount = likeState?.count ?? likes_count;
+
+  useEffect(() => {
+    if (!likeState) {
+      dispatch(setLikeState({ id: lick_id, liked: false, count: likes_count }));
+    }
+  }, [dispatch, likeState, lick_id, likes_count]);
 
   // Format date
   const formatDate = (dateString) => {
@@ -98,6 +113,37 @@ const LickCard = ({ lick, onClick }) => {
     }
   };
 
+  const handleLike = async (e) => {
+    e.stopPropagation();
+    const userId = getStoredUserId();
+    if (!userId) {
+      alert("You need to be logged in to like licks.");
+      return;
+    }
+    try {
+      // Optimistic update through Redux
+      dispatch(toggleLikeLocal({ id: lick_id }));
+      const response = await toggleLickLike(lick_id, userId);
+      if (response.success && typeof response.data?.liked === "boolean") {
+        // Ensure state matches server; if mismatch, toggle again to align
+        if (response.data.liked !== isLiked) {
+          dispatch(toggleLikeLocal({ id: lick_id }));
+        }
+      }
+    } catch (err) {
+      // Rollback optimistic update
+      dispatch(toggleLikeLocal({ id: lick_id }));
+      alert("Failed to update like. Try again.");
+    }
+  };
+
+  const commentsCount =
+    typeof lick.comments_count === "number"
+      ? lick.comments_count
+      : typeof lick.commentsCount === "number"
+      ? lick.commentsCount
+      : 0;
+
   return (
     <div className="bg-gray-900 rounded-lg p-5 border border-gray-800 hover:border-gray-700 transition-all duration-200 group">
       <div className="flex justify-between items-start mb-3">
@@ -128,8 +174,16 @@ const LickCard = ({ lick, onClick }) => {
       </div>
 
       <div className="flex items-center space-x-4 text-sm text-gray-400 mb-4">
-        <span className="flex items-center hover:text-red-400 transition-colors">
-          <FaHeart className="text-red-500 mr-1.5" /> {likes_count}
+        <button
+          onClick={handleLike}
+          className={`flex items-center transition-colors ${
+            isLiked ? "text-red-500" : "text-gray-400 hover:text-red-400"
+          }`}
+        >
+          <FaHeart className="mr-1.5" /> {localLikesCount}
+        </button>
+        <span className="flex items-center">
+          <CommentOutlined className="mr-1.5" /> {commentsCount}
         </span>
         {duration && (
           <span className="flex items-center">

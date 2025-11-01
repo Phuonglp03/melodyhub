@@ -57,3 +57,6 @@ export const handleUploadError = (error, req, res, next) => {
 
 // Utility function để xóa file
 export { deleteFromCloudinary, uploadToCloudinary };
+
+// Export uploadAudio for direct use (needed for lickRoutes)
+export { uploadAudio };
