@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload } from 'antd';
 import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined } from '@ant-design/icons';
 import { listPosts, createPost } from '../../../services/user/post';
@@ -114,6 +115,7 @@ const formatTime = (isoString) => {
 };
 
 const NewsFeed = () => {
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
@@ -453,14 +455,29 @@ const NewsFeed = () => {
             <Card key={post._id} style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <Space align="start" size={14}>
-                  <Avatar size={40} style={{ background: '#2db7f5' }}>
-                    {post?.userId?.displayName?.[0] || post?.userId?.username?.[0] || 'U'}
-                  </Avatar>
+                  <div
+                    role="button"
+                    onClick={() => {
+                      const uid = post?.userId?._id || post?.userId?.id || post?.userId;
+                      if (uid) navigate(`/users/${uid}/newfeeds`);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <Avatar size={40} style={{ background: '#2db7f5' }}>
+                      {post?.userId?.displayName?.[0] || post?.userId?.username?.[0] || 'U'}
+                    </Avatar>
+                  </div>
                   <div>
                     <Space style={{ marginBottom: 4 }}>
-                      <Text strong style={{ color: '#fff', fontSize: 16 }}>
+                      <span
+                        onClick={() => {
+                          const uid = post?.userId?._id || post?.userId?.id || post?.userId;
+                          if (uid) navigate(`/users/${uid}/newfeeds`);
+                        }}
+                        style={{ color: '#fff', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}
+                      >
                         {post?.userId?.displayName || post?.userId?.username || 'Người dùng'}
-                      </Text>
+                      </span>
                       <Text type="secondary" style={{ color: '#9ca3af', fontSize: 13 }}>
                         {formatTime(post?.createdAt)}
                       </Text>

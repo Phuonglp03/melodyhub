@@ -1,77 +1,116 @@
-// src/routes/appRoutes.js
-import React, { useState } from "react"; // Import thêm useState
-import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
-import MainLayout from "../layouts/userLayout";
-import "bootstrap/dist/css/bootstrap.min.css";
-import NewsFeed from "../pages/user/NewFeed";
-import Login from "../pages/auth/Login";
-import Register from "../pages/auth/Register";
+import React, { useEffect } from 'react';
+import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom';
+import { useDispatch, useSelector } from 'react-redux';
+import { refreshUser } from '../redux/features/auth/authSlice';
+import MainLayout from '../layouts/userLayout';
+import 'bootstrap/dist/css/bootstrap.min.css';
+import NewsFeed from '../pages/user/NewFeed';
+import PersonalFeed from '../pages/user/NewFeed/Personal';
+import UserFeed from '../pages/user/NewFeed/UserFeed';
+import ProfilePage from '../pages/user/Profile';
+import Login from '../pages/auth/Login';
+import Register from '../pages/auth/Register';
+import VerifyOTP from '../pages/auth/VerifyOTP';
+import ForgotPassword from '../pages/auth/ForgotPassword';
+import ResetPassword from '../pages/auth/ResetPassword';
+import ProtectedRoute from '../components/common/ProtectedRoute';
+import LiveStreamCreate from '../pages/user/LiveRoomCreate';
+import LiveStreamLive from '../pages/user/LiveRoomLive';
 
 const AppRoutes = () => {
-  // Dùng useState thay vì biến const
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    !!localStorage.getItem("token")
-  );
+  const dispatch = useDispatch();
+  const { user, isLoading } = useSelector((state) => state.auth);
 
-  // Hàm này sẽ được gọi từ component Login
-  const handleLoginSuccess = () => {
-    setIsAuthenticated(true);
-  };
+  useEffect(() => {
+    // Try to refresh user session on app load
+    dispatch(refreshUser());
+  }, [dispatch]);
+
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <div className="spinner-border" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <BrowserRouter>
       <Routes>
-        {/* Authentication Routes */}
-        <Route
-          path="/login"
+        {/* Public routes */}
+        <Route 
+          path="/login" 
           element={
-            !isAuthenticated ? (
-              <Login onLoginSuccess={handleLoginSuccess} />
+            !user ? (
+              <Login />
             ) : (
               <Navigate to="/" replace />
             )
-          }
+          } 
         />
-        <Route
-          path="/register"
+        <Route 
+          path="/register" 
           element={
-            !isAuthenticated ? <Register /> : <Navigate to="/" replace />
-          }
+            !user ? (
+              <Register />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          } 
         />
-
-        {/* Protected Application Routes */}
+        <Route 
+          path="/verify-otp" 
+          element={
+            !user ? (
+              <VerifyOTP />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          } 
+        />
+        <Route 
+          path="/forgot-password" 
+          element={
+            !user ? (
+              <ForgotPassword />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          } 
+        />
+        <Route 
+          path="/reset-password" 
+          element={
+            !user ? (
+              <ResetPassword />
+            ) : (
+              <Navigate to="/" replace />
+            )
+          } 
+        />
+        
+        {/* Protected routes */}
         <Route
           path="/"
-          // Pass handleLogout to MainLayout if it contains a logout button
           element={
-            isAuthenticated ? (
-              <MainLayout onLogout={handleLogout} />
-            ) : (
-              <Navigate to="/login" replace />
-            )
+            <ProtectedRoute>
+              <MainLayout />
+            </ProtectedRoute>
           }
         >
           {/* Nested routes accessible when authenticated */}
           <Route index element={<NewsFeed />} />
-          <Route path="licks" element={<LickCommunity />} />
-          <Route path="licks/:lickId" element={<LickDetail />} />
-          <Route path="licks/upload" element={<LickUploadPage />} />
-          {/* Example Admin Route - You might add further role-based checks here or within the component */}
-          <Route path="admin/cloudinary" element={<CloudinaryExplorerPage />} />
-
-          {/* Add other nested routes here */}
+          <Route path="livestream/setup/:roomId" element={<LiveStreamCreate />} />
+          <Route path="livestream/live/:roomId" element={<LiveStreamLive />} />
+          <Route path="newfeedspersonal" element={<PersonalFeed />} />
+          <Route path="users/:userId/newfeeds" element={<UserFeed />} />
+          <Route path="profile" element={<ProfilePage />} />
         </Route>
 
-        {/* Optional: Catch-all route for 404 Not Found */}
-        <Route
-          path="*"
-          element={
-            isAuthenticated ? (
-              <div>Page Not Found</div>
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          }
-        />
+        {/* 404 - Not Found */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

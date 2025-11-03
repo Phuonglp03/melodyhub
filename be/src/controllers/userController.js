@@ -1,6 +1,7 @@
 import User from '../models/User.js';
 import Post from '../models/Post.js';
 import UserFollow from '../models/UserFollow.js';
+import cloudinary, { uploadImage } from '../config/cloudinary.js';
 
 // Get current user profile (authenticated user)
 export const getCurrentUserProfile = async (req, res) => {
@@ -34,6 +35,8 @@ export const getCurrentUserProfile = async (req, res) => {
           username: user.username,
           displayName: user.displayName,
           birthday: user.birthday,
+          gender: user.gender,
+          location: user.location,
           bio: user.bio,
           avatarUrl: user.avatarUrl,
           roleId: user.roleId,
@@ -269,7 +272,13 @@ export const getUserProfileByUsername = async (req, res) => {
 export const updateUserProfile = async (req, res) => {
   try {
     const userId = req.userId; // From auth middleware
-    const { displayName, bio, birthday, avatarUrl, privacyProfile, theme, language } = req.body;
+    
+    console.log('📝 Update profile - Content-Type:', req.headers['content-type']);
+    console.log('📝 Update profile - req.file:', req.file ? 'File exists' : 'No file');
+    console.log('📝 Update profile - req.body keys:', Object.keys(req.body || {}));
+
+    // Parse body fields (có thể từ JSON hoặc multipart)
+    const { displayName, bio, birthday, avatarUrl, privacyProfile, theme, language, gender, location } = req.body;
 
     const user = await User.findById(userId);
     
@@ -284,10 +293,34 @@ export const updateUserProfile = async (req, res) => {
     if (displayName !== undefined) user.displayName = displayName;
     if (bio !== undefined) user.bio = bio;
     if (birthday !== undefined) user.birthday = birthday ? new Date(birthday) : undefined;
-    if (avatarUrl !== undefined) user.avatarUrl = avatarUrl;
+    
+    // Xử lý avatar: ưu tiên file upload (Cloudinary), sau đó mới đến URL string
+    if (req.file) {
+      // File đã được upload lên Cloudinary bởi multer-storage-cloudinary
+      // CloudinaryStorage trả về file object với path (URL) hoặc secure_url
+      const uploadedUrl = req.file.path || req.file.secure_url || req.file.url;
+      console.log('📸 Uploaded file URL:', uploadedUrl);
+      console.log('📸 Full file object keys:', Object.keys(req.file || {}));
+      
+      if (uploadedUrl) {
+        user.avatarUrl = uploadedUrl;
+        console.log('✅ Avatar URL updated from uploaded file:', uploadedUrl);
+      } else {
+        console.error('❌ No URL found in uploaded file object:', req.file);
+      }
+    } else if (avatarUrl !== undefined) {
+      // Nếu là JSON và có avatarUrl string
+      if (typeof avatarUrl === 'string' && avatarUrl.trim() !== '') {
+        user.avatarUrl = avatarUrl.trim();
+        console.log('✅ Avatar URL updated from body:', avatarUrl.trim());
+      }
+      // If empty string is sent, ignore to prevent accidental clearing
+    }
     if (privacyProfile !== undefined) user.privacyProfile = privacyProfile;
     if (theme !== undefined) user.theme = theme;
     if (language !== undefined) user.language = language;
+    if (gender !== undefined) user.gender = gender;
+    if (location !== undefined) user.location = location;
 
     await user.save();
 
@@ -301,6 +334,8 @@ export const updateUserProfile = async (req, res) => {
           username: user.username,
           displayName: user.displayName,
           birthday: user.birthday,
+          gender: user.gender,
+          location: user.location,
           bio: user.bio,
           avatarUrl: user.avatarUrl,
           roleId: user.roleId,
@@ -325,6 +360,63 @@ export const updateUserProfile = async (req, res) => {
       success: false,
       message: 'Internal server error',
       error: error.message
+    });
+  }
+};
+
+// Upload avatar image and update user's avatarUrl
+export const uploadAvatar = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const file = req.file;
+    
+    console.log('📸 Upload avatar - file object:', JSON.stringify(file, null, 2));
+    
+    if (!file) {
+      return res.status(400).json({ success: false, message: 'Missing avatar file' });
+    }
+
+    // With CloudinaryStorage, the file object should have path or secure_url
+    // Try multiple possible properties from Cloudinary response
+    const imageUrl = file.path || file.secure_url || file.url || (file.filename ? `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}` : null);
+    
+    console.log('📸 Extracted imageUrl:', imageUrl);
+    
+    if (!imageUrl) {
+      console.error('❌ No imageUrl found in file object:', file);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Upload failed - no URL returned from Cloudinary',
+        debug: { fileKeys: Object.keys(file || {}) }
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { avatarUrl: imageUrl },
+      { new: true }
+    ).select('-passwordHash');
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    console.log('✅ Avatar updated successfully:', imageUrl);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Avatar updated',
+      data: { 
+        avatarUrl: user.avatarUrl, 
+        user 
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error uploading avatar:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error', 
+      error: error.message 
     });
   }
 };
