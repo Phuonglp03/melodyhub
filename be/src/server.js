@@ -32,6 +32,7 @@ import './models/PlaylistLick.js';
 import './models/Post.js';
 import './models/PostComment.js';
 import './models/PostLike.js';
+// removed comment-like model wiring
 import './models/Project.js';
 import './models/ProjectCollaborator.js';
 import './models/ProjectComment.js';
@@ -47,12 +48,13 @@ import authRoutes from './routes/authRoutes.js';
 import postRoutes from './routes/postRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import liveroomRoutes from './routes/user/liveroomRoutes.js';
+// removed comment-like routes wiring
 
 const app = express();
 const httpServer = http.createServer(app);
 
-// Connect to MongoDB
-connectToDatabase();
+// Connect to MongoDB (ensure connected before handling requests)
+await connectToDatabase();
 
 // Middleware
 app.use(helmet());
