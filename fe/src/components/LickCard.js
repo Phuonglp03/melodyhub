@@ -4,7 +4,7 @@ import { playLickAudio } from "../services/user/lickService";
 import { toggleLickLike } from "../services/user/lickService";
 import { getStoredUserId } from "../services/user/post";
 import { useDispatch, useSelector } from "react-redux";
-import { setLikeState, toggleLikeLocal } from "../store/likesSlice";
+import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
 import { CommentOutlined } from "@ant-design/icons";
 
 const LickCard = ({ lick, onClick }) => {

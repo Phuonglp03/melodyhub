@@ -1,10 +1,22 @@
-import React, { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useLocation, useNavigate, Outlet } from "react-router-dom";
 
 const LickLibraryLayout = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("licks"); // Default to 'licks' tab
+
+  useEffect(() => {
+    if (location.pathname.startsWith("/library/my-licks")) {
+      setActiveTab("licks");
+    } else if (location.pathname.startsWith("/library/community")) {
+      setActiveTab("licks");
+    } else if (location.pathname.startsWith("/projects")) {
+      setActiveTab("projects");
+    } else if (location.pathname.startsWith("/playlists")) {
+      setActiveTab("playlists");
+    }
+  }, [location.pathname]);
 
   const isActive = (path) => {
     return location.pathname === path;
@@ -103,7 +115,9 @@ const LickLibraryLayout = ({ children }) => {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        <main className="flex-1 overflow-y-auto">
+          <Outlet />
+        </main>
       </div>
     </div>
   );
