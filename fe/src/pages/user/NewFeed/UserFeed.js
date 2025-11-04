@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Avatar, Button, Typography, Space, Input, Spin, Empty, message } from 'antd';
+import { Card, Avatar, Button, Typography, Space, Input, Spin, Empty, message, Modal } from 'antd';
 import { LikeOutlined, MessageOutlined } from '@ant-design/icons';
 import { listPostsByUser } from '../../../services/user/post';
+import { likePost, unlikePost, createPostComment } from '../../../services/user/post';
 import { getProfileById } from '../../../services/user/profile';
 import { useNavigate, useParams } from 'react-router-dom';
 
@@ -69,6 +70,12 @@ const UserFeed = () => {
   const [hasMore, setHasMore] = useState(true);
   const loaderRef = React.useRef(null);
   const [previewCache, setPreviewCache] = useState({});
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [commentPostId, setCommentPostId] = useState(null);
+  const [commentText, setCommentText] = useState('');
+  const [likingPostId, setLikingPostId] = useState(null);
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [postIdToLiked, setPostIdToLiked] = useState({});
 
   const fetchProfile = async (id) => {
     try {
@@ -77,6 +84,50 @@ const UserFeed = () => {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn('Load profile failed:', e);
+    }
+  };
+
+  const handleLike = async (postId) => {
+    try {
+      setLikingPostId(postId);
+      const isLiked = !!postIdToLiked[postId];
+      if (isLiked) {
+        await unlikePost(postId);
+        setPostIdToLiked((prev) => ({ ...prev, [postId]: false }));
+        message.success('Đã bỏ thích');
+      } else {
+        await likePost(postId);
+        setPostIdToLiked((prev) => ({ ...prev, [postId]: true }));
+        message.success('Đã thích bài viết');
+      }
+    } catch (e) {
+      message.error(e.message || 'Không thể thích bài viết');
+    } finally {
+      setLikingPostId(null);
+    }
+  };
+
+  const openComment = (postId) => {
+    setCommentPostId(postId);
+    setCommentText('');
+    setCommentOpen(true);
+  };
+
+  const submitComment = async () => {
+    if (!commentText.trim()) {
+      message.warning('Vui lòng nhập bình luận');
+      return;
+    }
+    try {
+      setCommentSubmitting(true);
+      await createPostComment(commentPostId, { comment: commentText.trim() });
+      message.success('Đã gửi bình luận');
+      setCommentOpen(false);
+      setCommentText('');
+    } catch (e) {
+      message.error(e.message || 'Không thể gửi bình luận');
+    } finally {
+      setCommentSubmitting(false);
     }
   };
 
@@ -135,6 +186,7 @@ const UserFeed = () => {
   }, [loading, hasMore, page, userId]);
 
   return (
+    <>
     <div style={{ maxWidth: 1680, margin: '0 auto', padding: '24px 24px', background: '#0a0a0a', minHeight: '100vh' }}>
       <div style={{ height: 180, background: '#131313', borderRadius: 8, marginBottom: 16 }} />
       <div style={{ display: 'grid', gridTemplateColumns: '360px minmax(0, 1.2fr) 360px', gap: 24 }}>
@@ -247,10 +299,19 @@ const UserFeed = () => {
                 </a>
               )}
               <Space style={{ marginTop: 14 }}>
-                <Button icon={<LikeOutlined />} style={{ background: 'transparent', border: 'none', color: '#fff' }}>
+                <Button 
+                  icon={<LikeOutlined />} 
+                  style={{ background: 'transparent', border: 'none', color: postIdToLiked[post._id] ? '#1890ff' : '#fff' }}
+                  loading={likingPostId === post._id}
+                  onClick={() => handleLike(post._id)}
+                >
                   Thích
                 </Button>
-                <Button icon={<MessageOutlined />} style={{ background: 'transparent', border: 'none', color: '#fff' }}>
+                <Button 
+                  icon={<MessageOutlined />} 
+                  style={{ background: 'transparent', border: 'none', color: '#fff' }}
+                  onClick={() => openComment(post._id)}
+                >
                   Bình luận
                 </Button>
               </Space>
@@ -271,6 +332,24 @@ const UserFeed = () => {
         </div>
       </div>
     </div>
+
+    <Modal
+      title="Bình luận bài viết"
+      open={commentOpen}
+      onCancel={() => setCommentOpen(false)}
+      onOk={submitComment}
+      confirmLoading={commentSubmitting}
+      okText="Gửi"
+      cancelText="Hủy"
+    >
+      <Input.TextArea
+        rows={4}
+   
+        value={commentText}
+        onChange={(e) => setCommentText(e.target.value)}
+      />
+    </Modal>
+    </>
   );
 };
 

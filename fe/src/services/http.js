@@ -8,7 +8,16 @@ export const http = axios.create({
 });
 
 http.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  let token = localStorage.getItem('token');
+  if (!token) {
+    try {
+      const userRaw = localStorage.getItem('user');
+      if (userRaw) {
+        const userObj = JSON.parse(userRaw);
+        token = userObj?.token || userObj?.accessToken;
+      }
+    } catch {}
+  }
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

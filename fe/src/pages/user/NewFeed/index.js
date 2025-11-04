@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload } from 'antd';
 import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined } from '@ant-design/icons';
 import { listPosts, createPost } from '../../../services/user/post';
+import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments } from '../../../services/user/post';
 
 const { Title, Text } = Typography;
 
@@ -132,6 +133,16 @@ const NewsFeed = () => {
   const [linkPreview, setLinkPreview] = useState(null);
   const [linkLoading, setLinkLoading] = useState(false);
   const [previewCache, setPreviewCache] = useState({}); // url -> {title, thumbnailUrl}
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [commentPostId, setCommentPostId] = useState(null);
+  const [commentText, setCommentText] = useState('');
+  const [likingPostId, setLikingPostId] = useState(null);
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [postIdToStats, setPostIdToStats] = useState({}); // postId -> {likesCount, commentsCount}
+  const [postIdToComments, setPostIdToComments] = useState({}); // postId -> comments[]
+  const [postIdToLiked, setPostIdToLiked] = useState({}); // postId -> boolean
+  const [postIdToCommentInput, setPostIdToCommentInput] = useState({}); // postId -> string
+  const [modalPost, setModalPost] = useState(null);
 
   const extractFirstUrl = (text) => {
     if (!text) return null;
@@ -161,6 +172,91 @@ const NewsFeed = () => {
       return `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
     }
     return '';
+  };
+
+  const handleLike = async (postId) => {
+    try {
+      setLikingPostId(postId);
+      const isLiked = !!postIdToLiked[postId];
+      if (isLiked) {
+        // Unlike
+        await unlikePost(postId);
+        setPostIdToLiked((prev) => ({ ...prev, [postId]: false }));
+        setPostIdToStats((prev) => {
+          const cur = prev[postId] || { likesCount: 0, commentsCount: 0 };
+          const nextLikes = Math.max((cur.likesCount || 0) - 1, 0);
+          return { ...prev, [postId]: { ...cur, likesCount: nextLikes } };
+        });
+        message.success('Đã bỏ thích');
+      } else {
+        // Like
+        await likePost(postId);
+        setPostIdToLiked((prev) => ({ ...prev, [postId]: true }));
+        setPostIdToStats((prev) => {
+          const cur = prev[postId] || { likesCount: 0, commentsCount: 0 };
+          return { ...prev, [postId]: { ...cur, likesCount: (cur.likesCount || 0) + 1 } };
+        });
+        message.success('Đã thích bài viết');
+      }
+      // reconcile with server (non-blocking)
+      getPostStats(postId).then((res) => {
+        const stats = res?.data || {};
+        setPostIdToStats((prev) => ({ ...prev, [postId]: stats }));
+      }).catch(() => {});
+    } catch (e) {
+      message.error(e.message || 'Không thể thích bài viết');
+    } finally {
+      setLikingPostId(null);
+    }
+  };
+
+  const openComment = (postId) => {
+    setCommentPostId(postId);
+    setCommentText('');
+    const p = items.find((it) => it._id === postId) || null;
+    setModalPost(p);
+    setCommentOpen(true);
+  };
+
+  const submitComment = async () => {
+    if (!commentText.trim()) {
+      message.warning('Vui lòng nhập bình luận');
+      return;
+    }
+    try {
+      setCommentSubmitting(true);
+      await createPostComment(commentPostId, { comment: commentText.trim() });
+      message.success('Đã gửi bình luận');
+      setCommentOpen(false);
+      setCommentText('');
+      // refresh comments and counts
+      const all = await getAllPostComments(commentPostId);
+      setPostIdToComments((prev) => ({ ...prev, [commentPostId]: all }));
+      const statsRes = await getPostStats(commentPostId);
+      setPostIdToStats((prev) => ({ ...prev, [commentPostId]: statsRes?.data || prev[commentPostId] }));
+    } catch (e) {
+      message.error(e.message || 'Không thể gửi bình luận');
+    } finally {
+      setCommentSubmitting(false);
+    }
+  };
+
+  const submitInlineComment = async (postId) => {
+    const text = (postIdToCommentInput[postId] || '').trim();
+    if (!text) { message.warning('Vui lòng nhập bình luận'); return; }
+    try {
+      setCommentSubmitting(true);
+      await createPostComment(postId, { comment: text });
+      setPostIdToCommentInput((prev) => ({ ...prev, [postId]: '' }));
+      const all = await getAllPostComments(postId);
+      setPostIdToComments((prev) => ({ ...prev, [postId]: all }));
+      const statsRes = await getPostStats(postId);
+      setPostIdToStats((prev) => ({ ...prev, [postId]: statsRes?.data || prev[postId] }));
+    } catch (e) {
+      message.error(e.message || 'Không thể gửi bình luận');
+    } finally {
+      setCommentSubmitting(false);
+    }
   };
 
   const fetchProviderOEmbed = async (url) => {
@@ -266,6 +362,17 @@ const NewsFeed = () => {
   // Enrich loaded posts with preview thumbnails if missing
   useEffect(() => {
     const enrich = async () => {
+      // fetch stats and initial comments for each post
+      for (const p of items) {
+        // fetch stats
+        getPostStats(p._id).then((res) => {
+          setPostIdToStats((prev) => ({ ...prev, [p._id]: res?.data || prev[p._id] }));
+        }).catch(() => {});
+        // fetch all top-level comments
+        getAllPostComments(p._id).then((list) => {
+          setPostIdToComments((prev) => ({ ...prev, [p._id]: list }));
+        }).catch(() => {});
+      }
       const urls = items
         .map((p) => p?.linkPreview?.url)
         .filter((u) => u && !previewCache[u]);
@@ -333,6 +440,7 @@ const NewsFeed = () => {
   };
 
   return (
+    <>
     <div style={{ 
       maxWidth: 1680, 
       margin: '0 auto', 
@@ -374,9 +482,19 @@ const NewsFeed = () => {
             title={<span style={{ color: '#fff', fontWeight: 600 }}>Tạo bài đăng</span>}
             onCancel={() => { if (!posting) { setIsModalOpen(false); } }}
             footer={
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <Button onClick={() => { if (!posting) setIsModalOpen(false); }}>Hủy</Button>
-                <Button type="primary" loading={posting} onClick={handleCreatePost}>Đăng</Button>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+                <Button 
+                  shape="round"
+                  onClick={() => { if (!posting) setIsModalOpen(false); }}
+                  style={{ height: 44, borderRadius: 22, padding: 0, width: 108, background: '#1f1f1f', color: '#e5e7eb', borderColor: '#303030' }}
+                >Hủy</Button>
+                <Button 
+                  type="primary" 
+                  shape="round"
+                  loading={posting} 
+                  onClick={handleCreatePost}
+                  style={{ height: 44, borderRadius: 22, padding: 0, width: 108, background: '#7c3aed', borderColor: '#7c3aed' }}
+                >Đăng</Button>
               </div>
             }
             styles={{ 
@@ -515,14 +633,40 @@ const NewsFeed = () => {
                   </div>
                 </a>
               )}
-              <Space style={{ marginTop: 14 }}>
-                <Button icon={<LikeOutlined />} style={{ background: 'transparent', border: 'none', color: '#fff' }}>
-                  Thích
+              <Space style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between' }}>
+                <Button 
+                  icon={<LikeOutlined />} 
+                  style={{ background: 'transparent', border: 'none', color: postIdToLiked[post._id] ? '#1890ff' : '#fff' }}
+                  loading={likingPostId === post._id}
+                  onClick={() => handleLike(post._id)}
+                >
+                  Thích {Number(postIdToStats[post._id]?.likesCount ?? 0) > 0 ? `(${postIdToStats[post._id].likesCount})` : ''}
                 </Button>
-                <Button icon={<MessageOutlined />} style={{ background: 'transparent', border: 'none', color: '#fff' }}>
-                  Bình luận
+                <Button 
+                  icon={<MessageOutlined />} 
+                  style={{ background: 'transparent', border: 'none', color: '#fff' }}
+                  onClick={() => openComment(post._id)}
+                >
+                  Bình luận {Number(postIdToStats[post._id]?.commentsCount ?? 0) > 0 ? `(${postIdToStats[post._id].commentsCount})` : ''}
                 </Button>
               </Space>
+
+              {/* Danh sách bình luận */}
+              {postIdToComments[post._id] && postIdToComments[post._id].length > 0 && (
+                <div style={{ marginTop: 12, background: '#0f0f10', borderTop: '1px solid #1f1f1f', paddingTop: 8 }}>
+                  {postIdToComments[post._id].map((c) => (
+                    <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
+                      <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>
+                        <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || 'Người dùng'}</div>
+                        <div>{c.comment}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              
             </Card>
           ))}
 
@@ -559,6 +703,88 @@ const NewsFeed = () => {
         </div>
       </div>
     </div>
+
+      <Modal
+        title={<span style={{ color: '#fff', fontWeight: 700 }}>Bình luận bài viết</span>}
+      open={commentOpen}
+      onCancel={() => setCommentOpen(false)}
+        footer={null}
+        width={860}
+        styles={{
+          header: { background: '#0f0f10', borderBottom: '1px solid #1f1f1f' },
+          content: { background: '#0f0f10', borderRadius: 12 },
+          body: { background: '#0f0f10' }
+        }}
+    >
+        {modalPost && (
+          <div>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+              <Avatar size={40} style={{ background: '#2db7f5' }}>
+                {modalPost?.userId?.displayName?.[0] || modalPost?.userId?.username?.[0] || 'U'}
+              </Avatar>
+              <div>
+                <div style={{ color: '#fff', fontWeight: 600 }}>
+                  {modalPost?.userId?.displayName || modalPost?.userId?.username || 'Người dùng'}
+                </div>
+                <Text type="secondary" style={{ color: '#9ca3af', fontSize: 12 }}>{formatTime(modalPost?.createdAt)}</Text>
+              </div>
+            </div>
+            {modalPost?.textContent && (
+              <div style={{ marginBottom: 8, color: '#e5e7eb' }}>{modalPost.textContent}</div>
+            )}
+            {modalPost?.media?.length > 0 && (
+              <div style={{ marginBottom: 8 }}><WavePlaceholder /></div>
+            )}
+            {modalPost?.linkPreview && (
+              <a href={modalPost.linkPreview?.url || '#'} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+                <div style={{ border: '1px solid #303030', borderRadius: 8, padding: 12, background: '#111', color: '#e5e7eb', marginTop: 8 }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    {(modalPost.linkPreview?.thumbnailUrl || (previewCache[modalPost.linkPreview?.url]?.thumbnailUrl)) ? (
+                      <img src={(modalPost.linkPreview?.thumbnailUrl || previewCache[modalPost.linkPreview?.url]?.thumbnailUrl)} alt="preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6 }} />
+                    ) : (
+                      <div style={{ width: 64, height: 64, borderRadius: 6, background: '#1f1f1f' }} />
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modalPost.linkPreview?.title || previewCache[modalPost.linkPreview?.url]?.title || modalPost.linkPreview?.url}</div>
+                      <div style={{ color: '#9ca3af', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modalPost.linkPreview?.url}</div>
+                    </div>
+                  </div>
+                </div>
+              </a>
+            )}
+
+            {/* stats quick view */}
+            <div style={{ marginTop: 8, color: '#9ca3af' }}>
+              {Number(postIdToStats[commentPostId]?.likesCount ?? 0)} lượt thích · {Number(postIdToStats[commentPostId]?.commentsCount ?? 0)} bình luận
+            </div>
+
+            {/* comments list */}
+            <div style={{ marginTop: 12, maxHeight: 360, overflowY: 'auto' }}>
+              {(postIdToComments[commentPostId] || []).map((c) => (
+                <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
+                  <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>
+                    <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || 'Người dùng'}</div>
+                    <div>{c.comment}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* input */}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
+              <Input
+                placeholder="Nhập bình luận của bạn..."
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                style={{ background: '#0f0f10', color: '#e5e7eb', borderColor: '#303030', height: 44, borderRadius: 22, flex: 1 }}
+              />
+              <Button type="primary" loading={commentSubmitting} onClick={submitComment} style={{ background: '#7c3aed', borderColor: '#7c3aed', borderRadius: 22, padding: '0 20px', height: 44 }}>Gửi</Button>
+            </div>
+          </div>
+        )}
+    </Modal>
+  </>
   );
 };
 

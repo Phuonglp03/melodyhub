@@ -70,6 +70,56 @@ export const deletePost = async (postId) => {
   return data;
 };
 
+// ---- Likes ----
+export const likePost = async (postId) => {
+  const { data } = await http.post(`/posts/${postId}/like`);
+  return data;
+};
+
+export const unlikePost = async (postId) => {
+  const { data } = await http.delete(`/posts/${postId}/like`);
+  return data;
+};
+
+// ---- Comments ----
+export const createPostComment = async (postId, { comment, parentCommentId } = {}) => {
+  const payload = { comment };
+  if (parentCommentId) payload.parentCommentId = parentCommentId;
+  const { data } = await http.post(`/posts/${postId}/comments`, payload);
+  return data;
+};
+
+export const getPostComments = async (postId, { parentCommentId, page = 1, limit = 10 } = {}) => {
+  const params = { page, limit };
+  if (parentCommentId) params.parentCommentId = parentCommentId;
+  const { data } = await http.get(`/posts/${postId}/comments`, { params });
+  return data;
+};
+
+// Stats
+export const getPostStats = async (postId) => {
+  const { data } = await http.get(`/posts/${postId}/stats`);
+  return data;
+};
+
+// Helper: fetch all comments (paginate until done)
+export const getAllPostComments = async (postId, { parentCommentId } = {}) => {
+  const all = [];
+  let page = 1;
+  // reasonable hard cap
+  const limit = 50;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const res = await getPostComments(postId, { parentCommentId, page, limit });
+    const items = res?.data?.comments || [];
+    all.push(...items);
+    const hasNext = res?.data?.pagination?.hasNextPage;
+    if (!hasNext) break;
+    page += 1;
+  }
+  return all;
+};
+
 export default {
   listPosts,
   listMyPosts,
@@ -78,6 +128,12 @@ export default {
   createPost,
   updatePost,
   deletePost,
+  likePost,
+  unlikePost,
+  createPostComment,
+  getPostComments,
+  getPostStats,
+  getAllPostComments,
   getStoredUserId,
 };
 

@@ -7,7 +7,8 @@ import {
   updatePost,
   deletePost,
   likePost,
-  unlikePost
+  unlikePost,
+  getPostStats
 } from '../controllers/postController.js';
 import middlewareController from '../middleware/auth.js';
 import { 
@@ -31,6 +32,9 @@ router.get('/user/:userId', getPostsByUser);
 
 // GET /api/posts/:postId - Get post by ID
 router.get('/:postId', getPostById);
+
+// GET /api/posts/:postId/stats - likesCount & commentsCount
+router.get('/:postId/stats', getPostStats);
 
 // PUT /api/posts/:postId - Update post with media upload
 router.put('/:postId', handlePostMediaUpload, handleUploadError, updatePost);
