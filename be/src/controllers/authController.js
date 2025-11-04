@@ -15,7 +15,7 @@ export const generateTokens = async (user) => {
       roleId: user.roleId
     },
     process.env.JWT_SECRET || 'your-secret-key',
-    { expiresIn: '15m' }
+    { expiresIn: '1h' }
   );
 
   // Generate refresh token (7 days)

@@ -1,6 +1,7 @@
 import Post from '../models/Post.js';
 import User from '../models/User.js';
 import PostLike from '../models/PostLike.js';
+import PostComment from '../models/PostComment.js';
 import { uploadToCloudinary } from '../middleware/file.js';
 
 // Helper function to detect media type from mimetype
@@ -493,5 +494,24 @@ export const unlikePost = async (req, res) => {
   } catch (error) {
     console.error('unlikePost error:', error);
     return res.status(500).json({ success: false, message: 'Failed to unlike post' });
+  }
+};
+
+// Get post stats: likes count and top-level comments count
+export const getPostStats = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const post = await Post.findById(postId).lean();
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
+    const [likesCount, commentsCount] = await Promise.all([
+      PostLike.countDocuments({ postId }),
+      PostComment.countDocuments({ postId, parentCommentId: { $exists: false } })
+    ]);
+    return res.status(200).json({ success: true, data: { likesCount, commentsCount } });
+  } catch (error) {
+    console.error('getPostStats error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get post stats' });
   }
 };
