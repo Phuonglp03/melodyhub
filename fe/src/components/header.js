@@ -47,7 +47,12 @@ const AppHeader = () => {
           <Text style={{ color: '#fff', fontWeight: 800, fontSize: 22 }}>MelodyHub</Text>
           <Space size={28} style={{ color: '#d1d5db' }}>
             <Text style={{ color: '#d1d5db', fontSize: 16 }}>Join Live</Text>
-            <Text style={{ color: '#d1d5db', fontSize: 16 }}>Library</Text>
+            <Text
+              style={{ color: '#d1d5db', fontSize: 16, cursor: 'pointer' }}
+              onClick={() => navigate('/library/my-licks')}
+            >
+              Library
+            </Text>
           </Space>
           <div style={{ flex: 1 }} />
           <Input

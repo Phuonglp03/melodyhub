@@ -1,10 +1,35 @@
-import React, { useEffect, useState } from 'react';
-import { Card, Avatar, Button, Typography, Space, Input, Spin, Empty, message, Modal, Upload, List, Divider } from 'antd';
-import { LikeOutlined, MessageOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons';
-import { listMyPosts, createPost } from '../../../services/user/post';
-import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments } from '../../../services/user/post';
-import { getMyProfile } from '../../../services/user/profile';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from "react";
+import {
+  Card,
+  Avatar,
+  Button,
+  Typography,
+  Space,
+  Input,
+  Spin,
+  Empty,
+  message,
+  Modal,
+  Upload,
+  List,
+  Divider,
+} from "antd";
+import {
+  LikeOutlined,
+  MessageOutlined,
+  PlusOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
+import { listMyPosts, createPost } from "../../../services/user/post";
+import {
+  likePost,
+  unlikePost,
+  createPostComment,
+  getPostStats,
+  getAllPostComments,
+} from "../../../services/user/post";
+import { getMyProfile } from "../../../services/user/profile";
+import { useNavigate } from "react-router-dom";
 
 const { Title, Text } = Typography;
 
@@ -12,42 +37,107 @@ const WavePlaceholder = () => (
   <div
     style={{
       height: 120,
-      background: '#1a1a1a',
+      background: "#1a1a1a",
       borderRadius: 8,
-      position: 'relative',
-      overflow: 'hidden',
+      position: "relative",
+      overflow: "hidden",
     }}
   >
-    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '100%', display: 'flex', alignItems: 'end', gap: 2, padding: '8px 12px' }}>
+    <div
+      style={{
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: "100%",
+        display: "flex",
+        alignItems: "end",
+        gap: 2,
+        padding: "8px 12px",
+      }}
+    >
       {Array.from({ length: 50 }).map((_, i) => (
-        <div key={i} style={{ width: 3, height: `${Math.random() * 80 + 20}px`, background: '#ff7a45', borderRadius: 1.5 }} />
+        <div
+          key={i}
+          style={{
+            width: 3,
+            height: `${Math.random() * 80 + 20}px`,
+            background: "#ff7a45",
+            borderRadius: 1.5,
+          }}
+        />
       ))}
-      <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, background: '#ff7a45', borderRadius: '50%' }} />
+      <div
+        style={{
+          position: "absolute",
+          right: 12,
+          top: "50%",
+          transform: "translateY(-50%)",
+          width: 12,
+          height: 12,
+          background: "#ff7a45",
+          borderRadius: "50%",
+        }}
+      />
     </div>
   </div>
 );
 
 const Suggestion = ({ user }) => (
-  <div style={{ display: 'flex', alignItems: 'center', padding: '6px 0', width: '100%' }}>
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      padding: "6px 0",
+      width: "100%",
+    }}
+  >
     <Space size={12}>
-      <Avatar size={36} style={{ background: user.color }}>{user.name[0]}</Avatar>
+      <Avatar size={36} style={{ background: user.color }}>
+        {user.name[0]}
+      </Avatar>
       <div>
-        <Text strong style={{ color: '#fff' }}>{user.name}</Text>
-        <div style={{ fontSize: 12, color: '#f3f5f7ff' }}>{user.followers} người theo dõi</div>
+        <Text strong style={{ color: "#fff" }}>
+          {user.name}
+        </Text>
+        <div style={{ fontSize: 12, color: "#f3f5f7ff" }}>
+          {user.followers} người theo dõi
+        </div>
       </div>
     </Space>
-    <Button shape="circle" size="large" type="primary" icon={<PlusOutlined />} style={{ marginLeft: 'auto' }} />
+    <Button
+      shape="circle"
+      size="large"
+      type="primary"
+      icon={<PlusOutlined />}
+      style={{ marginLeft: "auto" }}
+    />
   </div>
 );
 
-const LeaderboardItem = ({ name, icon, iconColor = '#111' }) => (
+const LeaderboardItem = ({ name, icon, iconColor = "#111" }) => (
   <Space>
-    <div style={{ width: 36, height: 36, background: iconColor, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 'bold', color: '#fff' }}>
+    <div
+      style={{
+        width: 36,
+        height: 36,
+        background: iconColor,
+        borderRadius: 8,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 12,
+        fontWeight: "bold",
+        color: "#fff",
+      }}
+    >
       {icon}
     </div>
     <div>
-      <Text strong style={{ color: '#fff' }}>{name}</Text>
-      <div style={{ fontSize: 12, color: '#9ca3af' }}>Tên người tạo</div>
+      <Text strong style={{ color: "#fff" }}>
+        {name}
+      </Text>
+      <div style={{ fontSize: 12, color: "#9ca3af" }}>Tên người tạo</div>
     </div>
   </Space>
 );
@@ -57,7 +147,7 @@ const formatTime = (isoString) => {
     const date = new Date(isoString);
     return date.toLocaleString();
   } catch {
-    return '';
+    return "";
   }
 };
 
@@ -68,11 +158,11 @@ const PersonalFeed = () => {
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(true);
   const loaderRef = React.useRef(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newText, setNewText] = useState('');
+  const [newText, setNewText] = useState("");
   const [files, setFiles] = useState([]);
   const [posting, setPosting] = useState(false);
   const [maxChars] = useState(300);
@@ -81,7 +171,7 @@ const PersonalFeed = () => {
   const [previewCache, setPreviewCache] = useState({});
   const [commentOpen, setCommentOpen] = useState(false);
   const [commentPostId, setCommentPostId] = useState(null);
-  const [commentText, setCommentText] = useState('');
+  const [commentText, setCommentText] = useState("");
   const [likingPostId, setLikingPostId] = useState(null);
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [postIdToStats, setPostIdToStats] = useState({});
@@ -96,7 +186,7 @@ const PersonalFeed = () => {
       setProfile(res?.data?.user || null);
     } catch (e) {
       // eslint-disable-next-line no-console
-      console.warn('Load profile failed:', e);
+      console.warn("Load profile failed:", e);
     }
   };
 
@@ -112,22 +202,27 @@ const PersonalFeed = () => {
           const nextLikes = Math.max((cur.likesCount || 0) - 1, 0);
           return { ...prev, [postId]: { ...cur, likesCount: nextLikes } };
         });
-        message.success('Đã bỏ thích');
+        message.success("Đã bỏ thích");
       } else {
         await likePost(postId);
         setPostIdToLiked((prev) => ({ ...prev, [postId]: true }));
         setPostIdToStats((prev) => {
           const cur = prev[postId] || { likesCount: 0, commentsCount: 0 };
-          return { ...prev, [postId]: { ...cur, likesCount: (cur.likesCount || 0) + 1 } };
+          return {
+            ...prev,
+            [postId]: { ...cur, likesCount: (cur.likesCount || 0) + 1 },
+          };
         });
-        message.success('Đã thích bài viết');
+        message.success("Đã thích bài viết");
       }
-      getPostStats(postId).then((res) => {
-        const stats = res?.data || {};
-        setPostIdToStats((prev) => ({ ...prev, [postId]: stats }));
-      }).catch(() => {});
+      getPostStats(postId)
+        .then((res) => {
+          const stats = res?.data || {};
+          setPostIdToStats((prev) => ({ ...prev, [postId]: stats }));
+        })
+        .catch(() => {});
     } catch (e) {
-      message.error(e.message || 'Không thể thích bài viết');
+      message.error(e.message || "Không thể thích bài viết");
     } finally {
       setLikingPostId(null);
     }
@@ -135,7 +230,7 @@ const PersonalFeed = () => {
 
   const openComment = (postId) => {
     setCommentPostId(postId);
-    setCommentText('');
+    setCommentText("");
     const p = items.find((it) => it._id === postId) || null;
     setModalPost(p);
     setCommentOpen(true);
@@ -143,39 +238,48 @@ const PersonalFeed = () => {
 
   const submitComment = async () => {
     if (!commentText.trim()) {
-      message.warning('Vui lòng nhập bình luận');
+      message.warning("Vui lòng nhập bình luận");
       return;
     }
     try {
       setCommentSubmitting(true);
       await createPostComment(commentPostId, { comment: commentText.trim() });
-      message.success('Đã gửi bình luận');
+      message.success("Đã gửi bình luận");
       setCommentOpen(false);
-      setCommentText('');
+      setCommentText("");
       const all = await getAllPostComments(commentPostId);
       setPostIdToComments((prev) => ({ ...prev, [commentPostId]: all }));
       const statsRes = await getPostStats(commentPostId);
-      setPostIdToStats((prev) => ({ ...prev, [commentPostId]: statsRes?.data || prev[commentPostId] }));
+      setPostIdToStats((prev) => ({
+        ...prev,
+        [commentPostId]: statsRes?.data || prev[commentPostId],
+      }));
     } catch (e) {
-      message.error(e.message || 'Không thể gửi bình luận');
+      message.error(e.message || "Không thể gửi bình luận");
     } finally {
       setCommentSubmitting(false);
     }
   };
 
   const submitInlineComment = async (postId) => {
-    const text = (postIdToCommentInput[postId] || '').trim();
-    if (!text) { message.warning('Vui lòng nhập bình luận'); return; }
+    const text = (postIdToCommentInput[postId] || "").trim();
+    if (!text) {
+      message.warning("Vui lòng nhập bình luận");
+      return;
+    }
     try {
       setCommentSubmitting(true);
       await createPostComment(postId, { comment: text });
-      setPostIdToCommentInput((prev) => ({ ...prev, [postId]: '' }));
+      setPostIdToCommentInput((prev) => ({ ...prev, [postId]: "" }));
       const all = await getAllPostComments(postId);
       setPostIdToComments((prev) => ({ ...prev, [postId]: all }));
       const statsRes = await getPostStats(postId);
-      setPostIdToStats((prev) => ({ ...prev, [postId]: statsRes?.data || prev[postId] }));
+      setPostIdToStats((prev) => ({
+        ...prev,
+        [postId]: statsRes?.data || prev[postId],
+      }));
     } catch (e) {
-      message.error(e.message || 'Không thể gửi bình luận');
+      message.error(e.message || "Không thể gửi bình luận");
     } finally {
       setCommentSubmitting(false);
     }
@@ -183,16 +287,17 @@ const PersonalFeed = () => {
 
   const fetchData = async (p = page) => {
     setLoading(true);
-    setError('');
+    setError("");
     try {
       const res = await listMyPosts({ page: p, limit });
       const posts = res?.data?.posts || [];
       const total = res?.data?.pagination?.totalPosts || 0;
-      if (p === 1) setItems(posts); else setItems((prev) => [...prev, ...posts]);
+      if (p === 1) setItems(posts);
+      else setItems((prev) => [...prev, ...posts]);
       const totalPages = Math.ceil(total / limit) || 1;
       setHasMore(p < totalPages);
     } catch (e) {
-      setError(e.message || 'Lỗi tải bài viết');
+      setError(e.message || "Lỗi tải bài viết");
     } finally {
       setLoading(false);
     }
@@ -208,7 +313,9 @@ const PersonalFeed = () => {
   useEffect(() => {
     const enrich = async () => {
       const urls = items
-        .map((p) => p?.linkPreview?.url || extractFirstUrl(p?.textContent || ''))
+        .map(
+          (p) => p?.linkPreview?.url || extractFirstUrl(p?.textContent || "")
+        )
         .filter((u) => u && !previewCache[u]);
       for (const url of urls) {
         // eslint-disable-next-line no-await-in-loop
@@ -230,29 +337,31 @@ const PersonalFeed = () => {
   const getYoutubeId = (urlString) => {
     try {
       const u = new URL(urlString);
-      if (u.hostname.includes('youtu.be')) return u.pathname.replace('/', '');
-      if (u.hostname.includes('youtube.com')) return u.searchParams.get('v');
+      if (u.hostname.includes("youtu.be")) return u.pathname.replace("/", "");
+      if (u.hostname.includes("youtube.com")) return u.searchParams.get("v");
       return null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   };
 
   const deriveThumbnail = (urlString) => {
     const ytId = getYoutubeId(urlString);
     if (ytId) return `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
-    return '';
+    return "";
   };
 
   const fetchProviderOEmbed = async (url) => {
     const tryFetch = async (endpoint) => {
       const res = await fetch(`${endpoint}${encodeURIComponent(url)}`);
-      if (!res.ok) throw new Error('oEmbed failed');
+      if (!res.ok) throw new Error("oEmbed failed");
       return res.json();
     };
     const endpoints = [
-      'https://noembed.com/embed?url=',
-      'https://soundcloud.com/oembed?format=json&url=',
-      'https://vimeo.com/api/oembed.json?url=',
-      'https://open.spotify.com/oembed?url=',
+      "https://noembed.com/embed?url=",
+      "https://soundcloud.com/oembed?format=json&url=",
+      "https://vimeo.com/api/oembed.json?url=",
+      "https://open.spotify.com/oembed?url=",
     ];
     for (const ep of endpoints) {
       try {
@@ -260,9 +369,9 @@ const PersonalFeed = () => {
         return {
           title: data.title || url,
           thumbnailUrl: data.thumbnail_url || deriveThumbnail(url),
-          provider: data.provider_name || '',
-          author: data.author_name || '',
-          type: data.type || 'link',
+          provider: data.provider_name || "",
+          author: data.author_name || "",
+          type: data.type || "link",
         };
       } catch (_) {}
     }
@@ -271,162 +380,476 @@ const PersonalFeed = () => {
 
   const fetchOgTags = async (url) => {
     try {
-      const proxied = `https://r.jina.ai/http/${url.replace(/^https?:\/\//, '')}`;
+      const proxied = `https://r.jina.ai/http/${url.replace(
+        /^https?:\/\//,
+        ""
+      )}`;
       const res = await fetch(proxied);
       if (!res.ok) return null;
       const text = await res.text();
-      const ogImageMatch = text.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
+      const ogImageMatch = text.match(
+        /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
+      );
       const titleMatch = text.match(/<title>([^<]+)<\/title>/i);
-      return { title: (titleMatch && titleMatch[1]) || url, thumbnailUrl: (ogImageMatch && ogImageMatch[1]) || deriveThumbnail(url), provider: '', author: '', type: 'link' };
-    } catch { return null; }
+      return {
+        title: (titleMatch && titleMatch[1]) || url,
+        thumbnailUrl: (ogImageMatch && ogImageMatch[1]) || deriveThumbnail(url),
+        provider: "",
+        author: "",
+        type: "link",
+      };
+    } catch {
+      return null;
+    }
   };
 
   const resolvePreview = async (url) => {
     if (previewCache[url]) return previewCache[url];
     const fromOembed = await fetchProviderOEmbed(url);
-    const data = fromOembed || (await fetchOgTags(url)) || { title: url, thumbnailUrl: deriveThumbnail(url) };
+    const data = fromOembed ||
+      (await fetchOgTags(url)) || {
+        title: url,
+        thumbnailUrl: deriveThumbnail(url),
+      };
     setPreviewCache((prev) => ({ ...prev, [url]: data }));
     return data;
   };
 
   useEffect(() => {
     const url = extractFirstUrl(newText);
-    if (!url) { setLinkPreview(null); return; }
+    if (!url) {
+      setLinkPreview(null);
+      return;
+    }
     let aborted = false;
     setLinkLoading(true);
-    resolvePreview(url).then((data) => { if (!aborted) setLinkPreview({ url, ...data }); }).finally(() => { if (!aborted) setLinkLoading(false); });
-    return () => { aborted = true; };
+    resolvePreview(url)
+      .then((data) => {
+        if (!aborted) setLinkPreview({ url, ...data });
+      })
+      .finally(() => {
+        if (!aborted) setLinkLoading(false);
+      });
+    return () => {
+      aborted = true;
+    };
   }, [newText]);
 
   const handleCreatePost = async () => {
-    if (!newText.trim()) { message.warning('Vui lòng nhập nội dung'); return; }
+    if (!newText.trim()) {
+      message.warning("Vui lòng nhập nội dung");
+      return;
+    }
     try {
       setPosting(true);
       if (files.length > 0) {
         const form = new FormData();
-        form.append('postType', 'status_update');
-        form.append('textContent', newText.trim());
-        if (linkPreview) form.append('linkPreview', JSON.stringify(linkPreview));
-        files.forEach((f) => { if (f.originFileObj) form.append('media', f.originFileObj); });
+        form.append("postType", "status_update");
+        form.append("textContent", newText.trim());
+        if (linkPreview)
+          form.append("linkPreview", JSON.stringify(linkPreview));
+        files.forEach((f) => {
+          if (f.originFileObj) form.append("media", f.originFileObj);
+        });
         await createPost(form);
       } else {
-        await createPost({ postType: 'status_update', textContent: newText.trim(), linkPreview });
+        await createPost({
+          postType: "status_update",
+          textContent: newText.trim(),
+          linkPreview,
+        });
       }
-      setNewText('');
+      setNewText("");
       setFiles([]);
       setIsModalOpen(false);
-      message.success('Đăng bài thành công');
+      message.success("Đăng bài thành công");
       fetchData(1);
       setPage(1);
     } catch (e) {
-      message.error(e.message || 'Đăng bài thất bại');
-    } finally { setPosting(false); }
+      message.error(e.message || "Đăng bài thất bại");
+    } finally {
+      setPosting(false);
+    }
   };
 
   useEffect(() => {
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && !loading && hasMore) {
-        const next = page + 1;
-        setPage(next);
-        fetchData(next);
-      }
-    }, { rootMargin: '200px' });
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loading && hasMore) {
+          const next = page + 1;
+          setPage(next);
+          fetchData(next);
+        }
+      },
+      { rootMargin: "200px" }
+    );
     const el = loaderRef.current;
     if (el) observer.observe(el);
-    return () => { if (el) observer.unobserve(el); };
+    return () => {
+      if (el) observer.unobserve(el);
+    };
   }, [loading, hasMore, page]);
 
   return (
-    <div style={{ maxWidth: 1680, margin: '0 auto', padding: '24px 24px', background: '#0a0a0a', minHeight: '100vh' }}>
-      <div style={{ height: 180, background: '#131313', borderRadius: 8, marginBottom: 16 }} />
-      <div style={{ display: 'grid', gridTemplateColumns: '360px minmax(0, 1.2fr) 360px', gap: 24 }}>
+    <div
+      style={{
+        maxWidth: 1680,
+        margin: "0 auto",
+        padding: "24px 24px",
+        background: "#0a0a0a",
+        minHeight: "100vh",
+      }}
+    >
+      <div
+        style={{
+          height: 180,
+          background: "#131313",
+          borderRadius: 8,
+          marginBottom: 16,
+        }}
+      />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "360px minmax(0, 1.2fr) 360px",
+          gap: 24,
+        }}
+      >
         <div>
-          <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f', marginBottom: 12, padding: 0 }}>
+          <Card
+            style={{
+              background: "#0f0f10",
+              borderColor: "#1f1f1f",
+              marginBottom: 12,
+              padding: 0,
+            }}
+          >
             <div
               style={{
                 height: 180,
-                borderRadius: '8px 8px 0 0',
-                backgroundImage: profile?.avatarUrl ? `url(${profile.avatarUrl})` : undefined,
-                backgroundColor: '#131313',
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
+                borderRadius: "8px 8px 0 0",
+                backgroundImage: profile?.avatarUrl
+                  ? `url(${profile.avatarUrl})`
+                  : undefined,
+                backgroundColor: "#131313",
+                backgroundSize: "cover",
+                backgroundPosition: "center",
               }}
             />
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 16px 20px 16px' }}>
-              <div style={{ marginTop: 12, textAlign: 'center', width: '100%' }}>
-                <div style={{ color: '#fff', fontSize: 22, fontWeight: 800 }}>
-                  {profile?.displayName || profile?.username || 'trần quý'}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                padding: "12px 16px 20px 16px",
+              }}
+            >
+              <div
+                style={{ marginTop: 12, textAlign: "center", width: "100%" }}
+              >
+                <div style={{ color: "#fff", fontSize: 22, fontWeight: 800 }}>
+                  {profile?.displayName || profile?.username || "trần quý"}
                 </div>
-                <div style={{ color: '#9ca3af', marginTop: 4 }}>@{profile?.username || '2003tranquy123'}</div>
+                <div style={{ color: "#9ca3af", marginTop: 4 }}>
+                  @{profile?.username || "2003tranquy123"}
+                </div>
               </div>
-              <Button onClick={() => navigate('/profile')} style={{ marginTop: 16, background: '#fff', color: '#111', borderColor: '#fff', padding: '0 20px', height: 40, borderRadius: 999 }}>View Profile</Button>
+              <Button
+                onClick={() => navigate("/profile")}
+                style={{
+                  marginTop: 16,
+                  background: "#fff",
+                  color: "#111",
+                  borderColor: "#fff",
+                  padding: "0 20px",
+                  height: 40,
+                  borderRadius: 999,
+                }}
+              >
+                View Profile
+              </Button>
             </div>
           </Card>
-          <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ color: '#fff', fontWeight: 800, fontSize: 16 }}>{profile?.followersCount ?? 0}</div>
-                <div style={{ color: '#9ca3af', fontSize: 12, marginTop: 4 }}>Followers</div>
+          <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 12,
+              }}
+            >
+              <div style={{ textAlign: "center" }}>
+                <div style={{ color: "#fff", fontWeight: 800, fontSize: 16 }}>
+                  {profile?.followersCount ?? 0}
+                </div>
+                <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 4 }}>
+                  Followers
+                </div>
               </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ color: '#fff', fontWeight: 800, fontSize: 16 }}>{profile?.followingCount ?? 0}</div>
-                <div style={{ color: '#9ca3af', fontSize: 12, marginTop: 4 }}>Following</div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ color: "#fff", fontWeight: 800, fontSize: 16 }}>
+                  {profile?.followingCount ?? 0}
+                </div>
+                <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 4 }}>
+                  Following
+                </div>
               </div>
             </div>
           </Card>
         </div>
 
         <div>
-          <div style={{ marginBottom: 20, background: '#0f0f10', border: '1px solid #1f1f1f', borderRadius: 8, padding: '20px 24px', display: 'flex', alignItems: 'center', gap: 16 }} onClick={() => setIsModalOpen(true)}>
-            <Avatar size={40} style={{ backgroundColor: '#722ed1' }}>{(profile?.displayName || 'U')[0]}</Avatar>
-            <Input.TextArea placeholder="Có gì mới ?" autoSize={{ minRows: 2, maxRows: 8 }} style={{ flex: 1, background: '#fff', border: 'none', borderRadius: 10, minHeight: 56, fontSize: 16 }} readOnly />
-            <Button type="primary" size="large" style={{ borderRadius: 999, background: '#1890ff', padding: '0 22px', height: 44 }} onClick={(e) => { e.stopPropagation(); setIsModalOpen(true); }}>Post</Button>
+          <div
+            style={{
+              marginBottom: 20,
+              background: "#0f0f10",
+              border: "1px solid #1f1f1f",
+              borderRadius: 8,
+              padding: "20px 24px",
+              display: "flex",
+              alignItems: "center",
+              gap: 16,
+            }}
+            onClick={() => setIsModalOpen(true)}
+          >
+            <Avatar size={40} style={{ backgroundColor: "#722ed1" }}>
+              {(profile?.displayName || "U")[0]}
+            </Avatar>
+            <Input.TextArea
+              placeholder="Có gì mới ?"
+              autoSize={{ minRows: 2, maxRows: 8 }}
+              style={{
+                flex: 1,
+                background: "#fff",
+                border: "none",
+                borderRadius: 10,
+                minHeight: 56,
+                fontSize: 16,
+              }}
+              readOnly
+            />
+            <Button
+              type="primary"
+              size="large"
+              style={{
+                borderRadius: 999,
+                background: "#1890ff",
+                padding: "0 22px",
+                height: 44,
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsModalOpen(true);
+              }}
+            >
+              Post
+            </Button>
           </div>
 
           <Modal
             open={isModalOpen}
-            title={<span style={{ color: '#fff', fontWeight: 600 }}>Tạo bài đăng</span>}
-            onCancel={() => { if (!posting) { setIsModalOpen(false); } }}
-            footer={<div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
-              <Button shape="round" onClick={() => { if (!posting) setIsModalOpen(false); }} style={{ height: 44, borderRadius: 22, padding: 0, width: 108, background: '#1f1f1f', color: '#e5e7eb', borderColor: '#303030' }}>Hủy</Button>
-              <Button shape="round" type="primary" loading={posting} onClick={handleCreatePost} style={{ height: 44, borderRadius: 22, padding: 0, width: 108, background: '#7c3aed', borderColor: '#7c3aed' }}>Đăng</Button>
-            </div>}
-            styles={{ content: { background: '#0f0f10' }, header: { background: '#0f0f10', borderBottom: '1px solid #1f1f1f' } }}
+            title={
+              <span style={{ color: "#fff", fontWeight: 600 }}>
+                Tạo bài đăng
+              </span>
+            }
+            onCancel={() => {
+              if (!posting) {
+                setIsModalOpen(false);
+              }
+            }}
+            footer={
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <Button
+                  shape="round"
+                  onClick={() => {
+                    if (!posting) setIsModalOpen(false);
+                  }}
+                  style={{
+                    height: 44,
+                    borderRadius: 22,
+                    padding: 0,
+                    width: 108,
+                    background: "#1f1f1f",
+                    color: "#e5e7eb",
+                    borderColor: "#303030",
+                  }}
+                >
+                  Hủy
+                </Button>
+                <Button
+                  shape="round"
+                  type="primary"
+                  loading={posting}
+                  onClick={handleCreatePost}
+                  style={{
+                    height: 44,
+                    borderRadius: 22,
+                    padding: 0,
+                    width: 108,
+                    background: "#7c3aed",
+                    borderColor: "#7c3aed",
+                  }}
+                >
+                  Đăng
+                </Button>
+              </div>
+            }
+            styles={{
+              content: { background: "#0f0f10" },
+              header: {
+                background: "#0f0f10",
+                borderBottom: "1px solid #1f1f1f",
+              },
+            }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <Input.TextArea placeholder="Chia sẻ điều gì đó..." autoSize={{ minRows: 3, maxRows: 8 }} value={newText} onChange={(e) => setNewText(e.target.value)} maxLength={maxChars} showCount />
-              <Upload.Dragger multiple fileList={files} accept="audio/*,video/*" beforeUpload={() => false} onChange={({ fileList }) => setFiles(fileList)} listType="text" style={{ padding: 8, borderColor: '#303030', background: '#0f0f10', color: '#e5e7eb', minHeight: 150 }}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <Input.TextArea
+                placeholder="Chia sẻ điều gì đó..."
+                autoSize={{ minRows: 3, maxRows: 8 }}
+                value={newText}
+                onChange={(e) => setNewText(e.target.value)}
+                maxLength={maxChars}
+                showCount
+              />
+              <Upload.Dragger
+                multiple
+                fileList={files}
+                accept="audio/*,video/*"
+                beforeUpload={() => false}
+                onChange={({ fileList }) => setFiles(fileList)}
+                listType="text"
+                style={{
+                  padding: 8,
+                  borderColor: "#303030",
+                  background: "#0f0f10",
+                  color: "#e5e7eb",
+                  minHeight: 150,
+                }}
                 itemRender={(originNode, file, fileList, actions) => (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', color: '#e5e7eb', padding: '6px 8px', borderBottom: '1px dashed #303030' }}>
-                    <span style={{ color: '#e5e7eb', fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 12 }}>{file.name}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Button danger size="small" onClick={actions.remove}>Xóa</Button>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      width: "100%",
+                      color: "#e5e7eb",
+                      padding: "6px 8px",
+                      borderBottom: "1px dashed #303030",
+                    }}
+                  >
+                    <span
+                      style={{
+                        color: "#e5e7eb",
+                        fontSize: 16,
+                        fontWeight: 600,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        marginRight: 12,
+                      }}
+                    >
+                      {file.name}
+                    </span>
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    >
+                      <Button danger size="small" onClick={actions.remove}>
+                        Xóa
+                      </Button>
                     </div>
                   </div>
                 )}
               >
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                  <p style={{ margin: 0, color: '#e5e7eb' }}>Kéo thả hoặc bấm để chọn file (audio/video)</p>
-                  <Text style={{ color: '#bfbfbf' }}>Hỗ trợ tối đa 10 file, 100MB mỗi file</Text>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <p style={{ margin: 0, color: "#e5e7eb" }}>
+                    Kéo thả hoặc bấm để chọn file (audio/video)
+                  </p>
+                  <Text style={{ color: "#bfbfbf" }}>
+                    Hỗ trợ tối đa 10 file, 100MB mỗi file
+                  </Text>
                 </div>
               </Upload.Dragger>
               {extractFirstUrl(newText) && (
-                <div style={{ border: '1px solid #303030', borderRadius: 8, padding: 12, background: '#111', color: '#e5e7eb' }}>
+                <div
+                  style={{
+                    border: "1px solid #303030",
+                    borderRadius: 8,
+                    padding: 12,
+                    background: "#111",
+                    color: "#e5e7eb",
+                  }}
+                >
                   {linkLoading && (
-                    <Text style={{ color: '#bfbfbf' }}>Đang tải preview…</Text>
+                    <Text style={{ color: "#bfbfbf" }}>Đang tải preview…</Text>
                   )}
                   {!linkLoading && (
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <div
+                      style={{ display: "flex", gap: 12, alignItems: "center" }}
+                    >
                       {linkPreview?.thumbnailUrl ? (
-                        <img src={linkPreview.thumbnailUrl} alt="preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6 }} />
+                        <img
+                          src={linkPreview.thumbnailUrl}
+                          alt="preview"
+                          style={{
+                            width: 64,
+                            height: 64,
+                            objectFit: "cover",
+                            borderRadius: 6,
+                          }}
+                        />
                       ) : (
-                        <div style={{ width: 64, height: 64, borderRadius: 6, background: '#1f1f1f' }} />
+                        <div
+                          style={{
+                            width: 64,
+                            height: 64,
+                            borderRadius: 6,
+                            background: "#1f1f1f",
+                          }}
+                        />
                       )}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{linkPreview?.title || extractFirstUrl(newText)}</div>
-                        <div style={{ color: '#9ca3af', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{extractFirstUrl(newText)}</div>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            color: "#fff",
+                            marginBottom: 4,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {linkPreview?.title || extractFirstUrl(newText)}
+                        </div>
+                        <div
+                          style={{
+                            color: "#9ca3af",
+                            fontSize: 12,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {extractFirstUrl(newText)}
+                        </div>
                       </div>
-                      <Button size="small" onClick={() => setLinkPreview(null)}>Ẩn</Button>
+                      <Button size="small" onClick={() => setLinkPreview(null)}>
+                        Ẩn
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -435,199 +858,489 @@ const PersonalFeed = () => {
           </Modal>
 
           {loading && (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+            <div
+              style={{ display: "flex", justifyContent: "center", padding: 24 }}
+            >
               <Spin />
             </div>
           )}
           {!loading && error && (
-            <Card style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
-              <Text style={{ color: '#fff' }}>{error}</Text>
+            <Card
+              style={{
+                marginBottom: 20,
+                background: "#0f0f10",
+                borderColor: "#1f1f1f",
+              }}
+            >
+              <Text style={{ color: "#fff" }}>{error}</Text>
             </Card>
           )}
           {!loading && !error && items.length === 0 && (
-            <Empty description={<span style={{ color: '#9ca3af' }}>Chưa có bài đăng</span>} />)
-          }
+            <Empty
+              description={
+                <span style={{ color: "#9ca3af" }}>Chưa có bài đăng</span>
+              }
+            />
+          )}
 
-          {!loading && !error && items.map((post) => {
-            const firstUrl = extractFirstUrl(post?.textContent || '');
-            const previewUrl = post?.linkPreview?.url || firstUrl;
-            const previewData = post?.linkPreview || (previewUrl ? previewCache[previewUrl] : null);
-            return (
-            <Card key={post._id} style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                <Space align="start" size={14}>
-                  <Avatar size={40} style={{ background: '#2db7f5' }}>
-                    {(post?.userId?.displayName || post?.userId?.username || 'U')[0]}
-                  </Avatar>
-                  <div>
-                    <Space style={{ marginBottom: 4 }}>
-                      <Text strong style={{ color: '#fff', fontSize: 16 }}>
-                        {post?.userId?.displayName || post?.userId?.username || 'Người dùng'}
-                      </Text>
-                      <Text type="secondary" style={{ color: '#9ca3af', fontSize: 13 }}>
-                        {formatTime(post?.createdAt)}
-                      </Text>
+          {!loading &&
+            !error &&
+            items.map((post) => {
+              const firstUrl = extractFirstUrl(post?.textContent || "");
+              const previewUrl = post?.linkPreview?.url || firstUrl;
+              const previewData =
+                post?.linkPreview ||
+                (previewUrl ? previewCache[previewUrl] : null);
+              return (
+                <Card
+                  key={post._id}
+                  style={{
+                    marginBottom: 20,
+                    background: "#0f0f10",
+                    borderColor: "#1f1f1f",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      marginBottom: 12,
+                    }}
+                  >
+                    <Space align="start" size={14}>
+                      <Avatar size={40} style={{ background: "#2db7f5" }}>
+                        {
+                          (post?.userId?.displayName ||
+                            post?.userId?.username ||
+                            "U")[0]
+                        }
+                      </Avatar>
+                      <div>
+                        <Space style={{ marginBottom: 4 }}>
+                          <Text strong style={{ color: "#fff", fontSize: 16 }}>
+                            {post?.userId?.displayName ||
+                              post?.userId?.username ||
+                              "Người dùng"}
+                          </Text>
+                          <Text
+                            type="secondary"
+                            style={{ color: "#9ca3af", fontSize: 13 }}
+                          >
+                            {formatTime(post?.createdAt)}
+                          </Text>
+                        </Space>
+                      </div>
                     </Space>
                   </div>
-                </Space>
-              </div>
-              {post?.textContent && (
-                <div style={{ marginBottom: 10, color: '#fff', fontSize: 15, lineHeight: 1.6 }}>
-                  {post.textContent}
-                </div>
-              )}
-              {post?.media?.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <WavePlaceholder />
-                </div>
-              )}
-              {previewUrl && (
-                <a href={previewUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-                  <div style={{ border: '1px solid #303030', borderRadius: 8, padding: 12, background: '#111', color: '#e5e7eb', marginTop: 8 }}>
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                      {(() => {
-                        const imgSrc = (previewData && previewData.thumbnailUrl) || deriveThumbnail(previewUrl);
-                        return imgSrc ? (
-                          <img src={imgSrc} alt="preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6 }} />
-                        ) : null;
-                      })() || (
-                        <div style={{ width: 64, height: 64, borderRadius: 6, background: '#1f1f1f' }} />
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {previewData?.title || previewUrl}
-                        </div>
-                        <div style={{ color: '#9ca3af', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{previewUrl}</div>
-                      </div>
+                  {post?.textContent && (
+                    <div
+                      style={{
+                        marginBottom: 10,
+                        color: "#fff",
+                        fontSize: 15,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      {post.textContent}
                     </div>
-                  </div>
-                </a>
-              )}
-              <Space style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between' }}>
-                <Button 
-                  icon={<LikeOutlined />} 
-                  style={{ background: 'transparent', border: 'none', color: postIdToLiked[post._id] ? '#1890ff' : '#fff' }}
-                  loading={likingPostId === post._id}
-                  onClick={() => handleLike(post._id)}
-                >
-                  Thích {Number(postIdToStats[post._id]?.likesCount ?? 0) > 0 ? `(${postIdToStats[post._id].likesCount})` : ''}
-                </Button>
-                <Button 
-                  icon={<MessageOutlined />} 
-                  style={{ background: 'transparent', border: 'none', color: '#fff' }}
-                  onClick={() => openComment(post._id)}
-                >
-                  Bình luận {Number(postIdToStats[post._id]?.commentsCount ?? 0) > 0 ? `(${postIdToStats[post._id].commentsCount})` : ''}
-                </Button>
-              </Space>
-
-              {postIdToComments[post._id] && postIdToComments[post._id].length > 0 && (
-                <div style={{ marginTop: 12, background: '#0f0f10', borderTop: '1px solid #1f1f1f', paddingTop: 8 }}>
-                  {(postIdToComments[post._id] || []).map((c) => {
-                    return (
-                      <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                        <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
-                        <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>
-                          <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || 'Người dùng'}</div>
-                          <div>{c.comment}</div>
+                  )}
+                  {post?.media?.length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <WavePlaceholder />
+                    </div>
+                  )}
+                  {previewUrl && (
+                    <a
+                      href={previewUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ textDecoration: "none" }}
+                    >
+                      <div
+                        style={{
+                          border: "1px solid #303030",
+                          borderRadius: 8,
+                          padding: 12,
+                          background: "#111",
+                          color: "#e5e7eb",
+                          marginTop: 8,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 12,
+                            alignItems: "center",
+                          }}
+                        >
+                          {(() => {
+                            const imgSrc =
+                              (previewData && previewData.thumbnailUrl) ||
+                              deriveThumbnail(previewUrl);
+                            return imgSrc ? (
+                              <img
+                                src={imgSrc}
+                                alt="preview"
+                                style={{
+                                  width: 64,
+                                  height: 64,
+                                  objectFit: "cover",
+                                  borderRadius: 6,
+                                }}
+                              />
+                            ) : null;
+                          })() || (
+                            <div
+                              style={{
+                                width: 64,
+                                height: 64,
+                                borderRadius: 6,
+                                background: "#1f1f1f",
+                              }}
+                            />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontWeight: 600,
+                                color: "#fff",
+                                marginBottom: 4,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {previewData?.title || previewUrl}
+                            </div>
+                            <div
+                              style={{
+                                color: "#9ca3af",
+                                fontSize: 12,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {previewUrl}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    </a>
+                  )}
+                  <Space
+                    style={{
+                      marginTop: 14,
+                      display: "flex",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <Button
+                      icon={<LikeOutlined />}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: postIdToLiked[post._id] ? "#1890ff" : "#fff",
+                      }}
+                      loading={likingPostId === post._id}
+                      onClick={() => handleLike(post._id)}
+                    >
+                      Thích{" "}
+                      {Number(postIdToStats[post._id]?.likesCount ?? 0) > 0
+                        ? `(${postIdToStats[post._id].likesCount})`
+                        : ""}
+                    </Button>
+                    <Button
+                      icon={<MessageOutlined />}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#fff",
+                      }}
+                      onClick={() => openComment(post._id)}
+                    >
+                      Bình luận{" "}
+                      {Number(postIdToStats[post._id]?.commentsCount ?? 0) > 0
+                        ? `(${postIdToStats[post._id].commentsCount})`
+                        : ""}
+                    </Button>
+                  </Space>
 
-              
-            </Card>
-          );})}
+                  {postIdToComments[post._id] &&
+                    postIdToComments[post._id].length > 0 && (
+                      <div
+                        style={{
+                          marginTop: 12,
+                          background: "#0f0f10",
+                          borderTop: "1px solid #1f1f1f",
+                          paddingTop: 8,
+                        }}
+                      >
+                        {(postIdToComments[post._id] || []).map((c) => {
+                          return (
+                            <div
+                              key={c._id}
+                              style={{
+                                display: "flex",
+                                gap: 8,
+                                marginBottom: 8,
+                              }}
+                            >
+                              <Avatar size={28} style={{ background: "#555" }}>
+                                {c?.userId?.displayName?.[0] ||
+                                  c?.userId?.username?.[0] ||
+                                  "U"}
+                              </Avatar>
+                              <div
+                                style={{
+                                  background: "#151515",
+                                  border: "1px solid #232323",
+                                  borderRadius: 10,
+                                  padding: "6px 10px",
+                                  color: "#e5e7eb",
+                                }}
+                              >
+                                <div style={{ fontWeight: 600 }}>
+                                  {c?.userId?.displayName ||
+                                    c?.userId?.username ||
+                                    "Người dùng"}
+                                </div>
+                                <div>{c.comment}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                </Card>
+              );
+            })}
 
           <div ref={loaderRef} style={{ height: 1 }} />
         </div>
 
         <Modal
-          title={<span style={{ color: '#fff', fontWeight: 700 }}>Bình luận bài viết</span>}
+          title={
+            <span style={{ color: "#fff", fontWeight: 700 }}>
+              Bình luận bài viết
+            </span>
+          }
           open={commentOpen}
           onCancel={() => setCommentOpen(false)}
           footer={null}
           width={860}
           styles={{
-            header: { background: '#0f0f10', borderBottom: '1px solid #1f1f1f' },
-            content: { background: '#0f0f10', borderRadius: 12 },
-            body: { background: '#0f0f10' }
+            header: {
+              background: "#0f0f10",
+              borderBottom: "1px solid #1f1f1f",
+            },
+            content: { background: "#0f0f10", borderRadius: 12 },
+            body: { background: "#0f0f10" },
           }}
         >
           {modalPost && (
             <div>
-              <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-                <Avatar size={40} style={{ background: '#2db7f5' }}>
-                  {modalPost?.userId?.displayName?.[0] || modalPost?.userId?.username?.[0] || 'U'}
+              <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+                <Avatar size={40} style={{ background: "#2db7f5" }}>
+                  {modalPost?.userId?.displayName?.[0] ||
+                    modalPost?.userId?.username?.[0] ||
+                    "U"}
                 </Avatar>
                 <div>
-                  <div style={{ color: '#fff', fontWeight: 600 }}>
-                    {modalPost?.userId?.displayName || modalPost?.userId?.username || 'Người dùng'}
+                  <div style={{ color: "#fff", fontWeight: 600 }}>
+                    {modalPost?.userId?.displayName ||
+                      modalPost?.userId?.username ||
+                      "Người dùng"}
                   </div>
-                  <span style={{ color: '#9ca3af', fontSize: 12 }}>{formatTime(modalPost?.createdAt)}</span>
+                  <span style={{ color: "#9ca3af", fontSize: 12 }}>
+                    {formatTime(modalPost?.createdAt)}
+                  </span>
                 </div>
               </div>
               {modalPost?.textContent && (
-                <div style={{ marginBottom: 8, color: '#e5e7eb' }}>{modalPost.textContent}</div>
+                <div style={{ marginBottom: 8, color: "#e5e7eb" }}>
+                  {modalPost.textContent}
+                </div>
               )}
               {modalPost?.media?.length > 0 && (
-                <div style={{ marginBottom: 8 }}><WavePlaceholder /></div>
+                <div style={{ marginBottom: 8 }}>
+                  <WavePlaceholder />
+                </div>
               )}
               {modalPost?.linkPreview && (
-                <a href={modalPost.linkPreview?.url || '#'} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-                  <div style={{ border: '1px solid #303030', borderRadius: 8, padding: 12, background: '#111', color: '#e5e7eb', marginTop: 8 }}>
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                <a
+                  href={modalPost.linkPreview?.url || "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ textDecoration: "none" }}
+                >
+                  <div
+                    style={{
+                      border: "1px solid #303030",
+                      borderRadius: 8,
+                      padding: 12,
+                      background: "#111",
+                      color: "#e5e7eb",
+                      marginTop: 8,
+                    }}
+                  >
+                    <div
+                      style={{ display: "flex", gap: 12, alignItems: "center" }}
+                    >
                       {modalPost.linkPreview?.thumbnailUrl ? (
-                        <img src={modalPost.linkPreview.thumbnailUrl} alt="preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6 }} />
+                        <img
+                          src={modalPost.linkPreview.thumbnailUrl}
+                          alt="preview"
+                          style={{
+                            width: 64,
+                            height: 64,
+                            objectFit: "cover",
+                            borderRadius: 6,
+                          }}
+                        />
                       ) : (
-                        <div style={{ width: 64, height: 64, borderRadius: 6, background: '#1f1f1f' }} />
+                        <div
+                          style={{
+                            width: 64,
+                            height: 64,
+                            borderRadius: 6,
+                            background: "#1f1f1f",
+                          }}
+                        />
                       )}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modalPost.linkPreview?.title || modalPost.linkPreview?.url}</div>
-                        <div style={{ color: '#9ca3af', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modalPost.linkPreview?.url}</div>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            color: "#fff",
+                            marginBottom: 4,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {modalPost.linkPreview?.title ||
+                            modalPost.linkPreview?.url}
+                        </div>
+                        <div
+                          style={{
+                            color: "#9ca3af",
+                            fontSize: 12,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {modalPost.linkPreview?.url}
+                        </div>
                       </div>
                     </div>
                   </div>
                 </a>
               )}
 
-              <div style={{ marginTop: 8, color: '#9ca3af' }}>
-                {Number(postIdToStats[commentPostId]?.likesCount ?? 0)} lượt thích · {Number(postIdToStats[commentPostId]?.commentsCount ?? 0)} bình luận
+              <div style={{ marginTop: 8, color: "#9ca3af" }}>
+                {Number(postIdToStats[commentPostId]?.likesCount ?? 0)} lượt
+                thích ·{" "}
+                {Number(postIdToStats[commentPostId]?.commentsCount ?? 0)} bình
+                luận
               </div>
 
-              <div style={{ marginTop: 12, maxHeight: 360, overflowY: 'auto' }}>
+              <div style={{ marginTop: 12, maxHeight: 360, overflowY: "auto" }}>
                 {(postIdToComments[commentPostId] || []).map((c) => (
-                  <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                    <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
-                    <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>
-                      <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || 'Người dùng'}</div>
+                  <div
+                    key={c._id}
+                    style={{ display: "flex", gap: 8, marginBottom: 8 }}
+                  >
+                    <Avatar size={28} style={{ background: "#555" }}>
+                      {c?.userId?.displayName?.[0] ||
+                        c?.userId?.username?.[0] ||
+                        "U"}
+                    </Avatar>
+                    <div
+                      style={{
+                        background: "#151515",
+                        border: "1px solid #232323",
+                        borderRadius: 10,
+                        padding: "6px 10px",
+                        color: "#e5e7eb",
+                      }}
+                    >
+                      <div style={{ fontWeight: 600 }}>
+                        {c?.userId?.displayName ||
+                          c?.userId?.username ||
+                          "Người dùng"}
+                      </div>
                       <div>{c.comment}</div>
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 12 }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                  marginTop: 12,
+                }}
+              >
                 <Input
                   placeholder="Nhập bình luận của bạn..."
                   value={commentText}
                   onChange={(e) => setCommentText(e.target.value)}
-                  style={{ background: '#0f0f10', color: '#e5e7eb', borderColor: '#303030', height: 44, borderRadius: 22, flex: 1 }}
+                  style={{
+                    background: "#0f0f10",
+                    color: "#e5e7eb",
+                    borderColor: "#303030",
+                    height: 44,
+                    borderRadius: 22,
+                    flex: 1,
+                  }}
                 />
-                <Button type="primary" loading={commentSubmitting} onClick={submitComment} style={{ background: '#7c3aed', borderColor: '#7c3aed', borderRadius: 22, padding: '0 20px', height: 44 }}>Gửi</Button>
+                <Button
+                  type="primary"
+                  loading={commentSubmitting}
+                  onClick={submitComment}
+                  style={{
+                    background: "#7c3aed",
+                    borderColor: "#7c3aed",
+                    borderRadius: 22,
+                    padding: "0 20px",
+                    height: 44,
+                  }}
+                >
+                  Gửi
+                </Button>
               </div>
             </div>
           )}
         </Modal>
 
         <div>
-          <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>
-            <div style={{ color: '#fff', fontWeight: 700, marginBottom: 12 }}>Find Me On</div>
+          <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
+            <div style={{ color: "#fff", fontWeight: 700, marginBottom: 12 }}>
+              Find Me On
+            </div>
             <Space>
-              <div style={{ width: 36, height: 36, borderRadius: 999, background: '#111', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6' }}>🌐</div>
-              <a href="#" style={{ color: '#fff' }}>Website</a>
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 999,
+                  background: "#111",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#3b82f6",
+                }}
+              >
+                🌐
+              </div>
+              <a href="#" style={{ color: "#fff" }}>
+                Website
+              </a>
             </Space>
           </Card>
         </div>
@@ -637,5 +1350,3 @@ const PersonalFeed = () => {
 };
 
 export default PersonalFeed;
-
-
