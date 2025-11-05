@@ -19,6 +19,8 @@ import LiveStreamLive from "../pages/user/LiveRoomLive";
 import LickLibraryLayout from "../layouts/LickLibraryLayout";
 import MyLicksPage from "../pages/user/MyLicks";
 import LickCommunityPage from "../pages/user/LickCommunity";
+import LickUploadPage from "../pages/user/LickUpload";
+import LickDetailPage from "../pages/user/LickDetail";
 
 const AppRoutes = () => {
   const dispatch = useDispatch();
@@ -90,6 +92,9 @@ const AppRoutes = () => {
           <Route path="newfeedspersonal" element={<PersonalFeed />} />
           <Route path="users/:userId/newfeeds" element={<UserFeed />} />
           <Route path="profile" element={<ProfilePage />} />
+          {/* Lick detail & upload */}
+          <Route path="licks/upload" element={<LickUploadPage />} />
+          <Route path="licks/:lickId" element={<LickDetailPage />} />
           {/* Lick Library */}
           <Route
             path="library"

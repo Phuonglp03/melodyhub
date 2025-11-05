@@ -1,37 +1,43 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   FaHeart,
+  FaComment,
   FaPlay,
   FaPause,
-  FaComment,
-  FaDownload,
+  FaEdit,
+  FaTrash,
 } from "react-icons/fa";
 import { playLickAudio, getLickById } from "../services/user/lickService";
-import { toggleLickLike } from "../services/user/lickService";
-import { getStoredUserId } from "../services/user/post";
-import { useDispatch, useSelector } from "react-redux";
-import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
 
-const LickCard = ({ lick, onClick }) => {
+const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
   const {
     lick_id,
     title,
-    creator,
     created_at,
     likes_count,
+    comments_count,
     tags,
     waveformData,
     duration,
     difficulty,
+    status,
+    is_public,
+    creator,
   } = lick;
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [progress, setProgress] = useState(0); // Track playback progress (0-1)
+  const audioRef = useRef(null);
 
   // Normalize id across different payloads
   const effectiveId = lick_id || lick._id || lick.id;
 
+  // Use waveformData from API (snake_case as returned by backend)
   const initialWaveform = waveformData || lick.waveformData || [];
   const [waveform, setWaveform] = useState(initialWaveform);
 
-  // Lazy hydrate waveform from details if missing in list payload
+  // Lazy hydrate waveform from details if missing in list payload (same as LickCard)
   useEffect(() => {
     let aborted = false;
     const computeWaveFromAudio = async (audioUrl) => {
@@ -57,7 +63,6 @@ const LickCard = ({ lick, onClick }) => {
           const start = i * blockSize;
           const end = Math.min(start + blockSize, channel.length);
           for (let j = start; j < end; j++) sum += Math.abs(channel[j]);
-          // Average absolute amplitude -> boost a bit for visibility
           const avg = sum / (end - start || 1);
           return Math.min(1, avg * 4);
         });
@@ -97,21 +102,6 @@ const LickCard = ({ lick, onClick }) => {
     };
   }, [effectiveId]);
 
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [progress, setProgress] = useState(0); // Track playback progress (0-1)
-  const audioRef = useRef(null);
-  const dispatch = useDispatch();
-  const likeState = useSelector((s) => s.likes.byId[lick_id]);
-  const isLiked = likeState?.liked || false;
-  const localLikesCount = likeState?.count ?? likes_count;
-
-  useEffect(() => {
-    if (!likeState) {
-      dispatch(setLikeState({ id: lick_id, liked: false, count: likes_count }));
-    }
-  }, [dispatch, likeState, lick_id, likes_count]);
-
   // Format date
   const formatDate = (dateString) => {
     const date = new Date(dateString);
@@ -122,11 +112,25 @@ const LickCard = ({ lick, onClick }) => {
     });
   };
 
-  // Handle play/pause for waveform
+  // Status badge color
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "active":
+        return "bg-green-900 text-green-300";
+      case "draft":
+        return "bg-yellow-900 text-yellow-300";
+      case "inactive":
+        return "bg-gray-800 text-gray-400";
+      default:
+        return "bg-gray-800 text-gray-400";
+    }
+  };
+
+  // Handle play/pause
   const handlePlayPause = async (e) => {
     e.stopPropagation();
 
-    // If already playing, pause (keep progress)
+    // If already playing, pause
     if (isPlaying && audioRef.current) {
       audioRef.current.pause();
       setIsPlaying(false);
@@ -137,7 +141,7 @@ const LickCard = ({ lick, onClick }) => {
       setIsLoading(true);
 
       // Get audio URL from API
-      const response = await playLickAudio(effectiveId);
+      const response = await playLickAudio(lick_id);
       console.log("Audio URL response:", response);
 
       if (response.success && response.data.audio_url) {
@@ -190,39 +194,33 @@ const LickCard = ({ lick, onClick }) => {
     }
   };
 
-  const handleLike = async (e) => {
-    e.stopPropagation();
-    const userId = getStoredUserId();
-    if (!userId) {
-      alert("You need to be logged in to like licks.");
-      return;
-    }
-    try {
-      // Optimistic update through Redux
-      dispatch(toggleLikeLocal({ id: lick_id }));
-      const response = await toggleLickLike(lick_id, userId);
-      if (response.success && typeof response.data?.liked === "boolean") {
-        // Ensure state matches server; if mismatch, toggle again to align
-        if (response.data.liked !== isLiked) {
-          dispatch(toggleLikeLocal({ id: lick_id }));
-        }
-      }
-    } catch (err) {
-      // Rollback optimistic update
-      dispatch(toggleLikeLocal({ id: lick_id }));
-      alert("Failed to update like. Try again.");
-    }
-  };
-
-  const commentsCount =
-    typeof lick.comments_count === "number"
-      ? lick.comments_count
-      : typeof lick.commentsCount === "number"
-      ? lick.commentsCount
-      : 0;
-
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 hover:shadow-lg transition-all">
+    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 hover:shadow-lg transition-all relative group">
+      {/* Action Buttons (Show on Hover) */}
+      <div className="absolute top-2 right-2 z-10 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(lick_id);
+          }}
+          className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-md transition-colors"
+          title="Edit"
+        >
+          <FaEdit size={12} />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(lick_id);
+          }}
+          className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-md transition-colors"
+          title="Delete"
+        >
+          <FaTrash size={12} />
+        </button>
+      </div>
+
+      {/* Waveform at top - matching LickCard */}
       <div className="relative h-32 bg-gray-800" onClick={handlePlayPause}>
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           {waveform && waveform.length > 0 ? (
@@ -263,16 +261,17 @@ const LickCard = ({ lick, onClick }) => {
         </button>
       </div>
 
+      {/* Content section - matching LickCard */}
       <div className="p-4">
         <h3
-          onClick={() => onClick(effectiveId)}
+          onClick={() => onClick(lick_id)}
           className="text-base font-semibold text-white mb-1 hover:text-cyan-300 cursor-pointer"
         >
           {title}
         </h3>
         <div className="flex items-center text-xs text-gray-400 mb-3">
           <span className="truncate">
-            By {creator?.display_name || "Unknown"}
+            {creator?.display_name ? `By ${creator.display_name}` : "By You"}
           </span>
           <span className="mx-2">•</span>
           <span>{formatDate(created_at)}</span>
@@ -295,6 +294,20 @@ const LickCard = ({ lick, onClick }) => {
               {difficulty}
             </span>
           ) : null}
+          {status && (
+            <span
+              className={`ml-2 px-2 py-0.5 rounded-full text-xs ${getStatusColor(
+                status
+              )}`}
+            >
+              {status}
+            </span>
+          )}
+          {!is_public && (
+            <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-gray-800 text-gray-400">
+              Private
+            </span>
+          )}
         </div>
 
         {tags && tags.length > 0 && (
@@ -313,31 +326,20 @@ const LickCard = ({ lick, onClick }) => {
 
         <div className="flex items-center justify-between text-sm text-gray-300">
           <div className="flex items-center gap-4">
-            <button
-              onClick={handleLike}
-              className={`flex items-center gap-1 ${
-                isLiked ? "text-rose-400" : "text-gray-300 hover:text-rose-300"
-              }`}
-            >
+            <span className="flex items-center gap-1 text-gray-400">
               <FaHeart />
-              <span>{localLikesCount}</span>
-            </button>
+              <span>{likes_count || 0}</span>
+            </span>
             <span className="flex items-center gap-1 text-gray-400">
               <FaComment />
-              <span>{commentsCount}</span>
+              <span>{comments_count || 0}</span>
             </span>
           </div>
-          <a
-            href="#"
-            onClick={(e) => e.preventDefault()}
-            className="text-gray-400 hover:text-white"
-          >
-            <FaDownload />
-          </a>
         </div>
       </div>
     </div>
   );
 };
 
-export default LickCard;
+export default MyLickCard;
+

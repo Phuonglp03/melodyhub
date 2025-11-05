@@ -2,6 +2,11 @@ import { mockLicks, mockComments, mockUser } from "./mockData";
 import { API_CONFIG } from "../../config/api";
 
 const API_BASE_URL = API_CONFIG.API_BASE_URL;
+// Normalize to always include '/api'
+const API_BASE = (() => {
+  const t = (API_BASE_URL || "").replace(/\/$/, "");
+  return t.endsWith("/api") ? t : `${t}/api`;
+})();
 const USE_MOCK_DATA = API_CONFIG.USE_MOCK_DATA;
 
 // Get community licks with search, filter, sort, and pagination
@@ -93,7 +98,7 @@ export const getCommunityLicks = async (params = {}) => {
     });
 
     const response = await fetch(
-      `${API_BASE_URL}/licks/community?${queryParams}`,
+      `${API_BASE}/licks/community?${queryParams}`,
       {
         method: "GET",
         headers: {
@@ -132,7 +137,7 @@ export const getLickById = async (lickId) => {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/licks/${lickId}`, {
+    const response = await fetch(`${API_BASE}/licks/${lickId}`, {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
@@ -166,7 +171,7 @@ export const toggleLickLike = async (lickId, userId) => {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/licks/${lickId}/like`, {
+    const response = await fetch(`${API_BASE}/licks/${lickId}/like`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -217,7 +222,7 @@ export const getLickComments = async (lickId, page = 1, limit = 10) => {
     });
 
     const response = await fetch(
-      `${API_BASE_URL}/licks/${lickId}/comments?${queryParams}`,
+      `${API_BASE}/licks/${lickId}/comments?${queryParams}`,
       {
         method: "GET",
         headers: {
@@ -271,7 +276,7 @@ export const addLickComment = async (lickId, commentData) => {
   try {
     const { userId, comment, parentCommentId, timestamp } = commentData;
 
-    const response = await fetch(`${API_BASE_URL}/licks/${lickId}/comments`, {
+    const response = await fetch(`${API_BASE}/licks/${lickId}/comments`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -325,7 +330,7 @@ export const playLickAudio = async (lickId, userId = null) => {
       : "";
 
     const response = await fetch(
-      `${API_BASE_URL}/licks/${lickId}/play${
+      `${API_BASE}/licks/${lickId}/play${
         queryParams ? `?${queryParams}` : ""
       }`,
       {
@@ -351,7 +356,7 @@ export const playLickAudio = async (lickId, userId = null) => {
 // Create a new lick with audio file
 export const createLick = async (formData) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/licks`, {
+    const response = await fetch(`${API_BASE}/licks`, {
       method: "POST",
       body: formData, // Send FormData directly (no Content-Type header needed)
     });
@@ -383,7 +388,7 @@ export const updateLick = async (lickId, lickData) => {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/licks/${lickId}`, {
+    const response = await fetch(`${API_BASE}/licks/${lickId}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
@@ -417,7 +422,7 @@ export const deleteLick = async (lickId) => {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/licks/${lickId}`, {
+    const response = await fetch(`${API_BASE}/licks/${lickId}`, {
       method: "DELETE",
     });
 

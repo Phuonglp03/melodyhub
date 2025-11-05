@@ -16,7 +16,7 @@ import {
   ShareAltOutlined,
 } from "@ant-design/icons";
 import { useDispatch, useSelector } from "react-redux";
-import { setLikeState, toggleLikeLocal } from "../store/likesSlice";
+import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
 import { toggleLickLike } from "../services/user/lickService";
 import { getStoredUserId } from "../services/user/post";
 import LickPlayer from "./LickPlayer";
