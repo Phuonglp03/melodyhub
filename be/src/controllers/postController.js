@@ -1,5 +1,7 @@
 import Post from '../models/Post.js';
 import User from '../models/User.js';
+import PostLike from '../models/PostLike.js';
+import PostComment from '../models/PostComment.js';
 import { uploadToCloudinary } from '../middleware/file.js';
 
 // Helper function to detect media type from mimetype
@@ -444,5 +446,72 @@ export const deletePost = async (req, res) => {
       message: 'Internal server error',
       error: error.message
     });
+  }
+};
+
+// Like a post (idempotent)
+export const likePost = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { postId } = req.params;
+
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
+
+    try {
+      const like = await PostLike.create({ postId, userId });
+      return res.status(201).json({ success: true, liked: true, data: { id: like._id } });
+    } catch (err) {
+      if (err && err.code === 11000) {
+        return res.status(200).json({ success: true, liked: true, message: 'Already liked' });
+      }
+      throw err;
+    }
+  } catch (error) {
+    console.error('likePost error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to like post' });
+  }
+};
+
+// Unlike a post (idempotent)
+export const unlikePost = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { postId } = req.params;
+
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
+
+    const deleted = await PostLike.findOneAndDelete({ postId, userId });
+    if (!deleted) {
+      return res.status(200).json({ success: true, liked: false, message: 'Not liked yet' });
+    }
+    return res.status(200).json({ success: true, liked: false });
+  } catch (error) {
+    console.error('unlikePost error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to unlike post' });
+  }
+};
+
+// Get post stats: likes count and top-level comments count
+export const getPostStats = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const post = await Post.findById(postId).lean();
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
+    const [likesCount, commentsCount] = await Promise.all([
+      PostLike.countDocuments({ postId }),
+      PostComment.countDocuments({ postId, parentCommentId: { $exists: false } })
+    ]);
+    return res.status(200).json({ success: true, data: { likesCount, commentsCount } });
+  } catch (error) {
+    console.error('getPostStats error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get post stats' });
   }
 };
