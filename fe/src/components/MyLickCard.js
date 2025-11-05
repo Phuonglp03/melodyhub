@@ -7,7 +7,10 @@ import {
   FaEdit,
   FaTrash,
 } from "react-icons/fa";
-import { playLickAudio, getLickById } from "../services/user/lickService";
+import { playLickAudio, getLickById, toggleLickLike } from "../services/user/lickService";
+import { useDispatch, useSelector } from "react-redux";
+import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
+import { getStoredUserId } from "../services/user/post";
 
 const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
   const {
@@ -29,6 +32,10 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0); // Track playback progress (0-1)
   const audioRef = useRef(null);
+  const dispatch = useDispatch();
+  const likeState = useSelector((s) => s.likes.byId[lick_id]);
+  const isLiked = likeState?.liked || false;
+  const localLikesCount = likeState?.count ?? likes_count;
 
   // Normalize id across different payloads
   const effectiveId = lick_id || lick._id || lick.id;
@@ -112,6 +119,13 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
     });
   };
 
+  // Initialize like state for this lick in redux once
+  useEffect(() => {
+    if (!likeState) {
+      dispatch(setLikeState({ id: lick_id, liked: false, count: likes_count || 0 }));
+    }
+  }, [dispatch, likeState, lick_id, likes_count]);
+
   // Status badge color
   const getStatusColor = (status) => {
     switch (status) {
@@ -191,6 +205,31 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
       alert(`Error: ${error.message}`);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleLike = async (e) => {
+    e.stopPropagation();
+    const userId = getStoredUserId();
+    if (!userId) {
+      alert("You need to be logged in to like licks.");
+      return;
+    }
+    try {
+      // optimistic
+      dispatch(toggleLikeLocal({ id: lick_id }));
+      const res = await toggleLickLike(lick_id, userId);
+      if (res?.success && typeof res.data?.liked === "boolean") {
+        if (res.data.liked !== isLiked) {
+          // state already toggled; if server response differs from previous state, keep; otherwise re-toggle
+        } else {
+          // server says same as previous -> revert
+          dispatch(toggleLikeLocal({ id: lick_id }));
+        }
+      }
+    } catch (err) {
+      // rollback
+      dispatch(toggleLikeLocal({ id: lick_id }));
     }
   };
 
@@ -326,14 +365,39 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
 
         <div className="flex items-center justify-between text-sm text-gray-300">
           <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1 text-gray-400">
+            <button
+              onClick={handleLike}
+              className={`flex items-center gap-1 ${
+                isLiked ? "text-rose-400" : "text-gray-400 hover:text-rose-300"
+              }`}
+            >
               <FaHeart />
-              <span>{likes_count || 0}</span>
-            </span>
+              <span>{localLikesCount || 0}</span>
+            </button>
             <span className="flex items-center gap-1 text-gray-400">
               <FaComment />
               <span>{comments_count || 0}</span>
             </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(lick_id);
+              }}
+              className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs"
+            >
+              Update
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(lick_id);
+              }}
+              className="px-3 py-1 rounded-md bg-red-600 hover:bg-red-700 text-white text-xs"
+            >
+              Delete
+            </button>
           </div>
         </div>
       </div>

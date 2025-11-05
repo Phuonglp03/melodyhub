@@ -29,6 +29,204 @@ const LickUpload = ({ onUploadSuccess, onUploadError }) => {
   const [uploadError, setUploadError] = useState(null);
   const [showDebugger, setShowDebugger] = useState(false);
 
+  // ---------------- Tag Taxonomy ----------------
+  const TAGS = {
+    Type: [
+      "Acoustic",
+      "Chord",
+      "Down Sweep/Fall",
+      "Dry",
+      "Harmony",
+      "Loop",
+      "Melody",
+      "Mixed",
+      "Monophonic",
+      "One Shot",
+      "Polyphonic",
+      "Processed",
+      "Progression",
+      "Riser/Sweep",
+      "Short",
+      "Wet",
+    ],
+    Timbre: [
+      "Bassy",
+      "Boomy",
+      "Breathy",
+      "Bright",
+      "Buzzy",
+      "Clean",
+      "Coarse/Harsh",
+      "Cold",
+      "Dark",
+      "Delicate",
+      "Detuned",
+      "Dissonant",
+      "Distorted",
+      "Exotic",
+      "Fat",
+      "Full",
+      "Glitchy",
+      "Granular",
+      "Gloomy",
+      "Hard",
+      "High",
+      "Hollow",
+      "Low",
+      "Metallic",
+      "Muffled",
+      "Muted",
+      "Narrow",
+      "Noisy",
+      "Round",
+      "Sharp",
+      "Shimmering",
+      "Sizzling",
+      "Smooth",
+      "Soft",
+      "Piercing",
+      "Thin",
+      "Tinny",
+      "Warm",
+      "Wide",
+      "Wooden",
+    ],
+    Genre: [
+      "Afrobeat",
+      "Amapiano",
+      "Ambient",
+      "Breaks",
+      "Brazilian Funk",
+      "Chillout",
+      "Chiptune",
+      "Cinematic",
+      "Classical",
+      "Acid House",
+      "Deep House",
+      "Disco",
+      "Drill",
+      "Drum & Bass",
+      "Dubstep",
+      "Ethnic/World",
+      "Electro House",
+      "Electro",
+      "Electro Swing",
+      "Folk/Country",
+      "Funk/Soul",
+      "Jazz",
+      "Jersey Club",
+      "Jungle",
+      "Hardstyle",
+      "House",
+      "Hip Hop",
+      "Latin/Afro Cuban",
+      "Minimal House",
+      "Nu Disco",
+      "R&B",
+      "Reggae/Dub",
+      "Reggaeton",
+      "Rock",
+      "Phonk",
+      "Pop",
+      "Progressive House",
+      "Synthwave",
+      "Tech House",
+      "Techno",
+      "Trance",
+      "Trap",
+      "Vocals",
+    ],
+    Articulation: [
+      "Arpeggiated",
+      "Decaying",
+      "Echoing",
+      "Long Release",
+      "Legato",
+      "Glissando/Glide",
+      "Pad",
+      "Percussive",
+      "Pitch Bend",
+      "Plucked",
+      "Pulsating",
+      "Punchy",
+      "Randomized",
+      "Slow Attack",
+      "Sweep/Filter Mod",
+      "Staccato/Stabs",
+      "Stuttered/Gated",
+      "Straight",
+      "Sustained",
+      "Syncopated",
+      "Uptempo",
+      "Wobble",
+      "Vibrato",
+    ],
+    Character: [
+      "Analog",
+      "Compressed",
+      "Digital",
+      "Dynamic",
+      "Loud",
+      "Range",
+      "Female",
+      "Funky",
+      "Jazzy",
+      "Lo Fi",
+      "Male",
+      "Quiet",
+      "Vintage",
+      "Vinyl",
+      "Warm",
+    ],
+    Emotional: [
+      "Aggressive",
+      "Angry",
+      "Bouncy",
+      "Calming",
+      "Carefree",
+      "Cheerful",
+      "Climactic",
+      "Cool",
+      "Dramatic",
+      "Elegant",
+      "Epic",
+      "Excited",
+      "Energetic",
+      "Fun",
+      "Futuristic",
+      "Gentle",
+      "Groovy",
+      "Happy",
+      "Haunting",
+      "Hypnotic",
+      "Industrial",
+      "Manic",
+      "Melancholic",
+      "Mellow",
+      "Mystical",
+      "Nervous",
+      "Passionate",
+      "Peaceful",
+      "Playful",
+      "Powerful",
+      "Rebellious",
+      "Reflective",
+      "Relaxing",
+      "Romantic",
+      "Rowdy",
+      "Sad",
+      "Sentimental",
+      "Sexy",
+      "Soothing",
+      "Sophisticated",
+      "Spacey",
+      "Suspenseful",
+      "Uplifting",
+      "Urgent",
+      "Weird",
+    ],
+  };
+
   const handleAudioUpload = (fileData) => {
     setAudioFile(fileData);
     setUploadError(null); // Clear any previous errors
@@ -64,7 +262,10 @@ const LickUpload = ({ onUploadSuccess, onUploadError }) => {
         key: values.key,
         tempo: values.tempo,
         difficulty: values.difficulty,
-        tags: values.tags || [],
+        tags: (values.tags || []).map((name, idx) => ({
+          tag_id: `${name}-${idx}-${Date.now()}`,
+          tag_name: name,
+        })),
         is_public: values.is_public !== false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -289,19 +490,28 @@ const LickUpload = ({ onUploadSuccess, onUploadError }) => {
           />
         </Form.Item>
 
-        {/* Tags */}
+        {/* Tags - grouped multi-select */}
         <Form.Item
           name="tags"
-          label={<Text style={{ color: "white" }}>Tags (comma separated)</Text>}
+          label={<Text style={{ color: "white" }}>Tags</Text>}
+          tooltip="Select as many as you like across categories"
         >
-          <Input
-            placeholder="guitar, blues, solo"
-            style={{
-              backgroundColor: "#1a1a1a",
-              border: "1px solid #333",
-              color: "white",
-            }}
-          />
+          <Select
+            mode="multiple"
+            allowClear
+            placeholder="Select tags"
+            style={{ backgroundColor: "#1a1a1a" }}
+          >
+            {Object.entries(TAGS).map(([group, items]) => (
+              <Select.OptGroup key={group} label={group}>
+                {items.map((t) => (
+                  <Option key={t} value={t}>
+                    {t}
+                  </Option>
+                ))}
+              </Select.OptGroup>
+            ))}
+          </Select>
         </Form.Item>
 
         {/* Submit Button */}

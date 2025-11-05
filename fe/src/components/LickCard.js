@@ -327,13 +327,6 @@ const LickCard = ({ lick, onClick }) => {
               <span>{commentsCount}</span>
             </span>
           </div>
-          <a
-            href="#"
-            onClick={(e) => e.preventDefault()}
-            className="text-gray-400 hover:text-white"
-          >
-            <FaDownload />
-          </a>
         </div>
       </div>
     </div>
