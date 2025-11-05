@@ -420,3 +420,154 @@ export const uploadAvatar = async (req, res) => {
     });
   }
 };
+
+// Follow a user
+export const followUser = async (req, res) => {
+  try {
+    const followerId = req.userId; // Current user (follower)
+    const { userId } = req.params; // User to follow (following)
+
+    // Check if trying to follow yourself
+    if (followerId === userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot follow yourself'
+      });
+    }
+
+    // Check if target user exists
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if already following
+    const existingFollow = await UserFollow.findOne({
+      followerId,
+      followingId: userId
+    });
+
+    if (existingFollow) {
+      return res.status(400).json({
+        success: false,
+        message: 'Already following this user'
+      });
+    }
+
+    // Create follow relationship
+    const follow = await UserFollow.create({
+      followerId,
+      followingId: userId
+    });
+
+    // Update follower's followingCount
+    await User.findByIdAndUpdate(followerId, {
+      $inc: { followingCount: 1 }
+    });
+
+    // Update target user's followersCount
+    await User.findByIdAndUpdate(userId, {
+      $inc: { followersCount: 1 }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Successfully followed user',
+      data: {
+        follow: {
+          id: follow._id,
+          followerId: follow.followerId,
+          followingId: follow.followingId,
+          createdAt: follow.createdAt
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error following user:', error);
+    
+    // Handle duplicate key error
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Already following this user'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Unfollow a user
+export const unfollowUser = async (req, res) => {
+  try {
+    const followerId = req.userId; // Current user (follower)
+    const { userId } = req.params; // User to unfollow (following)
+
+    // Check if trying to unfollow yourself
+    if (followerId === userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot unfollow yourself'
+      });
+    }
+
+    // Check if target user exists
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if follow relationship exists
+    const follow = await UserFollow.findOneAndDelete({
+      followerId,
+      followingId: userId
+    });
+
+    if (!follow) {
+      return res.status(400).json({
+        success: false,
+        message: 'Not following this user'
+      });
+    }
+
+    // Update follower's followingCount
+    await User.findByIdAndUpdate(followerId, {
+      $inc: { followingCount: -1 }
+    });
+
+    // Update target user's followersCount
+    await User.findByIdAndUpdate(userId, {
+      $inc: { followersCount: -1 }
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Successfully unfollowed user',
+      data: {
+        unfollowed: {
+          followerId,
+          followingId: userId
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error unfollowing user:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
