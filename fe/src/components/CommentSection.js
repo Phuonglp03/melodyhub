@@ -1,11 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { useSelector } from 'react-redux';
 import { getLickComments, addLickComment } from '../services/user/lickService';
+import { useNavigate } from 'react-router-dom';
 
 const CommentSection = ({ lickId, currentUser }) => {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const authUser = useSelector((s) => s.auth.user);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchComments = async () => {
@@ -29,10 +33,17 @@ const CommentSection = ({ lickId, currentUser }) => {
   const handleCommentSubmit = async (e) => {
     e.preventDefault();
     if (!newComment.trim()) return;
+    const userId = authUser?.user?.id || authUser?.id || currentUser?.id;
+    const hasToken = Boolean(authUser?.token);
+    if (!userId || !hasToken) {
+      // Redirect to login if not authenticated
+      navigate('/login');
+      return;
+    }
 
     try {
       const response = await addLickComment(lickId, {
-        userId: currentUser.id,
+        userId,
         comment: newComment,
       });
 

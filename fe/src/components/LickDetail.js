@@ -18,7 +18,7 @@ import {
 import { useDispatch, useSelector } from "react-redux";
 import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
 import { toggleLickLike } from "../services/user/lickService";
-import { getStoredUserId } from "../services/user/post";
+// Use Redux auth state rather than helper for user id
 import LickPlayer from "./LickPlayer";
 import GuitarTabNotation from "./GuitarTabNotation";
 import CommentSection from "./CommentSection";
@@ -37,6 +37,7 @@ const LickDetail = ({
   // Create audio ref for syncing player with tab notation
   const audioRef = useRef(null);
   const dispatch = useDispatch();
+  const authUser = useSelector((s) => s.auth.user);
   const likeState = useSelector((s) => s.likes.byId[lick.lick_id]);
   const isLiked = likeState?.liked || false;
   const localLikesCount = likeState?.count ?? lick.likes_count;
@@ -65,8 +66,9 @@ const LickDetail = ({
   }, [dispatch, likeState, lick.lick_id, lick.likes_count]);
 
   const handleLike = async () => {
-    const userId = getStoredUserId() || currentUserId;
-    if (!userId || userId === "current-user-id") {
+    const userId = authUser?.user?.id || authUser?.id || currentUserId;
+    const hasToken = Boolean(authUser?.token);
+    if (!userId || !hasToken || userId === "current-user-id") {
       alert("You need to be logged in to like licks.");
       return;
     }
