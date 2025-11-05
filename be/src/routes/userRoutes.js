@@ -5,7 +5,9 @@ import {
   getCurrentUserProfile, 
   getUserProfileById, 
   getUserProfileByUsername, 
-  updateUserProfile
+  updateUserProfile,
+  followUser,
+  unfollowUser
 } from '../controllers/userController.js';
 import middlewareController from '../middleware/auth.js';
 const { verifyToken } = middlewareController;
@@ -161,5 +163,11 @@ const conditionalValidation = (req, res, next) => {
 // PUT /api/users/profile - Update current user's profile (requires authentication)
 // Hỗ trợ cả JSON và multipart/form-data
 router.put('/profile', verifyToken, handleFileUpload, conditionalValidation, updateUserProfile);
+
+// POST /api/users/:userId/follow - Follow a user (requires authentication)
+router.post('/:userId/follow', verifyToken, followUser);
+
+// DELETE /api/users/:userId/follow - Unfollow a user (requires authentication)
+router.delete('/:userId/follow', verifyToken, unfollowUser);
 
 export default router;

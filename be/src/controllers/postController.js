@@ -27,17 +27,37 @@ const parseJsonIfString = (value) => {
 // Create a new post
 export const createPost = async (req, res) => {
   try {
-    const { userId, postType, textContent } = req.body;
+    // Get userId from token (set by verifyToken middleware) - more secure than from body
+    const userId = req.userId;
+    
+    // Debug logging
+    console.log('[createPost] Request body:', JSON.stringify(req.body, null, 2));
+    console.log('[createPost] Request files:', req.files ? req.files.length : 0);
+    console.log('[createPost] Content-Type:', req.headers['content-type']);
+    console.log('[createPost] UserId from token:', userId);
+    
+    const { postType, textContent } = req.body;
     const linkPreviewInput = parseJsonIfString(req.body.linkPreview);
     
     // Parse originalPostId if it's a string
     const originalPostId = req.body.originalPostId;
 
+    // Validate userId from token
+    if (!userId) {
+      console.error('[createPost] Missing userId from token - authentication required');
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required. Please login to create a post.'
+      });
+    }
+    
     // Validate required fields
-    if (!userId || !postType) {
+    if (!postType) {
+      console.error('[createPost] Missing postType in request body');
       return res.status(400).json({
         success: false,
-        message: 'userId and postType are required'
+        message: 'postType is required',
+        received: { postType: req.body.postType }
       });
     }
 
