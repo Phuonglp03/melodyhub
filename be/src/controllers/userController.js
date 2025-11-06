@@ -542,14 +542,13 @@ export const unfollowUser = async (req, res) => {
     }
 
     // Update follower's followingCount
-    await User.findByIdAndUpdate(followerId, {
-      $inc: { followingCount: -1 }
-    });
+    await User.findByIdAndUpdate(followerId, { $inc: { followingCount: -1 } });
+    // Prevent negative values in case counts were out-of-sync
+    await User.updateOne({ _id: followerId, followingCount: { $lt: 0 } }, { $set: { followingCount: 0 } });
 
     // Update target user's followersCount
-    await User.findByIdAndUpdate(userId, {
-      $inc: { followersCount: -1 }
-    });
+    await User.findByIdAndUpdate(userId, { $inc: { followersCount: -1 } });
+    await User.updateOne({ _id: userId, followersCount: { $lt: 0 } }, { $set: { followersCount: 0 } });
 
     res.status(200).json({
       success: true,
@@ -569,5 +568,40 @@ export const unfollowUser = async (req, res) => {
       message: 'Internal server error',
       error: error.message
     });
+  }
+};
+
+// Get follow suggestions for current user
+export const getFollowSuggestions = async (req, res) => {
+  try {
+    const currentUserId = req.userId; // requires auth
+    const limit = Math.min(parseInt(req.query.limit, 10) || 5, 50);
+
+    // Users the current user already follows
+    const following = await UserFollow.find({ followerId: currentUserId }).select('followingId');
+    const followingIds = following.map((f) => f.followingId);
+
+    // Exclude current user and already-following users
+    const users = await User.find({
+      _id: { $nin: [currentUserId, ...followingIds] },
+      isActive: { $ne: false },
+    })
+      .sort({ followersCount: -1, createdAt: -1 })
+      .limit(limit)
+      .select('username displayName avatarUrl followersCount');
+
+    res.status(200).json({
+      success: true,
+      data: users.map((u) => ({
+        id: u._id,
+        username: u.username,
+        displayName: u.displayName,
+        avatarUrl: u.avatarUrl,
+        followersCount: u.followersCount,
+      }))
+    });
+  } catch (error) {
+    console.error('Error getting follow suggestions:', error);
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
   }
 };

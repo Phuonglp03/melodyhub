@@ -73,6 +73,23 @@ export const uploadMyAvatar = async (file) => {
   return data;
 };
 
-export default { getMyProfile, updateMyProfile, uploadMyAvatar };
+export const followUser = async (userId) => {
+  if (!userId) throw new Error('userId is required');
+  const { data } = await http.post(`/users/${userId}/follow`);
+  return data;
+};
+
+export const unfollowUser = async (userId) => {
+  if (!userId) throw new Error('userId is required');
+  const { data } = await http.delete(`/users/${userId}/follow`);
+  return data;
+};
+
+export const getFollowSuggestions = async (limit = 5) => {
+  const { data } = await http.get(`/users/suggestions/list`, { params: { limit } });
+  return data;
+};
+
+export default { getMyProfile, updateMyProfile, uploadMyAvatar, followUser, unfollowUser, getFollowSuggestions };
 
 

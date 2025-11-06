@@ -7,10 +7,11 @@ import {
   getUserProfileByUsername, 
   updateUserProfile,
   followUser,
-  unfollowUser
+  unfollowUser,
+  getFollowSuggestions
 } from '../controllers/userController.js';
 import middlewareController from '../middleware/auth.js';
-const { verifyToken } = middlewareController;
+const { verifyToken, optionalVerifyToken } = middlewareController;
 
 const router = express.Router();
 
@@ -70,11 +71,11 @@ const validateProfileUpdate = [
 // GET /api/users/profile - Get current user's profile (requires authentication)
 router.get('/profile', verifyToken, getCurrentUserProfile);
 
-// GET /api/users/:userId - Get user profile by user ID (public, respects privacy settings)
-router.get('/:userId', getUserProfileById);
+// GET /api/users/:userId - Get user profile by user ID (public, but parse token if provided)
+router.get('/:userId', optionalVerifyToken, getUserProfileById);
 
-// GET /api/users/username/:username - Get user profile by username (public, respects privacy settings)
-router.get('/username/:username', getUserProfileByUsername);
+// GET /api/users/username/:username - Get user profile by username (public, but parse token if provided)
+router.get('/username/:username', optionalVerifyToken, getUserProfileByUsername);
 
 // Middleware để xử lý upload file nếu là multipart và skip validation
 const handleFileUpload = (req, res, next) => {
@@ -169,5 +170,8 @@ router.post('/:userId/follow', verifyToken, followUser);
 
 // DELETE /api/users/:userId/follow - Unfollow a user (requires authentication)
 router.delete('/:userId/follow', verifyToken, unfollowUser);
+
+// GET /api/users/suggestions - Suggested users to follow (requires authentication)
+router.get('/suggestions/list', verifyToken, getFollowSuggestions);
 
 export default router;
