@@ -21,8 +21,19 @@ import { handlePostMediaUpload, handleUploadError } from '../middleware/file.js'
 const router = express.Router();
 const { verifyToken } = middlewareController;
 
-// POST /api/posts - Create a new post with media upload
-router.post('/', handlePostMediaUpload, handleUploadError, createPost);
+// POST /api/posts - Create a new post with media upload (requires authentication)
+router.post('/', verifyToken, (req, res, next) => {
+  console.log('[POST /posts] Middleware - Content-Type:', req.headers['content-type']);
+  console.log('[POST /posts] Middleware - UserId from token:', req.userId);
+  console.log('[POST /posts] Middleware - Body keys before multer:', Object.keys(req.body || {}));
+  next();
+}, handlePostMediaUpload, (req, res, next) => {
+  console.log('[POST /posts] After multer - Body keys:', Object.keys(req.body || {}));
+  console.log('[POST /posts] After multer - userId from token:', req.userId);
+  console.log('[POST /posts] After multer - postType:', req.body.postType);
+  console.log('[POST /posts] After multer - Files:', req.files ? req.files.length : 0);
+  next();
+}, handleUploadError, createPost);
 
 // GET /api/posts - Get all posts with pagination
 router.get('/', getPosts);

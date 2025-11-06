@@ -5,12 +5,12 @@ import LickLike from "../models/LickLike.js";
 import LickComment from "../models/LickComment.js";
 import LickTag from "../models/LickTag.js";
 import Tag from "../models/Tag.js";
-import { uploadFromBuffer } from "../utils/cloudinaryUploader.js";
+// import { uploadFromBuffer } from "../utils/cloudinaryUploader.js";
 import {
   extractWaveformFromUrl,
   extractWaveformFromBuffer,
 } from "../utils/waveformExtractor.js";
-import { generateTabFromAudio } from "../utils/basicPitchService.js";
+// import { generateTabFromAudio } from "../utils/basicPitchService.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
