@@ -39,7 +39,6 @@ const LickUploadPage = () => {
     tempo: "",
     difficulty: "beginner",
     isPublic: true,
-    userId: "507f1f77bcf86cd799439011", // Test user ID
   });
 
   // Audio file state
@@ -523,7 +522,6 @@ const LickUploadPage = () => {
       // Create FormData
       const submitData = new FormData();
       submitData.append("audio", audioFile);
-      submitData.append("userId", formData.userId);
       submitData.append("title", formData.title);
       submitData.append("description", formData.description || "");
       submitData.append("tabNotation", formData.tabNotation || "");

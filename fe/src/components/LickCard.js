@@ -11,6 +11,7 @@ import { toggleLickLike } from "../services/user/lickService";
 // Prefer Redux auth state over ad-hoc local storage helpers
 import { useDispatch, useSelector } from "react-redux";
 import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
+import { getProfileById } from "../services/user/profile";
 
 const LickCard = ({ lick, onClick }) => {
   const {
@@ -24,6 +25,35 @@ const LickCard = ({ lick, onClick }) => {
     duration,
     difficulty,
   } = lick;
+
+  // Resolve userId from payload shapes (DB uses userId)
+  const userId =
+    lick.userId ||
+    lick.user_id ||
+    creator?.user_id ||
+    creator?._id ||
+    lick.user?.id ||
+    lick.user?.user_id ||
+    null;
+
+  const [resolvedCreator, setResolvedCreator] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const needFetch = !creator?.display_name && !creator?.username;
+    if (userId && needFetch) {
+      getProfileById(userId)
+        .then((res) => {
+          if (cancelled) return;
+          const u = res?.data?.user || res?.data;
+          if (u) setResolvedCreator(u);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, creator?.display_name, creator?.username]);
 
   // Normalize id across different payloads
   const effectiveId = lick_id || lick._id || lick.id;
@@ -274,7 +304,13 @@ const LickCard = ({ lick, onClick }) => {
         </h3>
         <div className="flex items-center text-xs text-gray-400 mb-3">
           <span className="truncate">
-            By {creator?.display_name || "Unknown"}
+            By{" "}
+            {creator?.display_name ||
+              creator?.displayName ||
+              resolvedCreator?.displayName ||
+              creator?.username ||
+              resolvedCreator?.username ||
+              "Unknown"}
           </span>
           <span className="mx-2">•</span>
           <span>{formatDate(created_at)}</span>

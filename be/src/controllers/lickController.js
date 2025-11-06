@@ -5,7 +5,7 @@ import LickLike from "../models/LickLike.js";
 import LickComment from "../models/LickComment.js";
 import LickTag from "../models/LickTag.js";
 import Tag from "../models/Tag.js";
-// import { uploadFromBuffer } from "../utils/cloudinaryUploader.js";
+import { uploadFromBuffer } from "../utils/cloudinaryUploader.js";
 import {
   extractWaveformFromUrl,
   extractWaveformFromBuffer,
@@ -190,7 +190,8 @@ export const getCommunityLicks = async (req, res) => {
       is_featured: lick.isFeatured,
       creator: {
         user_id: lick.creator?._id,
-        display_name: lick.creator?.displayName,
+        display_name: lick.creator?.displayName || lick.creator?.username,
+        username: lick.creator?.username || "",
         avatar_url: lick.creator?.avatarUrl,
       },
       tags: (lick.tags || []).map((tag) => ({
@@ -227,7 +228,13 @@ export const getCommunityLicks = async (req, res) => {
 // UC-12: Get user's own licks (My Licks) with search, filter, and status
 export const getMyLicks = async (req, res) => {
   try {
-    const { userId } = req.params; // or req.user.id from auth middleware
+    // Single source: prefer authenticated userId; fallback to URL param for backward compatibility
+    const userId = req.userId || req.user?.id || req.params.userId;
+    if (!userId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing userId" });
+    }
     const {
       search,
       tags,
@@ -553,7 +560,11 @@ export const getLickById = async (req, res) => {
     if (lick[0].creator && lick[0].creator._id) {
       creatorData = {
         user_id: lick[0].creator._id,
-        display_name: lick[0].creator.displayName || "Unknown User",
+        display_name:
+          lick[0].creator.displayName ||
+          lick[0].creator.username ||
+          "Unknown User",
+        username: lick[0].creator.username || "",
         avatar_url: lick[0].creator.avatarUrl || null,
       };
     }
@@ -762,7 +773,6 @@ export const createLick = async (req, res) => {
 
     // 2. Get text data from the form body
     const {
-      userId,
       title,
       description,
       tabNotation,
@@ -773,7 +783,7 @@ export const createLick = async (req, res) => {
       status,
       isFeatured,
     } = req.body;
-    // const userId = req.user.id; // Get this from your auth middleware
+    const userId = req.userId || req.user?.id; // authoritative user id from JWT
 
     // 3. Upload the audio file to Cloudinary
     // IMPORTANT: Use 'video' as the resource_type for audio files
@@ -799,7 +809,7 @@ export const createLick = async (req, res) => {
 
     // 4. Create the new Lick in your database
     const newLick = new Lick({
-      userId: userId || req.user?.id, // Get from body or auth middleware
+      userId, // always from auth middleware
       title,
       description,
       audioUrl: audioResult.secure_url, // URL from Cloudinary
@@ -991,7 +1001,11 @@ export const getLickComments = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching lick comments:", error);
-    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 
@@ -1002,12 +1016,16 @@ export const addLickComment = async (req, res) => {
     const { userId, comment, parentCommentId, timestamp } = req.body;
 
     if (!userId || !comment) {
-      return res.status(400).json({ success: false, message: "userId and comment are required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "userId and comment are required" });
     }
 
     const lick = await Lick.findById(lickId);
     if (!lick) {
-      return res.status(404).json({ success: false, message: "Lick not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Lick not found" });
     }
 
     const newComment = new LickComment({
@@ -1035,6 +1053,10 @@ export const addLickComment = async (req, res) => {
     });
   } catch (error) {
     console.error("Error adding lick comment:", error);
-    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };

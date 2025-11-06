@@ -7,10 +7,15 @@ import {
   FaEdit,
   FaTrash,
 } from "react-icons/fa";
-import { playLickAudio, getLickById, toggleLickLike } from "../services/user/lickService";
+import {
+  playLickAudio,
+  getLickById,
+  toggleLickLike,
+} from "../services/user/lickService";
 import { useDispatch, useSelector } from "react-redux";
 import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
 import { getStoredUserId } from "../services/user/post";
+import { getProfileById } from "../services/user/profile";
 
 const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
   const {
@@ -27,6 +32,28 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
     is_public,
     creator,
   } = lick;
+
+  // Resolve userId from payload (DB uses userId)
+  const userId =
+    lick.userId || lick.user_id || creator?.user_id || creator?._id || null;
+
+  const [resolvedCreator, setResolvedCreator] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const needFetch = !creator?.display_name && userId;
+    if (needFetch) {
+      getProfileById(userId)
+        .then((res) => {
+          if (cancelled) return;
+          const u = res?.data?.user || res?.data;
+          if (u) setResolvedCreator(u);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, creator?.display_name]);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -122,7 +149,9 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
   // Initialize like state for this lick in redux once
   useEffect(() => {
     if (!likeState) {
-      dispatch(setLikeState({ id: lick_id, liked: false, count: likes_count || 0 }));
+      dispatch(
+        setLikeState({ id: lick_id, liked: false, count: likes_count || 0 })
+      );
     }
   }, [dispatch, likeState, lick_id, likes_count]);
 
@@ -310,7 +339,15 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
         </h3>
         <div className="flex items-center text-xs text-gray-400 mb-3">
           <span className="truncate">
-            {creator?.display_name ? `By ${creator.display_name}` : "By You"}
+            {creator?.display_name ||
+            resolvedCreator?.displayName ||
+            creator?.displayName
+              ? `By ${
+                  creator?.display_name ||
+                  resolvedCreator?.displayName ||
+                  creator?.displayName
+                }`
+              : "By You"}
           </span>
           <span className="mx-2">•</span>
           <span>{formatDate(created_at)}</span>
@@ -406,4 +443,3 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
 };
 
 export default MyLickCard;
-

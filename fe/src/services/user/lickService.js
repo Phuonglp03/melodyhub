@@ -160,20 +160,11 @@ export const playLickAudio = async (lickId, userId = null) => {
 // Create a new lick with audio file
 export const createLick = async (formData) => {
   try {
-    const response = await fetch(`${API_BASE}/licks`, {
-      method: "POST",
-      body: formData, // Send FormData directly (no Content-Type header needed)
+    // Use shared axios client so Authorization header is attached
+    const res = await http.post(`/licks`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
     });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(
-        errorData.message || `HTTP error! status: ${response.status}`
-      );
-    }
-
-    const data = await response.json();
-    return data;
+    return res.data;
   } catch (error) {
     console.error("Error creating lick:", error);
     throw error;

@@ -21,8 +21,8 @@ const ProtectedRoute = ({ children, requiredRole }) => {
     );
   }
 
-  // Nếu chưa đăng nhập (không có token), chuyển hướng về trang đăng nhập
-  if (!user?.token) {
+  // Nếu chưa đăng nhập, chuyển hướng về trang đăng nhập
+  if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 

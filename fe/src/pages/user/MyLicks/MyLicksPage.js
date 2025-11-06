@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { FaSearch, FaPlus, FaFilter } from "react-icons/fa";
-import axios from "axios";
+import http from "../../../services/http";
 import {
   deleteLick,
   updateLick as apiUpdateLick,
@@ -9,8 +9,7 @@ import MyLickCard from "../../../components/MyLickCard";
 
 // --- Main My Licks Page ---
 const MyLicksPage = () => {
-  // Replace with actual user ID from auth context/redux
-  const userId = "507f1f77bcf86cd799439011"; // TODO: Get from auth
+  // userId is resolved server-side via JWT on /user/me
 
   const [licks, setLicks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -70,16 +69,11 @@ const MyLicksPage = () => {
         params.status = statusFilter;
       }
 
-      const response = await axios.get(
-        `http://localhost:9999/api/licks/user/${userId}`,
-        {
-          params,
-        }
-      );
+      const res = await http.get(`/licks/user/me`, { params });
 
-      if (response.data.success) {
-        setLicks(response.data.data);
-        setPagination(response.data.pagination);
+      if (res.data.success) {
+        setLicks(res.data.data);
+        setPagination(res.data.pagination);
       }
     } catch (err) {
       console.error("Error fetching my licks:", err);
