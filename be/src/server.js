@@ -9,9 +9,10 @@ import http from "http";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 
-import { connectToDatabase } from "./config/db.js";
-import { socketServer } from "./config/socket.js";
-import { nodeMediaServer } from "./config/media.js";
+import { connectToDatabase } from './config/db.js';
+import { corsMiddleware } from './config/cors.js';
+import { socketServer } from './config/socket.js'; 
+import { nodeMediaServer } from './config/media.js';
 // Import all models to ensure they are registered with Mongoose
 import "./models/User.js";
 import "./models/Role.js";
@@ -51,6 +52,7 @@ import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 const app = express();
 const httpServer = http.createServer(app);
 
+
 // Middleware
 app.use(
   helmet({
@@ -58,12 +60,7 @@ app.use(
     contentSecurityPolicy: false,
   })
 );
-app.use(
-  cors({
-    origin: "http://localhost:3000", // URL của frontend
-    credentials: true,
-  })
-);
+app.use(corsMiddleware());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -71,7 +68,6 @@ app.use(cookieParser());
 
 // Socket.io setup
 socketServer(httpServer);
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -81,12 +77,8 @@ app.use("/static", express.static(path.join(__dirname, "..", uploadDir)));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 // Health check
-app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    service: "melodyhub-be",
-    timestamp: new Date().toISOString(),
-  });
+app.get('/health', (req, res) => {
+  res.json({ ok: true, service: 'melodyhub-be', timestamp: new Date().toISOString() });
 });
 
 // API Routes

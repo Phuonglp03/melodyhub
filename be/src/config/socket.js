@@ -27,7 +27,7 @@ export const socketServer = (httpServer) => {
       console.log(`[Socket.IO] Client ${socket.id} đã tham gia phòng ${roomId}`);
     });
 
-    socket.on('send-message', async ({ roomId, message }) => {
+    socket.on('send-message-liveroom', async ({ roomId, message }) => {
       if (!tempUserId) {
         return socket.emit('chat-error', 'Xác thực không hợp lệ.');
       }
@@ -42,7 +42,7 @@ export const socketServer = (httpServer) => {
         
         const savedChat = await chat.save();
         const result = await RoomChat.findById(savedChat._id).populate('userId', 'displayName avatarUrl');
-        io.to(roomId).emit('new-message', result);
+        io.to(roomId).emit('new-message-liveroom', result);
 
       } catch (err) {
         console.error(`[Socket.IO] Lỗi khi gửi tin nhắn: ${err.message}`);
