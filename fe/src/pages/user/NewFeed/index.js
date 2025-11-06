@@ -4,14 +4,11 @@ import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spi
 import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined } from '@ant-design/icons';
 import { listPosts, createPost } from '../../../services/user/post';
 import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments } from '../../../services/user/post';
+import { followUser, unfollowUser, getFollowSuggestions, getProfileById } from '../../../services/user/profile';
 
 const { Title, Text } = Typography;
 
-const MOCK_USERS = [
-  { id: 1, name: 'Evan', followers: '3.49 nghìn', color: '#f56a00' },
-  { id: 2, name: 'JRED', followers: '196 nghìn', color: '#7265e6' },
-  { id: 3, name: 'Vóc to Orpheus', followers: '106', color: '#ffbf00' },
-];
+// suggestions fetched from API
 
 const MOCK_FEEDS = Array.from({ length: 5 }).map((_, i) => ({
   id: i + 1,
@@ -70,16 +67,38 @@ const WavePlaceholder = () => (
   </div>
 );
 
-const Suggestion = ({ user }) => (
+const Suggestion = ({ user, following, loading, onFollow }) => (
   <div style={{ display: 'flex', alignItems: 'center', padding: '6px 0', width: '100%' }}>
     <Space size={12}>
-      <Avatar size={36} style={{ background: user.color }}>{user.name[0]}</Avatar>
+      <Avatar size={36} src={user.avatarUrl} style={{ background: '#555' }}>
+        {(user.displayName || user.username || 'U')[0]}
+      </Avatar>
       <div>
-        <Text strong style={{ color: '#fff' }}>{user.name}</Text>
-        <div style={{ fontSize: 12, color: '#f3f5f7ff' }}>{user.followers} người theo dõi</div>
+        <Text strong style={{ color: '#fff' }}>{user.displayName || user.username}</Text>
+        <div style={{ fontSize: 12, color: '#f3f5f7ff' }}>{Number(user.followersCount || 0)} người theo dõi</div>
       </div>
     </Space>
-    <Button shape="circle" size="large" type="primary" icon={<PlusOutlined />} style={{ marginLeft: 'auto' }} />
+    {following ? (
+      <Button 
+        size="middle" 
+        type="primary" 
+        loading={loading}
+        onClick={() => onFollow(user.id)}
+        style={{ marginLeft: 'auto', borderRadius: 999 }} 
+      >
+        Đang theo dõi
+      </Button>
+    ) : (
+      <Button 
+        shape="circle" 
+        size="large" 
+        type="primary" 
+        loading={loading}
+        onClick={() => onFollow(user.id)}
+        icon={<PlusOutlined />} 
+        style={{ marginLeft: 'auto' }} 
+      />
+    )}
   </div>
 );
 
@@ -143,6 +162,21 @@ const NewsFeed = () => {
   const [postIdToLiked, setPostIdToLiked] = useState({}); // postId -> boolean
   const [postIdToCommentInput, setPostIdToCommentInput] = useState({}); // postId -> string
   const [modalPost, setModalPost] = useState(null);
+  const [userIdToFollowing, setUserIdToFollowing] = useState({}); // userId -> boolean
+  const [userIdToFollowLoading, setUserIdToFollowLoading] = useState({}); // userId -> boolean
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [currentUserId] = useState(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      if (!raw) return undefined;
+      const obj = JSON.parse(raw);
+      const u = obj?.user || obj;
+      return u?.id || u?.userId || u?._id;
+    } catch {
+      return undefined;
+    }
+  });
 
   const extractFirstUrl = (text) => {
     if (!text) return null;
@@ -209,6 +243,57 @@ const NewsFeed = () => {
       setLikingPostId(null);
     }
   };
+
+  const getAuthorId = (post) => (post?.userId?._id || post?.userId?.id || post?.userId || '').toString();
+
+  const toggleFollow = async (uid) => {
+    if (!uid) return;
+    try {
+      setUserIdToFollowLoading((prev) => ({ ...prev, [uid]: true }));
+      const isFollowing = !!userIdToFollowing[uid];
+      if (isFollowing) {
+        await unfollowUser(uid);
+        setUserIdToFollowing((prev) => ({ ...prev, [uid]: false }));
+        message.success('Đã bỏ theo dõi');
+      } else {
+        await followUser(uid);
+        setUserIdToFollowing((prev) => ({ ...prev, [uid]: true }));
+        message.success('Đã theo dõi');
+      }
+    } catch (e) {
+      const msg = e?.message || '';
+      if (!userIdToFollowing[uid] && msg.toLowerCase().includes('already following')) {
+        // BE trả về 400 nếu đã theo dõi trước đó; đồng bộ UI thành đang theo dõi
+        setUserIdToFollowing((prev) => ({ ...prev, [uid]: true }));
+        message.success('Đã theo dõi');
+      } else {
+        message.error(msg || 'Thao tác thất bại');
+      }
+    } finally {
+      setUserIdToFollowLoading((prev) => ({ ...prev, [uid]: false }));
+    }
+  };
+
+  const loadSuggestions = async () => {
+    try {
+      setSuggestionsLoading(true);
+      const res = await getFollowSuggestions(10);
+      const list = (res?.data || [])
+        .filter((u) => !!u?.id && (!currentUserId || u.id.toString() !== currentUserId.toString()))
+        .slice(0, 5);
+      const map = {};
+      list.forEach((u) => { map[u.id] = false; }); // BE đã lọc CHƯA follow
+      setUserIdToFollowing((prev) => ({ ...prev, ...map }));
+      setSuggestions(list);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('Load suggestions failed:', e.message);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
+
+  useEffect(() => { loadSuggestions(); }, []);
 
   const openComment = (postId) => {
     setCommentPostId(postId);
@@ -347,6 +432,22 @@ const NewsFeed = () => {
       setTotal(totalPosts);
       const totalPages = Math.ceil(totalPosts / l);
       setHasMore(p < totalPages);
+
+      // hydrate following status for authors in loaded posts
+      try {
+        const uniqueUserIds = Array.from(new Set((posts || []).map((it) => (it?.userId?._id || it?.userId?.id || it?.userId || '').toString()))).filter(Boolean);
+        const results = await Promise.all(uniqueUserIds.map(async (uid) => {
+          try {
+            const r = await getProfileById(uid);
+            return { uid, isFollowing: !!r?.data?.isFollowing };
+          } catch {
+            return { uid, isFollowing: false };
+          }
+        }));
+        const map = {};
+        results.forEach(({ uid, isFollowing }) => { map[uid] = isFollowing; });
+        setUserIdToFollowing((prev) => ({ ...prev, ...map }));
+      } catch {}
     } catch (e) {
       setError(e.message || 'Lỗi tải bài viết');
     } finally {
@@ -573,7 +674,7 @@ const NewsFeed = () => {
             <Card key={post._id} style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <Space align="start" size={14}>
-                  <div
+                    <div
                     role="button"
                     onClick={() => {
                       const uid = post?.userId?._id || post?.userId?.id || post?.userId;
@@ -581,7 +682,7 @@ const NewsFeed = () => {
                     }}
                     style={{ cursor: 'pointer' }}
                   >
-                    <Avatar size={40} style={{ background: '#2db7f5' }}>
+                    <Avatar size={40} src={post?.userId?.avatarUrl} style={{ background: '#2db7f5' }}>
                       {post?.userId?.displayName?.[0] || post?.userId?.username?.[0] || 'U'}
                     </Avatar>
                   </div>
@@ -602,9 +703,26 @@ const NewsFeed = () => {
                     </Space>
                   </div>
                 </Space>
-                <Button size="middle" style={{ background: '#333', borderColor: '#333', color: '#fff' }}>
-                  Follow
-                </Button>
+                {(() => {
+                  const uid = getAuthorId(post);
+                  const isFollowing = !!userIdToFollowing[uid];
+                  const loading = !!userIdToFollowLoading[uid];
+                  if (uid && currentUserId && uid.toString() === currentUserId.toString()) return null;
+                  return (
+                    <Button
+                      size="middle"
+                      loading={loading}
+                      onClick={() => toggleFollow(uid)}
+                      style={{
+                        background: isFollowing ? '#111' : '#333',
+                        borderColor: isFollowing ? '#444' : '#333',
+                        color: '#fff',
+                      }}
+                    >
+                      {isFollowing ? 'Đang theo dõi' : 'Follow'}
+                    </Button>
+                  );
+                })()}
               </div>
               {post?.textContent && (
                 <div style={{ marginBottom: 10, color: '#fff', fontSize: 15, lineHeight: 1.6 }}>
@@ -680,15 +798,25 @@ const NewsFeed = () => {
 
         <div>
           <Card style={{ marginBottom: 16, background: '#0f0f10', borderColor: '#1f1f1f' }} title={<Text style={{ color: '#fff', fontWeight: 700 }}>Gợi ý theo dõi</Text>}>
-            <List
-              itemLayout="horizontal"
-              dataSource={MOCK_USERS}
-              renderItem={(item) => (
-                <List.Item style={{ padding: '8px 0' }}>
-                  <Suggestion user={item} />
-                </List.Item>
-              )}
-            />
+            {suggestionsLoading && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}><Spin /></div>
+            )}
+            {!suggestionsLoading && (
+              <List
+                itemLayout="horizontal"
+                dataSource={suggestions}
+                renderItem={(user) => (
+                  <List.Item style={{ padding: '8px 0' }}>
+                    <Suggestion 
+                      user={user}
+                      following={!!userIdToFollowing[user.id]}
+                      loading={!!userIdToFollowLoading[user.id]}
+                      onFollow={(uid) => toggleFollow(uid)}
+                    />
+                  </List.Item>
+                )}
+              />
+            )}
           </Card>
 
           <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>

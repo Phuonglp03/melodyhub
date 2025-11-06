@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Input, Button, Space, Typography, Modal } from 'antd'; 
+import { Layout, Input, Button, Space, Typography, Modal, Avatar, Tooltip } from 'antd'; 
 import { FireOutlined, BellOutlined, MessageOutlined, SearchOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom'; 
 import { livestreamService } from '../services/user/livestreamService';
@@ -64,7 +64,28 @@ const AppHeader = () => {
           <Space size={24}>
             <BellOutlined style={{ color: '#e5e7eb', fontSize: 20 }} />
             <MessageOutlined style={{ color: '#e5e7eb', fontSize: 20 }} />
-            <UserOutlined style={{ color: '#e5e7eb', fontSize: 20 }} />
+            {(() => {
+              let avatarUrl; let displayName; let uid;
+              try {
+                const raw = localStorage.getItem('user');
+                if (raw) {
+                  const obj = JSON.parse(raw);
+                  const u = obj?.user || obj; // support both nested and flat shapes
+                  avatarUrl = u?.avatarUrl || u?.avatar_url;
+                  displayName = u?.displayName || u?.username || 'Profile';
+                  uid = u?.id || u?.userId || u?._id;
+                }
+              } catch {}
+              return (
+                <Tooltip title="Hồ sơ của tôi">
+                  {avatarUrl ? (
+                    <Avatar src={avatarUrl} size={28} style={{ cursor: 'pointer' }} onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')} />
+                  ) : (
+                    <UserOutlined style={{ color: '#e5e7eb', fontSize: 20, cursor: 'pointer' }} onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')} />
+                  )}
+                </Tooltip>
+              );
+            })()}
 
             <Button
               style={{ color: '#fff', background: '#ef4444', borderColor: '#ef4444', borderRadius: 999, height: 40, padding: '0 20px', fontSize: 14 }}
