@@ -18,7 +18,7 @@ import {
   unlikePost,
   createPostComment,
 } from "../../../services/user/post";
-import { getProfileById } from "../../../services/user/profile";
+import { getProfileById, followUser, unfollowUser } from "../../../services/user/profile";
 import { useNavigate, useParams } from "react-router-dom";
 
 const { Text } = Typography;
@@ -110,6 +110,8 @@ const UserFeed = () => {
   const navigate = useNavigate();
   const { userId } = useParams();
   const [profile, setProfile] = useState(null);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
   const [items, setItems] = useState([]);
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
@@ -124,14 +126,58 @@ const UserFeed = () => {
   const [likingPostId, setLikingPostId] = useState(null);
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [postIdToLiked, setPostIdToLiked] = useState({});
+  const [currentUserId] = useState(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      if (!raw) return undefined;
+      const obj = JSON.parse(raw);
+      const u = obj?.user || obj;
+      return u?.id || u?.userId || u?._id;
+    } catch {
+      return undefined;
+    }
+  });
+  const isOwnProfile = !!currentUserId && (currentUserId?.toString() === userId?.toString() || (profile?.id && currentUserId?.toString() === profile?.id?.toString()));
 
   const fetchProfile = async (id) => {
     try {
       const res = await getProfileById(id);
       setProfile(res?.data?.user || null);
+      if (typeof res?.data?.isFollowing === "boolean") {
+        setIsFollowing(res.data.isFollowing);
+      }
     } catch (e) {
       // eslint-disable-next-line no-console
       console.warn("Load profile failed:", e);
+    }
+  };
+
+  const toggleFollow = async () => {
+    if (!userId || !profile) return;
+    try {
+      setFollowLoading(true);
+      if (isFollowing) {
+        await unfollowUser(userId);
+        setIsFollowing(false);
+        setProfile((prev) => prev ? { ...prev, followersCount: Math.max(0, (prev.followersCount || 1) - 1) } : prev);
+        message.success("Đã bỏ theo dõi");
+      } else {
+        await followUser(userId);
+        setIsFollowing(true);
+        setProfile((prev) => prev ? { ...prev, followersCount: (prev.followersCount || 0) + 1 } : prev);
+        message.success("Đã theo dõi");
+      }
+    } catch (e) {
+      const msg = e?.message || '';
+      if (!isFollowing && msg.toLowerCase().includes('already following')) {
+        setIsFollowing(true);
+        setProfile((prev) => prev ? { ...prev, followersCount: (prev.followersCount || 0) + 1 } : prev);
+        message.success('Đã theo dõi');
+      } else {
+        message.error(msg || (isFollowing ? "Bỏ theo dõi thất bại" : "Theo dõi thất bại"));
+      }
+    } finally {
+      setFollowLoading(false);
     }
   };
 
@@ -306,20 +352,38 @@ const UserFeed = () => {
                     @{profile?.username || ""}
                   </div>
                 </div>
-                <Button
-                  onClick={() => navigate("/profile")}
-                  style={{
-                    marginTop: 16,
-                    background: "#fff",
-                    color: "#111",
-                    borderColor: "#fff",
-                    padding: "0 20px",
-                    height: 40,
-                    borderRadius: 999,
-                  }}
-                >
-                  View My Profile
-                </Button>
+                <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                  {isOwnProfile ? (
+                    <Button
+                      onClick={() => navigate('/profile')}
+                      style={{
+                        background: "#fff",
+                        color: "#111",
+                        borderColor: "#fff",
+                        padding: "0 20px",
+                        height: 40,
+                        borderRadius: 999,
+                      }}
+                    >
+                      Xem hồ sơ
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={toggleFollow}
+                      loading={followLoading}
+                      style={{
+                        background: isFollowing ? "#111" : "#fff",
+                        color: isFollowing ? "#fff" : "#111",
+                        borderColor: isFollowing ? "#303030" : "#fff",
+                        padding: "0 20px",
+                        height: 40,
+                        borderRadius: 999,
+                      }}
+                    >
+                      {isFollowing ? "Đang theo dõi" : "Theo dõi"}
+                    </Button>
+                  )}
+                </div>
               </div>
             </Card>
             <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
@@ -409,7 +473,7 @@ const UserFeed = () => {
                       }}
                     >
                       <Space align="start" size={14}>
-                        <Avatar size={40} style={{ background: "#2db7f5" }}>
+                        <Avatar size={40} src={post?.userId?.avatarUrl} style={{ background: "#2db7f5" }}>
                           {
                             (post?.userId?.displayName ||
                               post?.userId?.username ||

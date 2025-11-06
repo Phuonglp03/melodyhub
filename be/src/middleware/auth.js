@@ -86,9 +86,31 @@ export const checkPermission = (resource, action) => (req, res, next) => {
   next();
 };
 
+// Optional auth: nếu có Authorization thì verify và gán req.userId, nếu không thì bỏ qua
+export const optionalVerifyToken = (req, res, next) => {
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+  if (!authHeader) return next();
+  try {
+    const trimmedHeader = authHeader.trim();
+    const parts = trimmedHeader.split(/\s+/);
+    if (parts.length >= 2 && parts[0].toLowerCase() === 'bearer') {
+      const token = trimmedHeader.substring(7).trim();
+      if (token) {
+        const decoded = verifyJWT(token);
+        if (decoded) {
+          req.userId = decoded.userId || decoded.id;
+          req.userRole = decoded.roleId || decoded.role;
+        }
+      }
+    }
+  } catch {}
+  next();
+};
+
 export default {
   verifyToken,
   isAdmin,
   isUser,
-  checkPermission
+  checkPermission,
+  optionalVerifyToken
 };
