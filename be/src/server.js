@@ -9,10 +9,10 @@ import http from "http";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 
-import { connectToDatabase } from './config/db.js';
-import { corsMiddleware } from './config/cors.js';
-import { socketServer } from './config/socket.js'; 
-import { nodeMediaServer } from './config/media.js';
+import { connectToDatabase } from "./config/db.js";
+import { corsMiddleware } from "./config/cors.js";
+import { socketServer } from "./config/socket.js";
+import { nodeMediaServer } from "./config/media.js";
 // Import all models to ensure they are registered with Mongoose
 import "./models/User.js";
 import "./models/Role.js";
@@ -48,12 +48,12 @@ import postRoutes from "./routes/postRoutes.js";
 import lickRoutes from "./routes/lickRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import tagRoutes from "./routes/tagRoutes.js";
+import playlistRoutes from "./routes/playlistRoutes.js";
 
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 
 const app = express();
 const httpServer = http.createServer(app);
-
 
 // Middleware
 app.use(
@@ -79,8 +79,12 @@ app.use("/static", express.static(path.join(__dirname, "..", uploadDir)));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'melodyhub-be', timestamp: new Date().toISOString() });
+app.get("/health", (req, res) => {
+  res.json({
+    ok: true,
+    service: "melodyhub-be",
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // API Routes
@@ -90,6 +94,7 @@ app.use("/api/posts", postRoutes);
 app.use("/api/licks", lickRoutes);
 app.use("/api/livestreams", liveroomRoutes);
 app.use("/api/tags", tagRoutes);
+app.use("/api/playlists", playlistRoutes);
 
 // 404 handler - must be after all routes
 app.use((req, res, next) => {
