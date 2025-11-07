@@ -16,6 +16,7 @@ import {
   deletePlaylist,
   addLickToPlaylist,
   removeLickFromPlaylist,
+  updatePlaylist,
 } from "../../../services/user/playlistService";
 import { getCommunityLicks } from "../../../services/user/lickService";
 import LickCard from "../../../components/LickCard";
@@ -43,6 +44,11 @@ const PlaylistDetailPage = () => {
   // Suggested licks state
   const [suggestedLicks, setSuggestedLicks] = useState([]);
   const [loadingSuggested, setLoadingSuggested] = useState(false);
+
+  // Edit state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", description: "" });
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchPlaylist();
@@ -193,6 +199,47 @@ const PlaylistDetailPage = () => {
     }
   };
 
+  const handleStartEdit = () => {
+    if (playlist) {
+      setEditForm({
+        name: playlist.name || "",
+        description: playlist.description || "",
+      });
+      setIsEditing(true);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditForm({ name: "", description: "" });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!playlist) return;
+
+    try {
+      setSaving(true);
+      const result = await updatePlaylist(playlistId, {
+        name: editForm.name.trim(),
+        description: editForm.description.trim(),
+        isPublic: playlist.is_public,
+        coverImageUrl: playlist.cover_image_url,
+      });
+
+      if (result.success) {
+        await fetchPlaylist();
+        setIsEditing(false);
+      } else {
+        alert(result.message || "Failed to update playlist");
+      }
+    } catch (err) {
+      console.error("Error updating playlist:", err);
+      alert(err.message || "Failed to update playlist");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const isOwner =
     playlist &&
     authUser &&
@@ -260,14 +307,79 @@ const PlaylistDetailPage = () => {
               )}
             </div>
 
-            {/* Title */}
-            <h1 className="text-5xl font-bold mb-4 truncate">{playlist.name}</h1>
+            {/* Title - Editable */}
+            <div className="mb-4 flex items-start gap-3">
+              {isEditing ? (
+                <div className="flex-1">
+                  <input
+                    type="text"
+                    value={editForm.name}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, name: e.target.value }))
+                    }
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-3xl font-bold text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="Playlist name"
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                <h1 className="text-5xl font-bold truncate flex-1">
+                  {playlist.name}
+                </h1>
+              )}
+              {isOwner && (
+                <button
+                  onClick={isEditing ? handleCancelEdit : handleStartEdit}
+                  className="text-gray-400 hover:text-white transition-colors p-2"
+                  title={isEditing ? "Cancel editing" : "Edit playlist"}
+                >
+                  {isEditing ? <FaTimes size={20} /> : <FaEdit size={20} />}
+                </button>
+              )}
+            </div>
 
-            {/* Description */}
-            {playlist.description && (
-              <p className="text-gray-400 text-sm mb-4 line-clamp-2">
-                {playlist.description}
-              </p>
+            {/* Description - Editable */}
+            {isEditing ? (
+              <div className="mb-4">
+                <textarea
+                  value={editForm.description}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      description: e.target.value,
+                    }))
+                  }
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                  rows={3}
+                  placeholder="Add a description..."
+                  maxLength={250}
+                />
+                <div className="flex items-center justify-end gap-2 mt-2">
+                  <span className="text-xs text-gray-500">
+                    {editForm.description.length}/250
+                  </span>
+                  <button
+                    onClick={handleSaveEdit}
+                    disabled={saving || !editForm.name.trim()}
+                    className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-1.5 rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {saving ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    onClick={handleCancelEdit}
+                    disabled={saving}
+                    className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-1.5 rounded-md text-sm font-medium disabled:opacity-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              playlist.description && (
+                <p className="text-gray-400 text-sm mb-4 line-clamp-2">
+                  {playlist.description}
+                </p>
+              )
             )}
 
             {/* Creator Info */}

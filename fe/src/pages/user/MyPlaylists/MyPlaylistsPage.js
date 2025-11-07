@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { FaSearch, FaPlus, FaEdit, FaTrash, FaLock, FaGlobe } from "react-icons/fa";
+import { FaSearch, FaPlus, FaTrash, FaLock, FaGlobe } from "react-icons/fa";
 import { useNavigate } from "react-router-dom";
 import {
   getMyPlaylists,
@@ -194,26 +194,16 @@ const MyPlaylistsPage = () => {
                       <FaLock size={10} /> Private
                     </span>
                   )}
-                </div>
-                {/* Action buttons on hover */}
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigate(`/playlists/${playlist.playlist_id}/edit`);
-                    }}
-                    className="bg-orange-500 hover:bg-orange-600 text-white p-2 rounded-full"
-                  >
-                    <FaEdit size={14} />
-                  </button>
+                  {/* Delete button - small bin icon */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       handleDelete(playlist.playlist_id);
                     }}
-                    className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-full"
+                    className="bg-red-500/80 hover:bg-red-600 text-white p-1.5 rounded-full transition-colors"
+                    title="Delete playlist"
                   >
-                    <FaTrash size={14} />
+                    <FaTrash size={10} />
                   </button>
                 </div>
               </div>
