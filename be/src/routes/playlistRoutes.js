@@ -14,6 +14,11 @@ import { verifyToken, optionalVerifyToken } from "../middleware/auth.js";
 const router = express.Router();
 const jsonParser = express.json({ limit: "2mb" });
 
+// UC-16, Screen 30: Create a new playlist
+// POST /api/playlists - Create playlist (authenticated)
+// IMPORTANT: Must be defined BEFORE /:playlistId routes
+router.post("/", verifyToken, jsonParser, createPlaylist);
+
 // UC-15, Screen 29: Get user's playlists (My Playlists)
 // GET /api/playlists/me - Get current user's playlists (authenticated)
 router.get("/me", verifyToken, getMyPlaylists);
@@ -24,10 +29,6 @@ router.get("/user/:userId", optionalVerifyToken, getMyPlaylists);
 // Screen 31: Get playlist detail with all licks
 // GET /api/playlists/:playlistId - Get playlist by ID (public if isPublic=true, or owner)
 router.get("/:playlistId", optionalVerifyToken, getPlaylistById);
-
-// UC-16, Screen 30: Create a new playlist
-// POST /api/playlists - Create playlist (authenticated)
-router.post("/", verifyToken, jsonParser, createPlaylist);
 
 // UC-17, Screen 32: Update playlist
 // PUT /api/playlists/:playlistId - Update playlist (authenticated, owner only)

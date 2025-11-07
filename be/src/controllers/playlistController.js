@@ -167,7 +167,9 @@ export const getPlaylistById = async (req, res) => {
         const commentsCount = await LickComment.countDocuments({ lickId });
 
         // Get tags
-        const lickTags = await LickTag.find({ lickId }).populate("tagId").lean();
+        const lickTags = await LickTag.find({ lickId })
+          .populate("tagId")
+          .lean();
         const tags = lickTags.map((lt) => ({
           tag_id: lt.tagId._id,
           tag_name: lt.tagId.tagName,
@@ -273,15 +275,39 @@ export const createPlaylist = async (req, res) => {
     // Add licks to playlist if provided
     if (lickIds && Array.isArray(lickIds) && lickIds.length > 0) {
       // Validate that all licks exist
-      const validLickIds = lickIds.filter(
-        (id) => mongoose.Types.ObjectId.isValid(id)
+      const validLickIds = lickIds.filter((id) =>
+        mongoose.Types.ObjectId.isValid(id)
       );
-      const existingLicks = await Lick.find({
-        _id: { $in: validLickIds },
-        isPublic: true,
-      }).select("_id");
 
-      const existingLickIds = existingLicks.map((lick) => lick._id.toString());
+      // Build query based on playlist privacy
+      // Business Rule: Public playlists can only contain public licks
+      // Private playlists can contain both public and private licks
+      const lickQuery = { _id: { $in: validLickIds } };
+      if (newPlaylist.isPublic) {
+        lickQuery.isPublic = true; // Only public licks for public playlists
+      }
+      // For private playlists, no isPublic filter (can include both)
+
+      const existingLicks = await Lick.find(lickQuery).select("_id isPublic");
+
+      // Double-check: if playlist is public, filter out any private licks
+      const allowedLicks = newPlaylist.isPublic
+        ? existingLicks.filter((lick) => lick.isPublic === true)
+        : existingLicks;
+
+      const existingLickIds = allowedLicks.map((lick) => lick._id.toString());
+
+      // Check if any private licks were filtered out
+      if (
+        newPlaylist.isPublic &&
+        existingLicks.length !== allowedLicks.length
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Public playlists can only contain public licks. Some selected licks are private.",
+        });
+      }
 
       // Add licks to playlist with positions
       const playlistLicksToAdd = existingLickIds.map((lickId, index) => ({
@@ -397,6 +423,29 @@ export const updatePlaylist = async (req, res) => {
       });
     }
 
+    // Business Rule: If changing playlist from private to public,
+    // check that all licks in the playlist are public
+    if (update.isPublic === true && playlist.isPublic === false) {
+      // Get all licks in the playlist
+      const playlistLicks = await PlaylistLick.find({ playlistId }).populate(
+        "lickId",
+        "isPublic"
+      );
+
+      // Check if any lick is private
+      const hasPrivateLicks = playlistLicks.some(
+        (pl) => pl.lickId && !pl.lickId.isPublic
+      );
+
+      if (hasPrivateLicks) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Cannot make playlist public. It contains private licks. Please remove private licks first or make them public.",
+        });
+      }
+    }
+
     const updatedPlaylist = await Playlist.findByIdAndUpdate(
       playlistId,
       update,
@@ -510,12 +559,20 @@ export const addLickToPlaylist = async (req, res) => {
       });
     }
 
-    // Validate lick exists and is public
-    const lick = await Lick.findOne({ _id: lickId, isPublic: true });
+    // Validate lick exists
+    const lick = await Lick.findById(lickId);
     if (!lick) {
       return res.status(404).json({
         success: false,
-        message: "Lick not found or not public",
+        message: "Lick not found",
+      });
+    }
+
+    // Business Rule: If playlist is public, only allow public licks
+    if (playlist.isPublic && !lick.isPublic) {
+      return res.status(400).json({
+        success: false,
+        message: "Public playlists can only contain public licks",
       });
     }
 
@@ -682,4 +739,3 @@ export const reorderPlaylistLicks = async (req, res) => {
     });
   }
 };
-
