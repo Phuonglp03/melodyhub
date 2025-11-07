@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Button, Spin, Empty, message } from "antd";
+import { Button, Spin, Empty } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import LickDetail from "../../../components/LickDetail";
 import { getLickById } from "../../../services/user/lickService";
@@ -13,6 +13,18 @@ const LickDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [likesCount, setLikesCount] = useState(null);
+
+  const handleTabNotationUpdate = (updatedTab) => {
+    setLick((prev) =>
+      prev
+        ? {
+            ...prev,
+            tab_notation: updatedTab,
+            tabNotation: updatedTab,
+          }
+        : prev
+    );
+  };
 
   const fetchData = async () => {
     try {
@@ -88,6 +100,7 @@ const LickDetailPage = () => {
         showPlayer={true}
         showComments={true}
         showSidebar={true}
+        onTabNotationUpdate={handleTabNotationUpdate}
       />
     </div>
   );

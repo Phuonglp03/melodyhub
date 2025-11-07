@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { FaSearch, FaPlus, FaFilter } from "react-icons/fa";
 import http from "../../../services/http";
 import {
@@ -11,6 +12,7 @@ import MyLickCard from "../../../components/MyLickCard";
 const MyLicksPage = () => {
   // userId is resolved server-side via JWT on /user/me
 
+  const navigate = useNavigate();
   const [licks, setLicks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -30,7 +32,6 @@ const MyLicksPage = () => {
   const [editForm, setEditForm] = useState({
     title: "",
     description: "",
-    tabNotation: "",
     key: "",
     tempo: "",
     difficulty: "",
@@ -103,7 +104,7 @@ const MyLicksPage = () => {
 
   // Handle lick click
   const handleLickClick = (lickId) => {
-    window.location.href = `/lick/${lickId}`;
+    navigate(`/licks/${lickId}`);
   };
 
   // Handle edit
@@ -115,7 +116,6 @@ const MyLicksPage = () => {
     setEditForm({
       title: lick.title || "",
       description: lick.description || "",
-      tabNotation: lick.tab_notation || "",
       key: lick.key || "",
       tempo: lick.tempo || "",
       difficulty: lick.difficulty || "",
@@ -154,7 +154,7 @@ const MyLicksPage = () => {
 
   // Handle upload
   const handleUpload = () => {
-    window.location.href = "/licks/upload";
+    navigate("/licks/upload");
   };
 
   const handleEditChange = (e) => {
@@ -173,7 +173,6 @@ const MyLicksPage = () => {
       const payload = {
         title: editForm.title,
         description: editForm.description,
-        tabNotation: editForm.tabNotation,
         key: editForm.key,
         tempo: editForm.tempo,
         difficulty: editForm.difficulty,
@@ -192,7 +191,7 @@ const MyLicksPage = () => {
                   ...l,
                   title: updated.title ?? editForm.title,
                   description: updated.description ?? editForm.description,
-                  tab_notation: updated.tabNotation ?? editForm.tabNotation,
+                  tab_notation: updated.tabNotation ?? l.tab_notation,
                   key: updated.key ?? editForm.key,
                   tempo: updated.tempo ?? editForm.tempo,
                   difficulty: updated.difficulty ?? editForm.difficulty,
@@ -477,18 +476,6 @@ const MyLicksPage = () => {
                     <option value="inactive">Inactive</option>
                   </select>
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">
-                  Tab Notation (optional)
-                </label>
-                <textarea
-                  name="tabNotation"
-                  value={editForm.tabNotation}
-                  onChange={handleEditChange}
-                  rows={4}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
               </div>
               <div className="flex items-center gap-6">
                 <label className="inline-flex items-center gap-2 text-sm text-gray-300">

@@ -9,6 +9,7 @@ import {
   Button,
   Divider,
   Spin,
+  message,
 } from "antd";
 import {
   HeartOutlined,
@@ -23,6 +24,8 @@ import LickPlayer from "./LickPlayer";
 import GuitarTabNotation from "./GuitarTabNotation";
 import CommentSection from "./CommentSection";
 import { getMyProfile } from "../services/user/profile";
+import GuitarTabEditor from "./GuitarTabEditor";
+import { updateLick } from "../services/user/lickService";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -34,6 +37,7 @@ const LickDetail = ({
   showPlayer = true,
   showComments = true,
   showSidebar = true,
+  onTabNotationUpdate = () => {},
 }) => {
   // Create audio ref for syncing player with tab notation
   const audioRef = useRef(null);
@@ -50,6 +54,11 @@ const LickDetail = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [myProfile, setMyProfile] = useState(null);
+  const [tabContent, setTabContent] = useState(
+    lick?.tab_notation || lick?.tabNotation || ""
+  );
+  const [isEditingTab, setIsEditingTab] = useState(false);
+  const [savingTab, setSavingTab] = useState(false);
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString("vi-VN", {
       year: "numeric",
@@ -87,6 +96,12 @@ const LickDetail = ({
     loadProfile();
   }, []);
 
+  React.useEffect(() => {
+    const resolvedTab = lick?.tab_notation || lick?.tabNotation || "";
+    setTabContent(resolvedTab);
+    setIsEditingTab(false);
+  }, [lick?.lick_id, lick?.tab_notation, lick?.tabNotation]);
+
   const displayAvatar = myProfile?.avatarUrl || lick.creator?.avatar_url;
   const displayName =
     myProfile?.displayName ||
@@ -94,6 +109,49 @@ const LickDetail = ({
     lick.creator?.username ||
     lick.creator?.display_name ||
     "Unknown User";
+
+  const resolvedCurrentUserId =
+    myProfile?.id ||
+    authUser?.user?.id ||
+    authUser?.id ||
+    currentUser?.id ||
+    currentUserId;
+  const lickOwnerId =
+    lick.creator?.user_id ||
+    lick.userId ||
+    lick.user_id ||
+    lick.creator?._id ||
+    null;
+  const canEditTab =
+    Boolean(resolvedCurrentUserId) &&
+    Boolean(lickOwnerId) &&
+    String(resolvedCurrentUserId) === String(lickOwnerId);
+
+  const handleTabSave = async (newTab) => {
+    if (!canEditTab) return;
+    if (savingTab) {
+      message.info("Tab notation update in progress");
+      return;
+    }
+
+    setSavingTab(true);
+    try {
+      const response = await updateLick(lick.lick_id, { tabNotation: newTab });
+      const updatedTab =
+        response?.data?.tabNotation !== undefined
+          ? response.data.tabNotation
+          : newTab;
+      setTabContent(updatedTab);
+      onTabNotationUpdate(updatedTab);
+      message.success("Tab notation updated successfully");
+      setIsEditingTab(false);
+    } catch (error) {
+      console.error("Error updating tab notation:", error);
+      message.error(error?.message || "Failed to update tab notation");
+    } finally {
+      setSavingTab(false);
+    }
+  };
 
   const handleLike = async () => {
     const tokenFromStorage = (() => {
@@ -140,11 +198,13 @@ const LickDetail = ({
       <Col xs={24} lg={showSidebar ? 16 : 24}>
         <Card
           style={{
-            backgroundColor: "#2a2a2a",
-            border: "1px solid #333",
-            borderRadius: "8px",
+            backgroundColor: "#111827",
+            border: "1px solid #1f2937",
+            borderRadius: "12px",
             marginBottom: "24px",
+            boxShadow: "0 20px 45px rgba(15, 23, 42, 0.35)",
           }}
+          bodyStyle={{ padding: "28px" }}
         >
           {/* Audio Player */}
           {showPlayer && (
@@ -161,7 +221,10 @@ const LickDetail = ({
 
           {/* Lick Info */}
           <div style={{ marginBottom: "24px" }}>
-            <Title level={2} style={{ color: "white", marginBottom: "8px" }}>
+            <Title
+              level={2}
+              style={{ color: "#f9fafb", marginBottom: "12px" }}
+            >
               {lick.title}
             </Title>
 
@@ -170,23 +233,26 @@ const LickDetail = ({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  marginBottom: "16px",
+                  marginBottom: "20px",
                 }}
               >
                 {displayAvatar ? (
-                  <Avatar src={displayAvatar} style={{ marginRight: "8px" }} />
+                  <Avatar
+                    src={displayAvatar}
+                    style={{ marginRight: "12px", border: "2px solid #2563eb" }}
+                  />
                 ) : null}
                 <div>
                   <Text
                     style={{
-                      color: "white",
+                      color: "#f9fafb",
                       display: "block",
                       fontWeight: "bold",
                     }}
                   >
                     {displayName}
                   </Text>
-                  <Text style={{ color: "#ccc", fontSize: "12px" }}>
+                  <Text style={{ color: "#94a3b8", fontSize: "12px" }}>
                     {formatDate(lick.created_at)}
                   </Text>
                 </div>
@@ -194,27 +260,40 @@ const LickDetail = ({
             )}
 
             {/* Stats */}
-            <div style={{ display: "flex", gap: "24px", marginBottom: "16px" }}>
+            <div
+              style={{
+                display: "flex",
+                gap: "16px",
+                marginBottom: "20px",
+                flexWrap: "wrap",
+              }}
+            >
               <Button
-                type="text"
+                type="primary"
+                ghost
                 icon={<HeartOutlined />}
                 onClick={handleLike}
-                style={{ color: isLiked ? "#ff4757" : "#fff" }}
+                style={{
+                  color: isLiked ? "#f97316" : "#f9fafb",
+                  borderColor: "#334155",
+                  backgroundColor: isLiked ? "rgba(249,115,22,0.15)" : "transparent",
+                }}
               >
                 {localLikesCount} likes
               </Button>
               <Button
-                type="text"
+                type="primary"
+                ghost
                 icon={<CommentOutlined />}
-                style={{ color: "#3742fa" }}
+                style={{ color: "#38bdf8", borderColor: "#334155" }}
               >
-                {commentsCount}
-                comments
+                {commentsCount} comments
               </Button>
               <Button
-                type="text"
+                type="primary"
+                ghost
                 icon={<ShareAltOutlined />}
-                style={{ color: "#2ed573" }}
+                style={{ color: "#a855f7", borderColor: "#334155" }}
               >
                 Share
               </Button>
@@ -225,8 +304,15 @@ const LickDetail = ({
               {lick.tags.map((tag) => (
                 <Tag
                   key={tag.tag_id}
-                  color="orange"
-                  style={{ marginBottom: "4px" }}
+                  color="#f97316"
+                  style={{
+                    marginBottom: "6px",
+                    background: "rgba(249, 115, 22, 0.15)",
+                    border: "1px solid rgba(249, 115, 22, 0.4)",
+                    color: "#fb923c",
+                    borderRadius: "999px",
+                    padding: "2px 10px",
+                  }}
                 >
                   #{tag.tag_name}
                 </Tag>
@@ -235,7 +321,9 @@ const LickDetail = ({
 
             {/* Description */}
             {lick.description && (
-              <Paragraph style={{ color: "#ccc", marginBottom: "16px" }}>
+              <Paragraph
+                style={{ color: "#e2e8f0", marginBottom: "20px", lineHeight: 1.6 }}
+              >
                 {lick.description}
               </Paragraph>
             )}
@@ -243,39 +331,98 @@ const LickDetail = ({
             {/* Technical Info */}
             <Row gutter={[16, 16]}>
               <Col xs={12} sm={6}>
-                <Text style={{ color: "#ccc", fontSize: "12px" }}>Key:</Text>
+                <Text style={{ color: "#94a3b8", fontSize: "12px" }}>Key:</Text>
                 <br />
-                <Text style={{ color: "white" }}>{lick.key || "N/A"}</Text>
+                <Text style={{ color: "#f9fafb" }}>{lick.key || "N/A"}</Text>
               </Col>
               <Col xs={12} sm={6}>
-                <Text style={{ color: "#ccc", fontSize: "12px" }}>Tempo:</Text>
+                <Text style={{ color: "#94a3b8", fontSize: "12px" }}>Tempo:</Text>
                 <br />
-                <Text style={{ color: "white" }}>
-                  {lick.tempo || "N/A"} BPM
-                </Text>
+                <Text style={{ color: "#f9fafb" }}>{lick.tempo || "N/A"} BPM</Text>
               </Col>
               <Col xs={12} sm={6}>
-                <Text style={{ color: "#ccc", fontSize: "12px" }}>
+                <Text style={{ color: "#94a3b8", fontSize: "12px" }}>
                   Difficulty:
                 </Text>
                 <br />
-                <Text style={{ color: "white" }}>
-                  {lick.difficulty || "N/A"}
-                </Text>
+                <Text style={{ color: "#f9fafb" }}>{lick.difficulty || "N/A"}</Text>
               </Col>
               <Col xs={12} sm={6}>
-                <Text style={{ color: "#ccc", fontSize: "12px" }}>
+                <Text style={{ color: "#94a3b8", fontSize: "12px" }}>
                   Duration:
                 </Text>
                 <br />
-                <Text style={{ color: "white" }}>
-                  {lick.duration || "N/A"}s
-                </Text>
+                <Text style={{ color: "#f9fafb" }}>{lick.duration || "N/A"}s</Text>
               </Col>
             </Row>
           </div>
 
-          <Divider style={{ borderColor: "#333" }} />
+          <Divider style={{ borderColor: "#1f2937" }} />
+
+          {canEditTab && (
+            <div style={{ marginBottom: "24px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "16px",
+                  gap: "16px",
+                }}
+              >
+                <Title
+                  level={4}
+                  style={{ color: "white", margin: 0, fontSize: "20px" }}
+                >
+                  Tab Notation Editor
+                </Title>
+                <Button
+                  type="primary"
+                  ghost={!isEditingTab}
+                  onClick={() => setIsEditingTab((prev) => !prev)}
+                  disabled={savingTab}
+                  style={{
+                    borderColor: isEditingTab ? "#f97316" : "#334155",
+                    background: isEditingTab ? "#f97316" : "transparent",
+                    color: isEditingTab ? "white" : "#f9fafb",
+                  }}
+                >
+                  {isEditingTab ? "Close Editor" : "Edit Tab"}
+                </Button>
+              </div>
+              {isEditingTab ? (
+                <GuitarTabEditor
+                  initialTab={tabContent}
+                  onSave={handleTabSave}
+                  tempo={lick.tempo || 120}
+                />
+              ) : (
+                <div
+                  style={{
+                    backgroundColor: "#0f172a",
+                    border: "1px solid #1f2937",
+                    borderRadius: "10px",
+                    padding: "18px",
+                  }}
+                >
+                  {tabContent ? (
+                    <GuitarTabNotation
+                      tabData={tabContent}
+                      tempo={lick.tempo || 120}
+                      isEditable={false}
+                      audioRef={audioRef}
+                      audioDuration={lick.duration || 0}
+                    />
+                  ) : (
+                    <Text style={{ color: "#64748b" }}>
+                      No tab notation available. Click "Edit Tab" to create
+                      one.
+                    </Text>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {showComments && (
             <div style={{ marginTop: "16px" }}>
@@ -293,38 +440,60 @@ const LickDetail = ({
       {showSidebar && (
         <Col xs={24} lg={8}>
           <Card
-            title="Thông tin chi tiết"
+            title={canEditTab ? "Playback & Notes" : "Tab Notation"}
             style={{
-              backgroundColor: "#2a2a2a",
-              border: "1px solid #333",
-              borderRadius: "8px",
+              backgroundColor: "#0f172a",
+              border: "1px solid #1f2937",
+              borderRadius: "12px",
+              boxShadow: "0 18px 40px rgba(15,23,42,0.35)",
             }}
+            headStyle={{
+              color: "#f9fafb",
+              borderBottom: "1px solid #1f2937",
+              background: "rgba(148, 163, 184, 0.08)",
+            }}
+            bodyStyle={{ padding: "24px" }}
           >
             <div style={{ color: "white" }}>
-              <div style={{ marginBottom: "16px" }}>
-                {lick.tab_notation || lick.tabNotation ? (
-                  <GuitarTabNotation
-                    tabData={lick.tab_notation || lick.tabNotation}
-                    tempo={lick.tempo || 120}
-                    isEditable={false}
-                    audioRef={audioRef}
-                    audioDuration={lick.duration || 0}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      backgroundColor: "#1a1a1a",
-                      padding: "20px",
-                      borderRadius: "8px",
-                      textAlign: "center",
-                    }}
-                  >
-                    <Text style={{ color: "#666" }}>
-                      No tab notation available
-                    </Text>
-                  </div>
-                )}
-              </div>
+              {canEditTab ? (
+                <div style={{ color: "#94a3b8", lineHeight: 1.6 }}>
+                  <p style={{ marginBottom: "12px" }}>
+                    Sync the Tab Editor with the player to fine tune notes as
+                    you listen. Use the waveform progress to align with each
+                    measure.
+                  </p>
+                  <Divider style={{ borderColor: "#1f2937" }} />
+                  <p style={{ marginBottom: 0 }}>
+                    Tip: Save often to capture your changes. Closing the editor
+                    will reveal the rendered tab for a quick preview.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ marginBottom: "0" }}>
+                  {tabContent ? (
+                    <GuitarTabNotation
+                      tabData={tabContent}
+                      tempo={lick.tempo || 120}
+                      isEditable={false}
+                      audioRef={audioRef}
+                      audioDuration={lick.duration || 0}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        backgroundColor: "#111827",
+                        padding: "20px",
+                        borderRadius: "10px",
+                        textAlign: "center",
+                      }}
+                    >
+                      <Text style={{ color: "#64748b" }}>
+                        No tab notation available
+                      </Text>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </Card>
         </Col>
