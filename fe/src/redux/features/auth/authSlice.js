@@ -1,28 +1,30 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import { 
-  login as loginService, 
-  register as registerService, 
-  logout as logoutService, 
+import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
+import {
+  login as loginService,
+  register as registerService,
+  logout as logoutService,
   getCurrentUser as getCurrentUserService,
-  loginWithGoogle as loginWithGoogleService
-} from '../../../services/authService';
+  loginWithGoogle as loginWithGoogleService,
+} from "../../../services/authService";
 
-// Lấy thông tin user từ localStorage khi khởi tạo
-const user = JSON.parse(localStorage.getItem('user'));
+// Lấy thông tin user hợp lệ từ localStorage khi khởi tạo
+// Chỉ chấp nhận khi có token và có đối tượng user bên trong
+const storedAuth = JSON.parse(localStorage.getItem("user"));
+const initialUser = storedAuth?.token ? storedAuth.user || null : null;
 
 const initialState = {
-  user: user || null,
+  user: initialUser,
   isError: false,
   isSuccess: false,
   isLoading: false,
-  message: '',
+  message: "",
   requiresVerification: false,
-  verificationEmail: '',
+  verificationEmail: "",
 };
 
 // Đăng ký người dùng mới
 export const register = createAsyncThunk(
-  'auth/register',
+  "auth/register",
   async (userData, thunkAPI) => {
     try {
       return await registerService(userData);
@@ -40,22 +42,25 @@ export const register = createAsyncThunk(
 
 // Đăng nhập
 export const login = createAsyncThunk(
-  'auth/login',
+  "auth/login",
   async (credentials, thunkAPI) => {
     try {
-      const response = await loginService(credentials.email, credentials.password);
-      
+      const response = await loginService(
+        credentials.email,
+        credentials.password
+      );
+
       // If login requires email verification
       if (response.requiresVerification) {
         return { requiresVerification: true, ...response };
       }
-      
+
       // If login is successful
       if (response.success) {
         return response.data;
       }
-      
-      return thunkAPI.rejectWithValue(response.message || 'Đăng nhập thất bại');
+
+      return thunkAPI.rejectWithValue(response.message || "Đăng nhập thất bại");
     } catch (error) {
       const message =
         (error.response &&
@@ -70,7 +75,7 @@ export const login = createAsyncThunk(
 
 // Google Login
 export const googleLogin = createAsyncThunk(
-  'auth/googleLogin',
+  "auth/googleLogin",
   async (token, thunkAPI) => {
     try {
       return await loginWithGoogleService(token);
@@ -87,20 +92,21 @@ export const googleLogin = createAsyncThunk(
 );
 
 // Đăng xuất
-export const logout = createAsyncThunk('auth/logout', async () => {
+export const logout = createAsyncThunk("auth/logout", async () => {
   await logoutService();
 });
 
 // Làm mới thông tin người dùng
 export const refreshUser = createAsyncThunk(
-  'auth/refresh',
+  "auth/refresh",
   async (_, thunkAPI) => {
     try {
-      const user = getCurrentUserService();
-      if (!user) {
-        return thunkAPI.rejectWithValue('Không tìm thấy thông tin đăng nhập');
+      const current = getCurrentUserService();
+      // Chỉ coi là đăng nhập khi có token và có dữ liệu user
+      if (!current?.token || !(current?.user || current)) {
+        return thunkAPI.rejectWithValue("Không tìm thấy thông tin đăng nhập");
       }
-      return user;
+      return current.user || current;
     } catch (error) {
       const message =
         (error.response &&
@@ -114,14 +120,14 @@ export const refreshUser = createAsyncThunk(
 );
 
 const authSlice = createSlice({
-  name: 'auth',
+  name: "auth",
   initialState,
   reducers: {
     reset: (state) => {
       state.isLoading = false;
       state.isSuccess = false;
       state.isError = false;
-      state.message = '';
+      state.message = "";
     },
   },
   extraReducers: (builder) => {
@@ -132,10 +138,10 @@ const authSlice = createSlice({
       .addCase(register.fulfilled, (state, action) => {
         state.isLoading = false;
         state.isSuccess = true;
-        
+
         // Log để debug
-        console.log('Registration payload:', action.payload);
-        
+        console.log("Registration payload:", action.payload);
+
         // Xử lý dữ liệu trả về từ đăng ký
         if (action.payload.token) {
           // Nếu có token, lưu thông tin user vào state
@@ -146,17 +152,17 @@ const authSlice = createSlice({
               username: action.payload.username,
               displayName: action.payload.displayName,
               verifiedEmail: action.payload.verifiedEmail,
-              roleId: action.payload.roleId
+              roleId: action.payload.roleId,
             }),
             token: action.payload.token,
-            refreshToken: action.payload.refreshToken
+            refreshToken: action.payload.refreshToken,
           };
         } else {
           // Nếu không có token, vẫn lưu thông tin user nếu có
           state.user = action.payload.user || action.payload;
         }
-        
-        state.message = action.payload.message || 'Đăng ký thành công';
+
+        state.message = action.payload.message || "Đăng ký thành công";
       })
       .addCase(register.rejected, (state, action) => {
         state.isLoading = false;
@@ -167,20 +173,20 @@ const authSlice = createSlice({
       .addCase(login.pending, (state) => {
         state.isLoading = true;
         state.isError = false;
-        state.message = '';
+        state.message = "";
       })
       .addCase(login.fulfilled, (state, action) => {
         state.isLoading = false;
         state.isSuccess = true;
         state.isError = false;
-        state.message = action.payload?.message || 'Đăng nhập thành công';
-        
+        state.message = action.payload?.message || "Đăng nhập thành công";
+
         if (action.payload?.user) {
           state.user = action.payload.user;
         } else if (action.payload?.data?.user) {
           state.user = action.payload.data.user;
         }
-        
+
         // Handle email verification required
         if (action.payload?.requiresVerification) {
           state.requiresVerification = true;
@@ -190,7 +196,7 @@ const authSlice = createSlice({
       .addCase(login.rejected, (state, action) => {
         state.isLoading = false;
         state.isError = true;
-        state.message = action.payload || 'Đăng nhập thất bại';
+        state.message = action.payload || "Đăng nhập thất bại";
         state.user = null;
       })
       .addCase(googleLogin.pending, (state) => {
@@ -210,8 +216,16 @@ const authSlice = createSlice({
       .addCase(logout.fulfilled, (state) => {
         state.user = null;
       })
+      .addCase(refreshUser.pending, (state) => {
+        state.isLoading = true;
+      })
       .addCase(refreshUser.fulfilled, (state, action) => {
+        state.isLoading = false;
         state.user = action.payload;
+      })
+      .addCase(refreshUser.rejected, (state) => {
+        state.isLoading = false;
+        state.user = null;
       });
   },
 });

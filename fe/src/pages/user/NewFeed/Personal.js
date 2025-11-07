@@ -909,7 +909,11 @@ const PersonalFeed = () => {
                     }}
                   >
                     <Space align="start" size={14}>
-                      <Avatar size={40} src={post?.userId?.avatarUrl} style={{ background: "#2db7f5" }}>
+                      <Avatar
+                        size={40}
+                        src={post?.userId?.avatarUrl}
+                        style={{ background: "#2db7f5" }}
+                      >
                         {
                           (post?.userId?.displayName ||
                             post?.userId?.username ||
@@ -1087,7 +1091,11 @@ const PersonalFeed = () => {
                                 marginBottom: 8,
                               }}
                             >
-                              <Avatar size={28} src={c?.userId?.avatarUrl} style={{ background: "#555" }}>
+                              <Avatar
+                                size={28}
+                                src={c?.userId?.avatarUrl}
+                                style={{ background: "#555" }}
+                              >
                                 {c?.userId?.displayName?.[0] ||
                                   c?.userId?.username?.[0] ||
                                   "U"}

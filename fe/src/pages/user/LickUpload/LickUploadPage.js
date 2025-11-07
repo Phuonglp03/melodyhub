@@ -14,6 +14,8 @@ import {
   getBasicPitchStatus,
   preloadBasicPitch,
 } from "../../../services/basicPitchService";
+import TagFlowBoard from "../../../components/TagFlowBoard";
+import { fetchTagsGrouped } from "../../../services/user/tagService";
 
 const LickUploadPage = () => {
   const navigate = useNavigate();
@@ -37,7 +39,6 @@ const LickUploadPage = () => {
     tempo: "",
     difficulty: "beginner",
     isPublic: true,
-    userId: "507f1f77bcf86cd799439011", // Test user ID
   });
 
   // Audio file state
@@ -59,6 +60,240 @@ const LickUploadPage = () => {
     available: false,
     status: "not_loaded",
   });
+
+  // Tags taxonomy (grouped) fetched from API; fallback to local if needed
+  const FALLBACK_TAGS = {
+    Type: [
+      "Acoustic",
+      "Chord",
+      "Down Sweep/Fall",
+      "Dry",
+      "Harmony",
+      "Loop",
+      "Melody",
+      "Mixed",
+      "Monophonic",
+      "One Shot",
+      "Polyphonic",
+      "Processed",
+      "Progression",
+      "Riser/Sweep",
+      "Short",
+      "Wet",
+    ],
+    Timbre: [
+      "Bassy",
+      "Boomy",
+      "Breathy",
+      "Bright",
+      "Buzzy",
+      "Clean",
+      "Coarse/Harsh",
+      "Cold",
+      "Dark",
+      "Delicate",
+      "Detuned",
+      "Dissonant",
+      "Distorted",
+      "Exotic",
+      "Fat",
+      "Full",
+      "Glitchy",
+      "Granular",
+      "Gloomy",
+      "Hard",
+      "High",
+      "Hollow",
+      "Low",
+      "Metallic",
+      "Muffled",
+      "Muted",
+      "Narrow",
+      "Noisy",
+      "Round",
+      "Sharp",
+      "Shimmering",
+      "Sizzling",
+      "Smooth",
+      "Soft",
+      "Piercing",
+      "Thin",
+      "Tinny",
+      "Warm",
+      "Wide",
+      "Wooden",
+    ],
+    Genre: [
+      "Afrobeat",
+      "Amapiano",
+      "Ambient",
+      "Breaks",
+      "Brazilian Funk",
+      "Chillout",
+      "Chiptune",
+      "Cinematic",
+      "Classical",
+      "Acid House",
+      "Deep House",
+      "Disco",
+      "Drill",
+      "Drum & Bass",
+      "Dubstep",
+      "Ethnic/World",
+      "Electro House",
+      "Electro",
+      "Electro Swing",
+      "Folk/Country",
+      "Funk/Soul",
+      "Jazz",
+      "Jersey Club",
+      "Jungle",
+      "Hardstyle",
+      "House",
+      "Hip Hop",
+      "Latin/Afro Cuban",
+      "Minimal House",
+      "Nu Disco",
+      "R&B",
+      "Reggae/Dub",
+      "Reggaeton",
+      "Rock",
+      "Phonk",
+      "Pop",
+      "Progressive House",
+      "Synthwave",
+      "Tech House",
+      "Techno",
+      "Trance",
+      "Trap",
+      "Vocals",
+    ],
+    Articulation: [
+      "Arpeggiated",
+      "Decaying",
+      "Echoing",
+      "Long Release",
+      "Legato",
+      "Glissando/Glide",
+      "Pad",
+      "Percussive",
+      "Pitch Bend",
+      "Plucked",
+      "Pulsating",
+      "Punchy",
+      "Randomized",
+      "Slow Attack",
+      "Sweep/Filter Mod",
+      "Staccato/Stabs",
+      "Stuttered/Gated",
+      "Straight",
+      "Sustained",
+      "Syncopated",
+      "Uptempo",
+      "Wobble",
+      "Vibrato",
+    ],
+    Character: [
+      "Analog",
+      "Compressed",
+      "Digital",
+      "Dynamic",
+      "Loud",
+      "Range",
+      "Female",
+      "Funky",
+      "Jazzy",
+      "Lo Fi",
+      "Male",
+      "Quiet",
+      "Vintage",
+      "Vinyl",
+      "Warm",
+    ],
+    Emotional: [
+      "Aggressive",
+      "Angry",
+      "Bouncy",
+      "Calming",
+      "Carefree",
+      "Cheerful",
+      "Climactic",
+      "Cool",
+      "Dramatic",
+      "Elegant",
+      "Epic",
+      "Excited",
+      "Energetic",
+      "Fun",
+      "Futuristic",
+      "Gentle",
+      "Groovy",
+      "Happy",
+      "Haunting",
+      "Hypnotic",
+      "Industrial",
+      "Manic",
+      "Melancholic",
+      "Mellow",
+      "Mystical",
+      "Nervous",
+      "Passionate",
+      "Peaceful",
+      "Playful",
+      "Powerful",
+      "Rebellious",
+      "Reflective",
+      "Relaxing",
+      "Romantic",
+      "Rowdy",
+      "Sad",
+      "Sentimental",
+      "Sexy",
+      "Soothing",
+      "Sophisticated",
+      "Spacey",
+      "Suspenseful",
+      "Uplifting",
+      "Urgent",
+      "Weird",
+    ],
+  };
+
+  const [selectedTags, setSelectedTags] = useState([]); // array of strings
+  const [tagGroups, setTagGroups] = useState({});
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetchTagsGrouped();
+        if (res?.success && res.data) {
+          // Map API -> UI groups as name arrays
+          const mapped = Object.fromEntries(
+            Object.entries(res.data).map(([type, arr]) => [
+              // Map backend tag_type to our group names when possible
+              type === "mood" || type === "emotional"
+                ? "Emotional"
+                : type === "genre"
+                ? "Genre"
+                : type === "instrument"
+                ? "Type"
+                : type === "character"
+                ? "Character"
+                : type === "articulation"
+                ? "Articulation"
+                : type === "timbre"
+                ? "Timbre"
+                : type,
+              arr.map((t) => t.tag_name),
+            ])
+          );
+          // Use server-provided tags only; no fallback merge
+          setTagGroups(mapped);
+        }
+      } catch {}
+    };
+    load();
+  }, []);
 
   // Handle form input changes
   const handleInputChange = (e) => {
@@ -230,7 +465,9 @@ const LickUploadPage = () => {
         }
         setTabEditorMode("playback");
       } else {
-        setError("Tab generation failed or AI returned no notes. Try a different audio file or check your input.");
+        setError(
+          "Tab generation failed or AI returned no notes. Try a different audio file or check your input."
+        );
         setAiProgress("❌ Tab generation failed.");
         setTabEditorMode("visual");
         return; // Abort rest of the flow if failure
@@ -285,7 +522,6 @@ const LickUploadPage = () => {
       // Create FormData
       const submitData = new FormData();
       submitData.append("audio", audioFile);
-      submitData.append("userId", formData.userId);
       submitData.append("title", formData.title);
       submitData.append("description", formData.description || "");
       submitData.append("tabNotation", formData.tabNotation || "");
@@ -294,6 +530,8 @@ const LickUploadPage = () => {
       submitData.append("difficulty", formData.difficulty);
       submitData.append("isPublic", formData.isPublic);
       submitData.append("status", "active");
+      // Attach tags as names array; backend can upsert and attach
+      submitData.append("tags", JSON.stringify(selectedTags));
 
       // Submit to backend
       const response = await createLick(submitData);
@@ -695,6 +933,38 @@ const LickUploadPage = () => {
             </div>
           </div>
 
+          {/* Tags */}
+          <div className="bg-gray-900 rounded-lg p-6 border border-gray-800">
+            <h3 className="text-lg font-semibold text-white mb-4">Tags</h3>
+            <p className="text-gray-400 text-sm mb-3">
+              Sound Palette · chọn thẻ để mô tả màu âm
+            </p>
+            <TagFlowBoard
+              groups={tagGroups}
+              selected={selectedTags}
+              onToggle={(t) =>
+                setSelectedTags((prev) =>
+                  prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+                )
+              }
+            />
+            {selectedTags.length > 0 && (
+              <div className="mt-4">
+                <p className="text-gray-400 text-sm mb-2">Selected:</p>
+                <div className="flex flex-wrap gap-2">
+                  {selectedTags.map((t) => (
+                    <span
+                      key={t}
+                      className="text-[11px] px-2 py-1 rounded-full bg-gray-800 text-gray-300 border border-gray-700"
+                    >
+                      #{t}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Tab Notation */}
           <div
             data-section="tab-notation"
@@ -774,9 +1044,9 @@ const LickUploadPage = () => {
                       Preparing audio...
                     </div>
                   ) : (
-                  <p className="text-gray-400">
-                    Enter tab notation to use playback mode
-                  </p>
+                    <p className="text-gray-400">
+                      Enter tab notation to use playback mode
+                    </p>
                   )}
                 </div>
               )

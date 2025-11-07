@@ -11,10 +11,13 @@ import {
   generateTab,
   getLickComments,
   addLickComment,
+  updateLickComment,
+  deleteLickComment,
   // getLickComments,
   // addLickComment,
 } from "../controllers/lickController.js";
 import { uploadAudio } from "../middleware/file.js";
+import { verifyToken } from "../middleware/auth.js";
 
 const jsonParser = express.json({ limit: "2mb" });
 
@@ -27,12 +30,15 @@ const router = express.Router();
 // GET /api/licks/community - Get community licks with search, filter, sort, and pagination
 router.get("/community", getCommunityLicks);
 
-// GET /api/licks/user/:userId - Get user's own licks (My Licks) with search, filter, and status
+// GET current user's licks (auth) - uses req.userId
+router.get("/user/me", verifyToken, getMyLicks);
+
+// GET /api/licks/user/:userId - fallback legacy route
 router.get("/user/:userId", getMyLicks);
 
 // POST /api/licks - Create a new lick (with audio file upload)
 // IMPORTANT: This route must come BEFORE /:lickId routes
-router.post("/", uploadAudio.single("audio"), createLick);
+router.post("/", verifyToken, uploadAudio.single("audio"), createLick);
 
 // POST /api/licks/generate-tab - Generate guitar tab from audio using AI
 // IMPORTANT: Must come BEFORE /:lickId routes to avoid being caught by them
@@ -45,7 +51,7 @@ router.get("/:lickId/play", playLickAudio);
 router.get("/:lickId", getLickById);
 
 // POST /api/licks/:lickId/like - Like/Unlike a lick
-router.post("/:lickId/like", jsonParser, toggleLickLike);
+router.post("/:lickId/like", verifyToken, jsonParser, toggleLickLike);
 
 // PUT /api/licks/:lickId - Update a lick
 router.put("/:lickId", jsonParser, updateLick);
@@ -55,7 +61,9 @@ router.delete("/:lickId", deleteLick);
 
 // Comments
 router.get("/:lickId/comments", getLickComments);
-router.post("/:lickId/comments", jsonParser, addLickComment);
+router.post("/:lickId/comments", verifyToken, jsonParser, addLickComment);
+router.put("/:lickId/comments/:commentId", verifyToken, jsonParser, updateLickComment);
+router.delete("/:lickId/comments/:commentId", verifyToken, deleteLickComment);
 
 console.log("[LICK ROUTES] All routes registered successfully");
 

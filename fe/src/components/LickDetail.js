@@ -18,10 +18,11 @@ import {
 import { useDispatch, useSelector } from "react-redux";
 import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
 import { toggleLickLike } from "../services/user/lickService";
-import { getStoredUserId } from "../services/user/post";
+// Use Redux auth state rather than helper for user id
 import LickPlayer from "./LickPlayer";
 import GuitarTabNotation from "./GuitarTabNotation";
 import CommentSection from "./CommentSection";
+import { getMyProfile } from "../services/user/profile";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -37,11 +38,18 @@ const LickDetail = ({
   // Create audio ref for syncing player with tab notation
   const audioRef = useRef(null);
   const dispatch = useDispatch();
+  const authUser = useSelector((s) => s.auth.user);
   const likeState = useSelector((s) => s.likes.byId[lick.lick_id]);
   const isLiked = likeState?.liked || false;
   const localLikesCount = likeState?.count ?? lick.likes_count;
+  const [commentsCount, setCommentsCount] = useState(
+    typeof lick.comments_count === "number"
+      ? lick.comments_count
+      : lick.commentsCount ?? 0
+  );
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [myProfile, setMyProfile] = useState(null);
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString("vi-VN", {
       year: "numeric",
@@ -64,9 +72,42 @@ const LickDetail = ({
     }
   }, [dispatch, likeState, lick.lick_id, lick.likes_count]);
 
+  React.useEffect(() => {
+    // Fetch current user's profile for displaying correct user info
+    const loadProfile = async () => {
+      try {
+        const res = await getMyProfile();
+        if (res?.success && res?.data?.user) {
+          setMyProfile(res.data.user);
+        }
+      } catch (_) {
+        // ignore - fallback to lick.creator below
+      }
+    };
+    loadProfile();
+  }, []);
+
+  const displayAvatar = myProfile?.avatarUrl || lick.creator?.avatar_url;
+  const displayName =
+    myProfile?.displayName ||
+    myProfile?.username ||
+    lick.creator?.username ||
+    lick.creator?.display_name ||
+    "Unknown User";
+
   const handleLike = async () => {
-    const userId = getStoredUserId() || currentUserId;
-    if (!userId || userId === "current-user-id") {
+    const tokenFromStorage = (() => {
+      try {
+        const stored = localStorage.getItem("user");
+        return stored ? JSON.parse(stored)?.token : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+
+    const userId = authUser?.user?.id || authUser?.id || currentUserId;
+    const hasToken = Boolean(tokenFromStorage);
+    if (!userId || !hasToken || userId === "current-user-id") {
       alert("You need to be logged in to like licks.");
       return;
     }
@@ -124,32 +165,33 @@ const LickDetail = ({
               {lick.title}
             </Title>
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                marginBottom: "16px",
-              }}
-            >
-              <Avatar
-                src={lick.creator.avatar_url}
-                style={{ marginRight: "8px" }}
-              />
-              <div>
-                <Text
-                  style={{
-                    color: "white",
-                    display: "block",
-                    fontWeight: "bold",
-                  }}
-                >
-                  {lick.creator.display_name}
-                </Text>
-                <Text style={{ color: "#ccc", fontSize: "12px" }}>
-                  {formatDate(lick.created_at)}
-                </Text>
+            {(myProfile || lick.creator) && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  marginBottom: "16px",
+                }}
+              >
+                {displayAvatar ? (
+                  <Avatar src={displayAvatar} style={{ marginRight: "8px" }} />
+                ) : null}
+                <div>
+                  <Text
+                    style={{
+                      color: "white",
+                      display: "block",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    {displayName}
+                  </Text>
+                  <Text style={{ color: "#ccc", fontSize: "12px" }}>
+                    {formatDate(lick.created_at)}
+                  </Text>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Stats */}
             <div style={{ display: "flex", gap: "24px", marginBottom: "16px" }}>
@@ -166,9 +208,7 @@ const LickDetail = ({
                 icon={<CommentOutlined />}
                 style={{ color: "#3742fa" }}
               >
-                {typeof lick.comments_count === "number"
-                  ? lick.comments_count
-                  : lick.commentsCount ?? 0}{" "}
+                {commentsCount}
                 comments
               </Button>
               <Button
@@ -242,6 +282,7 @@ const LickDetail = ({
               <CommentSection
                 lickId={lick.lick_id}
                 currentUser={{ id: currentUserId }}
+                onCountChange={setCommentsCount}
               />
             </div>
           )}
@@ -283,56 +324,6 @@ const LickDetail = ({
                     </Text>
                   </div>
                 )}
-              </div>
-
-              <div style={{ marginBottom: "16px" }}>
-                <Text style={{ color: "#ccc", fontSize: "12px" }}>
-                  Waveform Data:
-                </Text>
-                {/* New: Match LickCard.js waveform visualization */}
-                <div className="relative h-28 bg-gradient-to-b from-orange-800 to-orange-900 rounded-lg overflow-hidden mt-2">
-                  {lick.waveform_data && lick.waveform_data.length > 0 ? (
-                    <div className="flex items-center justify-center h-full px-4">
-                      <div className="flex items-center justify-center space-x-0.5 h-full w-full">
-                        {lick.waveform_data.map((amplitude, index) => {
-                          const barProgress = index / lick.waveform_data.length;
-                          const isPlayed = isPlaying && barProgress <= progress;
-                          return (
-                            <div
-                              key={index}
-                              className="w-1 transition-all duration-100"
-                              style={{
-                                backgroundColor: isPlayed
-                                  ? "#fbbf24"
-                                  : "#fdba74",
-                                height: `${Math.max(amplitude * 100, 2)}%`,
-                                opacity: isPlayed ? 1 : 0.7 + amplitude * 0.3,
-                              }}
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-center h-full">
-                      <span className="text-orange-300 opacity-30 text-sm">
-                        No waveform data
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <Text style={{ color: "#ccc", fontSize: "12px" }}>
-                  Featured:
-                </Text>
-                <br />
-                <Text
-                  style={{ color: lick.is_featured ? "#2ed573" : "#ff4757" }}
-                >
-                  {lick.is_featured ? "Yes" : "No"}
-                </Text>
               </div>
             </div>
           </Card>
