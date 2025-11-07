@@ -42,6 +42,11 @@ const LickDetail = ({
   const likeState = useSelector((s) => s.likes.byId[lick.lick_id]);
   const isLiked = likeState?.liked || false;
   const localLikesCount = likeState?.count ?? lick.likes_count;
+  const [commentsCount, setCommentsCount] = useState(
+    typeof lick.comments_count === "number"
+      ? lick.comments_count
+      : lick.commentsCount ?? 0
+  );
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [myProfile, setMyProfile] = useState(null);
@@ -203,9 +208,7 @@ const LickDetail = ({
                 icon={<CommentOutlined />}
                 style={{ color: "#3742fa" }}
               >
-                {typeof lick.comments_count === "number"
-                  ? lick.comments_count
-                  : lick.commentsCount ?? 0}{" "}
+                {commentsCount}
                 comments
               </Button>
               <Button
@@ -279,6 +282,7 @@ const LickDetail = ({
               <CommentSection
                 lickId={lick.lick_id}
                 currentUser={{ id: currentUserId }}
+                onCountChange={setCommentsCount}
               />
             </div>
           )}

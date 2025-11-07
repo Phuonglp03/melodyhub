@@ -260,7 +260,7 @@ const LickUploadPage = () => {
   };
 
   const [selectedTags, setSelectedTags] = useState([]); // array of strings
-  const [tagGroups, setTagGroups] = useState(FALLBACK_TAGS);
+  const [tagGroups, setTagGroups] = useState({});
 
   useEffect(() => {
     const load = async () => {
@@ -287,8 +287,8 @@ const LickUploadPage = () => {
               arr.map((t) => t.tag_name),
             ])
           );
-          // Preserve ordering of known groups
-          setTagGroups({ ...FALLBACK_TAGS, ...mapped });
+          // Use server-provided tags only; no fallback merge
+          setTagGroups(mapped);
         }
       } catch {}
     };

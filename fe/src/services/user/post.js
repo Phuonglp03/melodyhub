@@ -6,7 +6,13 @@ export const getStoredUserId = () => {
     const storedUserRaw = localStorage.getItem('user');
     const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : null;
     // Backend stores `id` in auth responses; fallback to `_id` if present
-    return storedUser?.id || storedUser?._id || undefined;
+    return (
+      storedUser?.user?.id ||
+      storedUser?.user?._id ||
+      storedUser?.id ||
+      storedUser?._id ||
+      undefined
+    );
   } catch {
     return undefined;
   }

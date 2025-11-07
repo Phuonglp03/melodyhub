@@ -128,6 +128,28 @@ export const addLickComment = async (lickId, commentData) => {
   }
 };
 
+// Update a lick comment
+export const updateLickComment = async (lickId, commentId, comment) => {
+  try {
+    const res = await http.put(`/licks/${lickId}/comments/${commentId}`, { comment });
+    return res.data;
+  } catch (error) {
+    console.error("Error updating lick comment:", error);
+    throw error;
+  }
+};
+
+// Delete a lick comment
+export const deleteLickComment = async (lickId, commentId) => {
+  try {
+    const res = await http.delete(`/licks/${lickId}/comments/${commentId}`);
+    return res.data;
+  } catch (error) {
+    console.error("Error deleting lick comment:", error);
+    throw error;
+  }
+};
+
 // Play Lick Audio - Get audio URL for playback
 export const playLickAudio = async (lickId, userId = null) => {
   try {
