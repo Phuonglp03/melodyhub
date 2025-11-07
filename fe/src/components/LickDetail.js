@@ -371,14 +371,16 @@ const LickDetail = ({
                   Tab Notation Editor
                 </Title>
                 <Button
-                  type="primary"
-                  ghost={!isEditingTab}
+                  type="text"
                   onClick={() => setIsEditingTab((prev) => !prev)}
                   disabled={savingTab}
                   style={{
-                    borderColor: isEditingTab ? "#38bdf8" : "#1f2937",
-                    background: isEditingTab ? "#38bdf8" : "transparent",
-                    color: isEditingTab ? "#0f172a" : "#cbd5f5",
+                    padding: "0 12px",
+                    height: "36px",
+                    borderRadius: "8px",
+                    color: isEditingTab ? "#e5e7eb" : "#94a3b8",
+                    backgroundColor: isEditingTab ? "rgba(148, 163, 184, 0.12)" : "transparent",
+                    border: "1px solid rgba(148, 163, 184, 0.2)",
                   }}
                 >
                   {isEditingTab ? "Close Editor" : "Edit Tab"}
