@@ -29,6 +29,7 @@ const LickPlayer = ({
   const [isLoading, setIsLoading] = useState(false);
   const [audioUrl, setAudioUrl] = useState(lick?.audio_url || "");
   const [myProfile, setMyProfile] = useState(null);
+  const animationFrameRef = useRef(null);
 
   const internalAudioRef = useRef(null);
   const audioRef = externalAudioRef || internalAudioRef;
@@ -131,6 +132,39 @@ const LickPlayer = ({
     }
   };
 
+  const animateProgress = () => {
+    if (!audioRef.current) return;
+    const time = audioRef.current.currentTime;
+    setCurrentTime(time);
+    if (onTimeUpdate) {
+      onTimeUpdate(time);
+    }
+    animationFrameRef.current = requestAnimationFrame(animateProgress);
+  };
+
+  React.useEffect(() => {
+    if (isPlaying) {
+      animationFrameRef.current = requestAnimationFrame(animateProgress);
+      return () => {
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+      };
+    }
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+  }, [isPlaying]);
+
+  React.useEffect(() => () => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+  }, []);
+
   const handleSeek = (value) => {
     if (audioRef.current) {
       audioRef.current.currentTime = value;
@@ -139,10 +173,16 @@ const LickPlayer = ({
   };
 
   const handleVolumeChange = (value) => {
+    const nextValue = Array.isArray(value) ? value[0] : value;
+    const normalized = nextValue / 100;
     if (audioRef.current) {
-      audioRef.current.volume = value;
-      setVolume(value);
-      setIsMuted(value === 0);
+      audioRef.current.volume = normalized;
+      setVolume(normalized);
+      if (nextValue === 0) {
+        setIsMuted(true);
+      } else if (isMuted) {
+        setIsMuted(false);
+      }
     }
   };
 
@@ -161,7 +201,10 @@ const LickPlayer = ({
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
+    const millis = Math.floor((seconds % 1) * 100);
+    return `${mins}:${secs.toString().padStart(2, "0")}.${millis
+      .toString()
+      .padStart(2, "0")}`;
   };
 
   const progress = duration > 0 ? currentTime / duration : 0;
@@ -359,9 +402,9 @@ const LickPlayer = ({
             <Col flex={0}>
               <Slider
                 min={0}
-                max={1}
-                step={0.1}
-                value={isMuted ? 0 : volume}
+                max={100}
+                step={1}
+                value={isMuted ? 0 : Math.round(volume * 100)}
                 onChange={handleVolumeChange}
                 style={{ margin: 0, width: 140 }}
                 trackStyle={volumeSliderTheme.track}
