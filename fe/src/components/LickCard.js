@@ -8,9 +8,10 @@ import {
 } from "react-icons/fa";
 import { playLickAudio, getLickById } from "../services/user/lickService";
 import { toggleLickLike } from "../services/user/lickService";
-import { getStoredUserId } from "../services/user/post";
+// Prefer Redux auth state over ad-hoc local storage helpers
 import { useDispatch, useSelector } from "react-redux";
 import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
+import { getProfileById } from "../services/user/profile";
 
 const LickCard = ({ lick, onClick }) => {
   const {
@@ -24,6 +25,35 @@ const LickCard = ({ lick, onClick }) => {
     duration,
     difficulty,
   } = lick;
+
+  // Resolve userId from payload shapes (DB uses userId)
+  const userId =
+    lick.userId ||
+    lick.user_id ||
+    creator?.user_id ||
+    creator?._id ||
+    lick.user?.id ||
+    lick.user?.user_id ||
+    null;
+
+  const [resolvedCreator, setResolvedCreator] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const needFetch = !creator?.display_name && !creator?.username;
+    if (userId && needFetch) {
+      getProfileById(userId)
+        .then((res) => {
+          if (cancelled) return;
+          const u = res?.data?.user || res?.data;
+          if (u) setResolvedCreator(u);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, creator?.display_name, creator?.username]);
 
   // Normalize id across different payloads
   const effectiveId = lick_id || lick._id || lick.id;
@@ -102,6 +132,7 @@ const LickCard = ({ lick, onClick }) => {
   const [progress, setProgress] = useState(0); // Track playback progress (0-1)
   const audioRef = useRef(null);
   const dispatch = useDispatch();
+  const authUser = useSelector((s) => s.auth.user);
   const likeState = useSelector((s) => s.likes.byId[lick_id]);
   const isLiked = likeState?.liked || false;
   const localLikesCount = likeState?.count ?? likes_count;
@@ -192,8 +223,9 @@ const LickCard = ({ lick, onClick }) => {
 
   const handleLike = async (e) => {
     e.stopPropagation();
-    const userId = getStoredUserId();
-    if (!userId) {
+    const userId = authUser?.user?.id || authUser?.id;
+    const hasToken = Boolean(authUser?.token);
+    if (!userId || !hasToken) {
       alert("You need to be logged in to like licks.");
       return;
     }
@@ -272,7 +304,13 @@ const LickCard = ({ lick, onClick }) => {
         </h3>
         <div className="flex items-center text-xs text-gray-400 mb-3">
           <span className="truncate">
-            By {creator?.display_name || "Unknown"}
+            By{" "}
+            {creator?.display_name ||
+              creator?.displayName ||
+              resolvedCreator?.displayName ||
+              creator?.username ||
+              resolvedCreator?.username ||
+              "Unknown"}
           </span>
           <span className="mx-2">•</span>
           <span>{formatDate(created_at)}</span>
@@ -327,13 +365,6 @@ const LickCard = ({ lick, onClick }) => {
               <span>{commentsCount}</span>
             </span>
           </div>
-          <a
-            href="#"
-            onClick={(e) => e.preventDefault()}
-            className="text-gray-400 hover:text-white"
-          >
-            <FaDownload />
-          </a>
         </div>
       </div>
     </div>

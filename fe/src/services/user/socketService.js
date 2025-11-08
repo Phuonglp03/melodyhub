@@ -59,7 +59,7 @@ export const joinRoom = (roomId) => {
 };
 
 export const sendMessage = (roomId, message) => {
-  getSocket().emit('send-message', { roomId, message });
+  getSocket().emit('send-message-liveroom', { roomId, message });
 };
 
 // --- Listeners (Lắng nghe sự kiện) ---
@@ -86,7 +86,7 @@ export const onStreamDetailsUpdated = (callback) => {
 };
 
 export const onNewMessage = (callback) => {
-  getSocket().on('new-message', callback);
+  getSocket().on('new-message-liveroom', callback);
 };
 
 export const onStreamPrivacyUpdated = (callback) => {
@@ -100,7 +100,7 @@ export const offSocketEvents = () => {
   s.off('stream-status-live');
   s.off('stream-status-ended');
   s.off('stream-details-updated');
-  s.off('new-message');
+  s.off('new-message-liveroom');
   s.off('stream-privacy-updated');
 };
 

@@ -1,17 +1,15 @@
 import React, { useState, useEffect } from "react";
+import { FaSearch, FaPlus, FaFilter } from "react-icons/fa";
+import http from "../../../services/http";
 import {
-  FaSearch,
-  FaPlus,
-  FaFilter,
-} from "react-icons/fa";
-import axios from "axios";
-import { deleteLick, updateLick as apiUpdateLick } from "../../../services/user/lickService";
+  deleteLick,
+  updateLick as apiUpdateLick,
+} from "../../../services/user/lickService";
 import MyLickCard from "../../../components/MyLickCard";
 
 // --- Main My Licks Page ---
 const MyLicksPage = () => {
-  // Replace with actual user ID from auth context/redux
-  const userId = "507f1f77bcf86cd799439011"; // TODO: Get from auth
+  // userId is resolved server-side via JWT on /user/me
 
   const [licks, setLicks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,6 +40,12 @@ const MyLicksPage = () => {
   });
   const [saving, setSaving] = useState(false);
 
+  // Delete confirmation modal
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTargetId, setConfirmTargetId] = useState(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [confirmError, setConfirmError] = useState("");
+
   // Fetch user's licks from API
   const fetchMyLicks = async () => {
     try {
@@ -65,16 +69,11 @@ const MyLicksPage = () => {
         params.status = statusFilter;
       }
 
-      const response = await axios.get(
-        `http://localhost:9999/api/licks/user/${userId}`,
-        {
-          params,
-        }
-      );
+      const res = await http.get(`/licks/user/me`, { params });
 
-      if (response.data.success) {
-        setLicks(response.data.data);
-        setPagination(response.data.pagination);
+      if (res.data.success) {
+        setLicks(res.data.data);
+        setPagination(res.data.pagination);
       }
     } catch (err) {
       console.error("Error fetching my licks:", err);
@@ -128,19 +127,28 @@ const MyLicksPage = () => {
   };
 
   // Handle delete
-  const handleDelete = async (lickId) => {
-    if (
-      window.confirm(
-        "Are you sure you want to delete this lick? This action cannot be undone."
-      )
-    ) {
-      try {
-        await deleteLick(lickId);
-        setLicks((prevLicks) => prevLicks.filter((lick) => lick.lick_id !== lickId));
-      } catch (err) {
-        console.error("Error deleting lick:", err);
-        alert("Failed to delete lick");
-      }
+  const handleDelete = (lickId) => {
+    setConfirmTargetId(lickId);
+    setConfirmError("");
+    setConfirmOpen(true);
+  };
+
+  const performDelete = async () => {
+    if (!confirmTargetId) return;
+    try {
+      setConfirmLoading(true);
+      setConfirmError("");
+      await deleteLick(confirmTargetId);
+      setLicks((prevLicks) =>
+        prevLicks.filter((lick) => lick.lick_id !== confirmTargetId)
+      );
+      setConfirmOpen(false);
+      setConfirmTargetId(null);
+    } catch (err) {
+      console.error("Error deleting lick:", err);
+      setConfirmError(err?.message || "Failed to delete lick");
+    } finally {
+      setConfirmLoading(false);
     }
   };
 
@@ -391,7 +399,9 @@ const MyLicksPage = () => {
             </div>
             <form onSubmit={handleEditSubmit} className="px-6 py-5 space-y-4">
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Title</label>
+                <label className="block text-sm text-gray-300 mb-1">
+                  Title
+                </label>
                 <input
                   name="title"
                   value={editForm.title}
@@ -401,7 +411,9 @@ const MyLicksPage = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Description</label>
+                <label className="block text-sm text-gray-300 mb-1">
+                  Description
+                </label>
                 <textarea
                   name="description"
                   value={editForm.description}
@@ -412,7 +424,9 @@ const MyLicksPage = () => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">Key</label>
+                  <label className="block text-sm text-gray-300 mb-1">
+                    Key
+                  </label>
                   <input
                     name="key"
                     value={editForm.key}
@@ -421,7 +435,9 @@ const MyLicksPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">Tempo (BPM)</label>
+                  <label className="block text-sm text-gray-300 mb-1">
+                    Tempo (BPM)
+                  </label>
                   <input
                     name="tempo"
                     value={editForm.tempo}
@@ -430,7 +446,9 @@ const MyLicksPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">Difficulty</label>
+                  <label className="block text-sm text-gray-300 mb-1">
+                    Difficulty
+                  </label>
                   <select
                     name="difficulty"
                     value={editForm.difficulty}
@@ -444,7 +462,9 @@ const MyLicksPage = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">Status</label>
+                  <label className="block text-sm text-gray-300 mb-1">
+                    Status
+                  </label>
                   <select
                     name="status"
                     value={editForm.status}
@@ -459,7 +479,9 @@ const MyLicksPage = () => {
                 </div>
               </div>
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Tab Notation (optional)</label>
+                <label className="block text-sm text-gray-300 mb-1">
+                  Tab Notation (optional)
+                </label>
                 <textarea
                   name="tabNotation"
                   value={editForm.tabNotation}
@@ -513,6 +535,58 @@ const MyLicksPage = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => {
+              if (!confirmLoading) {
+                setConfirmOpen(false);
+                setConfirmTargetId(null);
+              }
+            }}
+          />
+          <div className="relative z-10 w-full max-w-md mx-4 bg-gray-900 border border-gray-800 rounded-lg shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-800">
+              <h2 className="text-lg font-semibold text-white">Delete Lick</h2>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <p className="text-gray-300 text-sm">
+                Are you sure you want to delete this lick? This action cannot be
+                undone.
+              </p>
+              {confirmError && (
+                <div className="text-red-400 text-sm">{confirmError}</div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-800 flex justify-end gap-3">
+              <button
+                type="button"
+                className="px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-700"
+                onClick={() => {
+                  if (!confirmLoading) {
+                    setConfirmOpen(false);
+                    setConfirmTargetId(null);
+                  }
+                }}
+                disabled={confirmLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md disabled:opacity-50"
+                onClick={performDelete}
+                disabled={confirmLoading}
+              >
+                {confirmLoading ? "Deleting..." : "Delete"}
+              </button>
+            </div>
           </div>
         </div>
       )}

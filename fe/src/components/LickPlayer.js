@@ -7,6 +7,7 @@ import {
   MutedOutlined,
 } from "@ant-design/icons";
 import { playLickAudio } from "../services/user/lickService";
+import { getMyProfile } from "../services/user/profile";
 
 const { Text } = Typography;
 
@@ -27,6 +28,7 @@ const LickPlayer = ({
   const [isMuted, setIsMuted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [audioUrl, setAudioUrl] = useState(lick?.audio_url || "");
+  const [myProfile, setMyProfile] = useState(null);
 
   const internalAudioRef = useRef(null);
   const audioRef = externalAudioRef || internalAudioRef;
@@ -74,6 +76,29 @@ const LickPlayer = ({
 
     loadAudio();
   }, [lick, usePlayEndpoint, userId, audioRef]);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const res = await getMyProfile();
+        if (res?.success && res?.data?.user) {
+          setMyProfile(res.data.user);
+        }
+      } catch (_) {
+        // ignore
+      }
+    };
+    loadProfile();
+  }, []);
+
+  const displayName =
+    myProfile?.displayName ||
+    myProfile?.username ||
+    lick?.creator?.username ||
+    lick?.creator?.display_name ||
+    "Unknown User";
+
+  const displayAvatar = myProfile?.avatarUrl || lick?.creator?.avatar_url;
 
   const handlePlayPause = () => {
     if (!audioRef.current) return;
@@ -288,7 +313,7 @@ const LickPlayer = ({
             {lick.title}
           </Text>
           <Text style={{ color: "#ccc", fontSize: "12px" }}>
-            by {lick.creator.display_name} • {lick.duration}s • {lick.tempo} BPM
+            by {displayName} • {lick.duration || 0}s • {lick.tempo || "N/A"} BPM
           </Text>
         </div>
       )}

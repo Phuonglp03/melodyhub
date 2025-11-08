@@ -86,7 +86,7 @@ const LickDetailPage = () => {
         lick={{ ...lick, likes_count: likesCount ?? lick.likes_count }}
         onLike={handleLike}
         showPlayer={true}
-        showComments={false}
+        showComments={true}
         showSidebar={true}
       />
     </div>

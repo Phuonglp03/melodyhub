@@ -5,7 +5,7 @@ import LickLike from "../models/LickLike.js";
 import LickComment from "../models/LickComment.js";
 import LickTag from "../models/LickTag.js";
 import Tag from "../models/Tag.js";
-// import { uploadFromBuffer } from "../utils/cloudinaryUploader.js";
+import { uploadFromBuffer } from "../utils/cloudinaryUploader.js";
 import {
   extractWaveformFromUrl,
   extractWaveformFromBuffer,
@@ -93,6 +93,14 @@ export const getCommunityLicks = async (req, res) => {
           foreignField: "lickId",
           as: "likes",
         },
+      },
+      {
+        $lookup: {
+          from: "lickcomments",
+          localField: "_id",
+          foreignField: "lickId",
+          as: "comments",
+        },
       }
     );
 
@@ -122,6 +130,7 @@ export const getCommunityLicks = async (req, res) => {
       {
         $addFields: {
           likesCount: { $size: "$likes" },
+          commentsCount: { $size: "$comments" },
           creator: { $arrayElemAt: ["$creator", 0] },
           // Use tagsJoin if filtering by tags, otherwise use tags
           tags: tags ? "$tagsJoin" : "$tags",
@@ -154,6 +163,7 @@ export const getCommunityLicks = async (req, res) => {
             tagType: 1,
           },
           likesCount: 1,
+          commentsCount: 1,
         },
       }
     );
@@ -190,7 +200,8 @@ export const getCommunityLicks = async (req, res) => {
       is_featured: lick.isFeatured,
       creator: {
         user_id: lick.creator?._id,
-        display_name: lick.creator?.displayName,
+        display_name: lick.creator?.displayName || lick.creator?.username,
+        username: lick.creator?.username || "",
         avatar_url: lick.creator?.avatarUrl,
       },
       tags: (lick.tags || []).map((tag) => ({
@@ -199,6 +210,7 @@ export const getCommunityLicks = async (req, res) => {
         tag_type: tag.tagType,
       })),
       likes_count: lick.likesCount,
+      comments_count: lick.commentsCount,
       created_at: lick.createdAt,
       updated_at: lick.updatedAt,
     }));
@@ -227,7 +239,13 @@ export const getCommunityLicks = async (req, res) => {
 // UC-12: Get user's own licks (My Licks) with search, filter, and status
 export const getMyLicks = async (req, res) => {
   try {
-    const { userId } = req.params; // or req.user.id from auth middleware
+    // Single source: prefer authenticated userId; fallback to URL param for backward compatibility
+    const userId = req.userId || req.user?.id || req.params.userId;
+    if (!userId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing userId" });
+    }
     const {
       search,
       tags,
@@ -553,7 +571,11 @@ export const getLickById = async (req, res) => {
     if (lick[0].creator && lick[0].creator._id) {
       creatorData = {
         user_id: lick[0].creator._id,
-        display_name: lick[0].creator.displayName || "Unknown User",
+        display_name:
+          lick[0].creator.displayName ||
+          lick[0].creator.username ||
+          "Unknown User",
+        username: lick[0].creator.username || "",
         avatar_url: lick[0].creator.avatarUrl || null,
       };
     }
@@ -600,7 +622,8 @@ export const getLickById = async (req, res) => {
 export const toggleLickLike = async (req, res) => {
   try {
     const { lickId } = req.params;
-    const { userId } = req.body;
+    const bodyUserId = req.body?.userId;
+    const userId = req.userId || req.user?.id || bodyUserId;
 
     if (!userId) {
       return res.status(400).json({
@@ -762,7 +785,6 @@ export const createLick = async (req, res) => {
 
     // 2. Get text data from the form body
     const {
-      userId,
       title,
       description,
       tabNotation,
@@ -773,7 +795,7 @@ export const createLick = async (req, res) => {
       status,
       isFeatured,
     } = req.body;
-    // const userId = req.user.id; // Get this from your auth middleware
+    const userId = req.userId || req.user?.id; // authoritative user id from JWT
 
     // 3. Upload the audio file to Cloudinary
     // IMPORTANT: Use 'video' as the resource_type for audio files
@@ -799,7 +821,7 @@ export const createLick = async (req, res) => {
 
     // 4. Create the new Lick in your database
     const newLick = new Lick({
-      userId: userId || req.user?.id, // Get from body or auth middleware
+      userId, // always from auth middleware
       title,
       description,
       audioUrl: audioResult.secure_url, // URL from Cloudinary
@@ -962,6 +984,7 @@ export const getLickComments = async (req, res) => {
 
     const [comments, total] = await Promise.all([
       LickComment.find({ lickId })
+        .populate("userId", "username displayName avatarUrl")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -974,12 +997,16 @@ export const getLickComments = async (req, res) => {
       data: comments.map((c) => ({
         comment_id: c._id,
         lick_id: c.lickId,
-        user_id: c.userId,
+        user_id: c.userId?._id || c.userId,
         comment: c.comment,
         parent_comment_id: c.parentCommentId,
         timestamp: c.timestamp ?? 0,
         created_at: c.createdAt,
         updated_at: c.updatedAt,
+        // enriched fields for UI convenience
+        display_name:
+          c.userId?.displayName || c.userId?.username || "Unknown User",
+        avatar_url: c.userId?.avatarUrl || "",
       })),
       pagination: {
         currentPage: page,
@@ -991,7 +1018,11 @@ export const getLickComments = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching lick comments:", error);
-    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
 
@@ -999,42 +1030,174 @@ export const getLickComments = async (req, res) => {
 export const addLickComment = async (req, res) => {
   try {
     const { lickId } = req.params;
-    const { userId, comment, parentCommentId, timestamp } = req.body;
+    const requesterUserId = req.userId || req.user?.id || req.body?.userId;
+    const { comment, parentCommentId, timestamp } = req.body || {};
 
-    if (!userId || !comment) {
-      return res.status(400).json({ success: false, message: "userId and comment are required" });
+    if (
+      !comment ||
+      typeof comment !== "string" ||
+      comment.trim().length === 0
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Comment is required" });
+    }
+    if (!requesterUserId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
     const lick = await Lick.findById(lickId);
     if (!lick) {
-      return res.status(404).json({ success: false, message: "Lick not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Lick not found" });
     }
 
-    const newComment = new LickComment({
+    if (parentCommentId) {
+      const parent = await LickComment.findById(parentCommentId);
+      if (!parent || String(parent.lickId) !== String(lickId)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid parentCommentId" });
+      }
+    }
+
+    const doc = await LickComment.create({
       lickId,
-      userId,
-      comment,
-      parentCommentId: parentCommentId || null,
-      timestamp: typeof timestamp === "number" ? timestamp : 0,
+      userId: requesterUserId,
+      comment: comment.trim(),
+      parentCommentId: parentCommentId || undefined,
+      timestamp: typeof timestamp === "number" ? timestamp : undefined,
     });
-    await newComment.save();
+
+    const populated = await LickComment.findById(doc._id)
+      .populate("userId", "username displayName avatarUrl")
+      .lean();
 
     res.status(201).json({
       success: true,
       message: "Comment added successfully",
       data: {
-        comment_id: newComment._id,
-        lick_id: newComment.lickId,
-        user_id: newComment.userId,
-        comment: newComment.comment,
-        parent_comment_id: newComment.parentCommentId,
-        timestamp: newComment.timestamp,
-        created_at: newComment.createdAt,
-        updated_at: newComment.updatedAt,
+        comment_id: populated._id,
+        lick_id: populated.lickId,
+        user_id: populated.userId?._id || populated.userId,
+        comment: populated.comment,
+        parent_comment_id: populated.parentCommentId,
+        timestamp: populated.timestamp ?? 0,
+        created_at: populated.createdAt,
+        updated_at: populated.updatedAt,
+        display_name:
+          populated.userId?.displayName ||
+          populated.userId?.username ||
+          "Unknown User",
+        avatar_url: populated.userId?.avatarUrl || "",
       },
     });
   } catch (error) {
     console.error("Error adding lick comment:", error);
-    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+// Update a lick comment (owner or admin)
+export const updateLickComment = async (req, res) => {
+  try {
+    const requesterId = req.userId;
+    const requesterRole = req.userRole;
+    const { lickId, commentId } = req.params;
+    const { comment } = req.body || {};
+
+    if (
+      !comment ||
+      typeof comment !== "string" ||
+      comment.trim().length === 0
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Comment is required" });
+    }
+
+    const doc = await LickComment.findById(commentId);
+    if (!doc || String(doc.lickId) !== String(lickId)) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Comment not found" });
+    }
+
+    const isOwner = String(doc.userId) === String(requesterId);
+    const isAdmin = requesterRole === "admin";
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    doc.comment = comment.trim();
+    await doc.save();
+
+    const populated = await LickComment.findById(doc._id)
+      .populate("userId", "username displayName avatarUrl")
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        comment_id: populated._id,
+        lick_id: populated.lickId,
+        user_id: populated.userId?._id || populated.userId,
+        comment: populated.comment,
+        parent_comment_id: populated.parentCommentId,
+        timestamp: populated.timestamp ?? 0,
+        created_at: populated.createdAt,
+        updated_at: populated.updatedAt,
+        display_name:
+          populated.userId?.displayName ||
+          populated.userId?.username ||
+          "Unknown User",
+        avatar_url: populated.userId?.avatarUrl || "",
+      },
+    });
+  } catch (error) {
+    console.error("updateLickComment error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to update comment" });
+  }
+};
+
+// Delete a lick comment (owner or admin)
+export const deleteLickComment = async (req, res) => {
+  try {
+    const requesterId = req.userId;
+    const requesterRole = req.userRole;
+    const { lickId, commentId } = req.params;
+
+    const doc = await LickComment.findById(commentId);
+    if (!doc || String(doc.lickId) !== String(lickId)) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Comment not found" });
+    }
+
+    const isOwner = String(doc.userId) === String(requesterId);
+    const isAdmin = requesterRole === "admin";
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    // Also delete direct replies of this comment (basic cascade)
+    await Promise.all([
+      LickComment.deleteOne({ _id: commentId }),
+      LickComment.deleteMany({ parentCommentId: commentId }),
+    ]);
+
+    return res.status(200).json({ success: true, message: "Comment deleted" });
+  } catch (error) {
+    console.error("deleteLickComment error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to delete comment" });
   }
 };

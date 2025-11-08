@@ -9,9 +9,10 @@ import http from "http";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 
-import { connectToDatabase } from "./config/db.js";
-import { socketServer } from "./config/socket.js";
-import { nodeMediaServer } from "./config/media.js";
+import { connectToDatabase } from './config/db.js';
+import { corsMiddleware } from './config/cors.js';
+import { socketServer } from './config/socket.js'; 
+import { nodeMediaServer } from './config/media.js';
 // Import all models to ensure they are registered with Mongoose
 import "./models/User.js";
 import "./models/Role.js";
@@ -48,11 +49,14 @@ import authRoutes from "./routes/authRoutes.js";
 import postRoutes from "./routes/postRoutes.js";
 import lickRoutes from "./routes/lickRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
+import tagRoutes from "./routes/tagRoutes.js";
+
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 import dmRoutes from "./routes/dmRoutes.js";
 
 const app = express();
 const httpServer = http.createServer(app);
+
 
 // Middleware
 app.use(
@@ -61,12 +65,7 @@ app.use(
     contentSecurityPolicy: false,
   })
 );
-app.use(
-  cors({
-    origin: "http://localhost:3000", // URL của frontend
-    credentials: true,
-  })
-);
+app.use(corsMiddleware());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -74,7 +73,6 @@ app.use(cookieParser());
 
 // Socket.io setup
 socketServer(httpServer);
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -84,12 +82,8 @@ app.use("/static", express.static(path.join(__dirname, "..", uploadDir)));
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 // Health check
-app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    service: "melodyhub-be",
-    timestamp: new Date().toISOString(),
-  });
+app.get('/health', (req, res) => {
+  res.json({ ok: true, service: 'melodyhub-be', timestamp: new Date().toISOString() });
 });
 
 // API Routes
@@ -99,6 +93,7 @@ app.use("/api/posts", postRoutes);
 app.use("/api/licks", lickRoutes);
 app.use("/api/livestreams", liveroomRoutes);
 app.use("/api/dm", dmRoutes);
+app.use("/api/tags", tagRoutes);
 
 // 404 handler - must be after all routes
 app.use((req, res, next) => {
@@ -144,6 +139,7 @@ const port = Number(process.env.PORT) || 9999;
 async function start() {
   try {
     await connectToDatabase();
+
     httpServer.listen(port, () => {
       console.log(`melodyhub-be listening on port ${port}`);
       nodeMediaServer();
