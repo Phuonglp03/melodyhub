@@ -909,6 +909,7 @@ const PersonalFeed = () => {
                     }}
                   >
                     <Space align="start" size={14}>
+
                       <Avatar
                         size={40}
                         src={post?.userId?.avatarUrl}
