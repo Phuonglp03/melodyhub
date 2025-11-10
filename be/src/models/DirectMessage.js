@@ -29,3 +29,4 @@ directMessageSchema.index({ conversationId: 1, createdAt: -1 });
 const DirectMessage = mongoose.model('DirectMessage', directMessageSchema);
 export default DirectMessage;
 
+

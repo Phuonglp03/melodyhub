@@ -1,12 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSelector } from 'react-redux';
-import { Avatar, Button, Input, message, Badge, Spin, Empty } from 'antd';
+import { useSearchParams } from 'react-router-dom';
+import { Avatar, Button, Input, message, Badge, Spin, Empty, Typography } from 'antd';
 import { 
   MessageOutlined, 
   CheckOutlined, 
   CloseOutlined,
   SendOutlined,
-  UserOutlined
+  UserOutlined,
+  SearchOutlined,
+  EditOutlined,
+  MoreOutlined,
+  PhoneOutlined,
+  VideoCameraOutlined,
+  InfoCircleOutlined,
+  LikeOutlined,
+  SmileOutlined
 } from '@ant-design/icons';
 import useDMConversations from '../../../hooks/useDMConversations';
 import useDMConversationMessages from '../../../hooks/useDMConversationMessages';
@@ -18,12 +27,14 @@ const { TextArea } = Input;
 const ChatPage = () => {
   const currentUser = useSelector((state) => state.auth.user);
   const currentUserId = currentUser?.id || currentUser?._id;
+  const [searchParams, setSearchParams] = useSearchParams();
   
   const { conversations, loading, accept, decline, ensureWith } = useDMConversations();
   const [selectedConvId, setSelectedConvId] = useState(null);
   const [inputText, setInputText] = useState('');
-  const [filter, setFilter] = useState('all'); // 'all', 'active', 'pending'
+  const [filter, setFilter] = useState('all'); // 'all', 'unread', 'groups'
   const [peerInput, setPeerInput] = useState('');
+  const [searchText, setSearchText] = useState('');
   const [requesterOverride, setRequesterOverride] = useState({}); // conversationId -> true if I just created/requested
   
   const messagesEndRef = useRef(null);
@@ -35,6 +46,19 @@ const ChatPage = () => {
       initSocket(currentUserId);
     }
   }, [currentUserId]);
+  
+  // Handle conversation query parameter from popover navigation
+  useEffect(() => {
+    const convIdFromUrl = searchParams.get('conversation');
+    if (convIdFromUrl && conversations.length > 0) {
+      const convExists = conversations.find(c => c._id === convIdFromUrl);
+      if (convExists) {
+        setSelectedConvId(convIdFromUrl);
+        // Clear the query parameter
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, [searchParams, conversations, setSearchParams]);
 
   // Get selected conversation
   const selectedConv = conversations.find((c) => c._id === selectedConvId);
@@ -52,8 +76,23 @@ const ChatPage = () => {
 
   // Filter conversations
   const filteredConvs = conversations.filter((c) => {
-    if (filter === 'active') return c.status === 'active';
-    if (filter === 'pending') return c.status === 'pending';
+    // Search filter
+    if (searchText) {
+      const peer = getPeer(c);
+      const peerName = peer?.displayName || peer?.username || '';
+      if (!peerName.toLowerCase().includes(searchText.toLowerCase())) {
+        return false;
+      }
+    }
+    
+    // Status filter
+    if (filter === 'unread') {
+      return getUnreadCount(c) > 0;
+    }
+    if (filter === 'groups') {
+      // For now, we'll treat all as individual chats. Can be extended later
+      return false;
+    }
     return true;
   });
 
@@ -85,6 +124,14 @@ const ChatPage = () => {
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
+  };
+
+  // Handle send like
+  const handleSendLike = () => {
+    if (!selectedConvId) return;
+    const canSend = selectedConv?.status === 'active' || (selectedConv?.status === 'pending' && isRequester);
+    if (!canSend) return message.warning('Chỉ người gửi yêu cầu mới có thể nhắn khi đang chờ chấp nhận');
+    send('👍');
   };
 
   // Handle typing
@@ -131,59 +178,51 @@ const ChatPage = () => {
         {/* Sidebar */}
         <div className="chat-sidebar">
           <div className="chat-sidebar-header">
-            <h4><MessageOutlined /> Tin nhắn</h4>
-            {/* Tạo cuộc trò chuyện nhanh bằng userId */}
-            <Input.Search
-              placeholder="Nhập userId để bắt đầu chat"
-              allowClear
-              value={peerInput}
-              onChange={(e) => setPeerInput(e.target.value)}
-              enterButton="Bắt đầu"
-              onSearch={async (val) => {
-                const peerId = (val || '').trim();
-                if (!peerId) return;
-                try {
-                  const conv = await ensureWith(peerId);
-                  if (conv && conv._id) {
-                    setSelectedConvId(conv._id);
-                    // Mark that I am the requester for this pending conversation
-                    if (conv.status === 'pending') {
-                      setRequesterOverride((prev) => ({ ...prev, [conv._id]: true }));
-                    }
-                    if (conv.status === 'pending') {
-                      message.info('Đã gửi yêu cầu tin nhắn');
-                    } else {
-                      message.success('Đã mở cuộc trò chuyện');
-                    }
-                  }
-                } catch (e) {
-                  message.error(e.message || 'Không thể tạo cuộc trò chuyện');
-                }
-              }}
-              style={{ marginBottom: 12 }}
-            />
+            <div className="chat-sidebar-title">
+              <div className="chat-sidebar-title-left">
+                <div className="chat-icon-circle">
+                  <MessageOutlined />
+                </div>
+                <Typography.Title level={4} className="chat-sidebar-title-text">Đoạn chat</Typography.Title>
+              </div>
+              <div className="chat-sidebar-title-right">
+                <MoreOutlined className="chat-header-icon" />
+                <EditOutlined className="chat-header-icon" />
+              </div>
+            </div>
+            
+            {/* Search Bar */}
+            <div className="chat-search-container">
+              <Input
+                placeholder="Tìm kiếm trên Messenger"
+                prefix={<SearchOutlined />}
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                className="chat-search-input"
+              />
+            </div>
+            
+            {/* Filter Tabs */}
             <div className="chat-filters">
               <Button 
-                size="small" 
-                type={filter === 'all' ? 'primary' : 'default'}
+                className={`chat-filter-tab ${filter === 'all' ? 'active' : ''}`}
                 onClick={() => setFilter('all')}
               >
                 Tất cả
               </Button>
               <Button 
-                size="small" 
-                type={filter === 'active' ? 'primary' : 'default'}
-                onClick={() => setFilter('active')}
+                className={`chat-filter-tab ${filter === 'unread' ? 'active' : ''}`}
+                onClick={() => setFilter('unread')}
               >
-                Đã chấp nhận
+                Chưa đọc
               </Button>
               <Button 
-                size="small" 
-                type={filter === 'pending' ? 'primary' : 'default'}
-                onClick={() => setFilter('pending')}
+                className={`chat-filter-tab ${filter === 'groups' ? 'active' : ''}`}
+                onClick={() => setFilter('groups')}
               >
-                Yêu cầu
+                Nhóm
               </Button>
+              <MoreOutlined className="chat-filter-more" />
             </div>
           </div>
 
@@ -206,7 +245,7 @@ const ChatPage = () => {
                     className={`chat-conv-item ${isSelected ? 'selected' : ''} ${conv.status === 'pending' ? 'pending' : ''}`}
                     onClick={() => setSelectedConvId(conv._id)}
                   >
-                    <Badge count={unread} offset={[-5, 5]}>
+                    <Badge count={unread > 0 ? unread : 0} offset={[-5, 5]}>
                       <Avatar 
                         src={peerAvatar} 
                         icon={<UserOutlined />}
@@ -214,7 +253,12 @@ const ChatPage = () => {
                       />
                     </Badge>
                     <div className="chat-conv-info">
-                      <div className="chat-conv-name">{peerName}</div>
+                      <div className="chat-conv-header">
+                        <div className="chat-conv-name">{peerName}</div>
+                        {conv.lastMessageAt && (
+                          <div className="chat-conv-time">{formatTime(conv.lastMessageAt)}</div>
+                        )}
+                      </div>
                       <div className="chat-conv-preview">
                         {conv.status === 'pending' ? (
                           <span className="pending-badge">Yêu cầu tin nhắn</span>
@@ -222,10 +266,10 @@ const ChatPage = () => {
                           <span>{conv.lastMessage || 'Chưa có tin nhắn'}</span>
                         )}
                       </div>
-                      {conv.lastMessageAt && (
-                        <div className="chat-conv-time">{formatTime(conv.lastMessageAt)}</div>
-                      )}
                     </div>
+                    {unread > 0 && (
+                      <div className="chat-conv-unread-dot"></div>
+                    )}
                   </div>
                 );
               })
@@ -257,9 +301,14 @@ const ChatPage = () => {
                         <div className="chat-header-name">
                           {peer?.displayName || peer?.username || 'Người dùng'}
                         </div>
-                        {peerTyping && (
-                          <div className="chat-typing-indicator">Đang gõ...</div>
-                        )}
+                        <div className="chat-header-status">
+                          {peerTyping ? 'Đang gõ...' : formatTime(peer?.lastSeen || selectedConv?.lastMessageAt)}
+                        </div>
+                      </div>
+                      <div className="chat-header-actions">
+                        <PhoneOutlined className="chat-header-action-icon" />
+                        <VideoCameraOutlined className="chat-header-action-icon" />
+                        <InfoCircleOutlined className="chat-header-action-icon" />
                       </div>
                     </>
                   );
@@ -359,19 +408,29 @@ const ChatPage = () => {
                       handleSend();
                     }
                   }}
-                  placeholder="Nhập tin nhắn..."
+                  placeholder="Aa"
                   autoSize={{ minRows: 1, maxRows: 4 }}
                   rows={1}
+                  className="chat-input-textarea"
                   disabled={selectedConv?.status === 'pending' && !isRequester}
                 />
-                <Button
-                  type="primary"
-                  icon={<SendOutlined />}
-                  onClick={handleSend}
-                  disabled={!inputText.trim() || (selectedConv?.status === 'pending' && !isRequester)}
-                >
-                  Gửi
-                </Button>
+                <div className="chat-input-right">
+                  <Button 
+                    type="text" 
+                    icon={<SmileOutlined />} 
+                    className="chat-input-icon"
+                    title="Emoji"
+                    disabled={selectedConv?.status === 'pending' && !isRequester}
+                  />
+                  <Button 
+                    type="text" 
+                    icon={<LikeOutlined />} 
+                    className="chat-input-icon"
+                    onClick={handleSendLike}
+                    title="Like"
+                    disabled={selectedConv?.status === 'pending' && !isRequester}
+                  />
+                </div>
               </div>
             </>
           )}
