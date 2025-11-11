@@ -72,6 +72,15 @@ const safeOn = (event, callback) => {
   const s = getSocket();
   if (s) {
     s.on(event, callback);
+  } else {
+    console.warn(`[Socket.IO] Bỏ qua lắng nghe '${event}' vì socket chưa sẵn sàng.`);
+  }
+};
+
+const safeOff = (event) => {
+  const s = getSocket();
+  if (s) {
+    s.off(event);
   }
 };
 export const onStreamPreviewReady = (callback) => {
