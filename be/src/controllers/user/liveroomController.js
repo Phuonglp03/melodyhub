@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import LiveRoom from '../../models/LiveRoom.js';
 import UserFollow from '../../models/UserFollow.js';
 import { getSocketIo } from '../../config/socket.js';
+import RoomChat from '../../models/RoomChat.js';
 
 export const createLiveStream = async (req, res) => {
   const { title, description, privacyType } = req.body;
@@ -38,7 +39,7 @@ export const createLiveStream = async (req, res) => {
 export const getLiveStreamById = async (req, res) => {
   try {
     const { id } = req.params;
-    const currentUserId = req.query.userId;
+    const userId = req.userId;
     const stream = await LiveRoom.findById(id)
       .populate('hostId', 'displayName username avatarUrl');
 
@@ -47,15 +48,15 @@ export const getLiveStreamById = async (req, res) => {
     }
     
     const hostId = stream.hostId._id.toString();
-    const isHost = currentUserId && currentUserId === hostId;
+    const isHost = userId && userId === hostId;
     if (!isHost) {
       if (stream.privacyType === 'follow_only') {
-        if (!currentUserId) {
+        if (!userId) {
           return res.status(401).json({ message: 'Vui lòng đăng nhập để xem stream này.' });
         }
 
         const isFollowing = await UserFollow.findOne({ 
-          followerId: currentUserId, 
+          followerId: userId, 
           followingId: hostId 
         });
         
@@ -228,6 +229,72 @@ export const updateLiveStreamDetails = async (req, res) => {
 
   } catch (err) {
     console.error('Lỗi khi cập nhật chi tiết stream:', err);
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
+
+export const getChatHistory = async (req, res) => {
+  const { roomId } = req.params;
+  try {
+    const messages = await RoomChat.find({ roomId })
+      .sort({ sentAt: 1 })
+      .populate('userId', 'displayName avatarUrl');
+
+    res.status(200).json(messages);
+  } catch (err) {
+    console.error('Lỗi khi lấy chat history:', err);
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
+
+export const banUser = async (req, res) => {
+  const { roomId, userId } = req.params;
+  const { messageId } = req.body;
+  const hostId = req.userId;
+
+  try {
+    const room = await LiveRoom.findOne({ _id: roomId, hostId });
+    if (!room) return res.status(404).json({ message: 'Không tìm thấy phòng hoặc bạn không phải host.' });
+
+    if (!room.bannedUsers.includes(userId)) {
+      room.bannedUsers.push(userId);
+      await room.save();
+    }
+
+    const io = getSocketIo();
+    io.to(roomId).emit('user-banned', { userId });
+
+    if (messageId) {
+      const chat = await RoomChat.findOne({ _id: messageId, roomId, userId });
+      if (chat) {
+        chat.deleted = true;
+        await chat.save();
+        io.to(roomId).emit('message-removed', { messageId });
+      }
+    }
+
+    res.status(200).json({ message: 'Đã ban user.' });
+  } catch (err) {
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
+
+export const unbanUser = async (req, res) => {
+  const { roomId, userId } = req.params;
+  const hostId = req.userId;
+
+  try {
+    const room = await LiveRoom.findOne({ _id: roomId, hostId });
+    if (!room) return res.status(404).json({ message: 'Không tìm thấy phòng hoặc bạn không phải host.' });
+
+    room.bannedUsers = room.bannedUsers.filter(id => id.toString() !== userId);
+    await room.save();
+
+    const io = getSocketIo();
+    io.to(roomId).emit('user-unbanned', { userId });
+
+    res.status(200).json({ message: 'Đã unban user.' });
+  } catch (err) {
     res.status(500).json({ message: 'Lỗi server.' });
   }
 };
