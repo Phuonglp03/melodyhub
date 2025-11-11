@@ -33,6 +33,7 @@
     "socket.io-client": "^4.8.1",
     "styled-components": "^6.1.19",
     "tone": "^15.1.22",
+    "video.js": "^8.23.4",
     "wavesurfer.js": "^7.11.0",
     "web-vitals": "^2.1.4",
     "webmidi": "^3.1.13"

@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { refreshUser } from "../redux/features/auth/authSlice";
+import { refreshUser } from "../redux/authSlice";
 import MainLayout from "../layouts/userLayout";
 import "bootstrap/dist/css/bootstrap.min.css";
 import NewsFeed from "../pages/user/NewFeed";
