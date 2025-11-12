@@ -70,6 +70,11 @@ const getRoomViewers = async (roomId) => {
   const { data} = await api.get(`/livestreams/${roomId}/viewers`);
   return data;
 };
+
+const getRoomViewers = async (roomId) => {
+  const { data} = await api.get(`/livestreams/${roomId}/viewers`);
+  return data;
+};
 export const livestreamService = {
   createLiveStream,
   getLiveStreamById,

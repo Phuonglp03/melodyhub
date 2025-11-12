@@ -8,7 +8,7 @@ import {
   deletePost,
   likePost,
   unlikePost,
-  getPostStats
+  getPostStats,
 } from '../controllers/postController.js';
 import middlewareController from '../middleware/auth.js';
 import { 

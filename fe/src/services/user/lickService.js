@@ -46,6 +46,17 @@ export const getCommunityLicks = async (params = {}) => {
   }
 };
 
+export const getMyLicks = async (params = {}) => {
+  try {
+    const queryParams = { page: 1, limit: 50, ...params };
+    const res = await http.get(`/licks/user/me`, { params: queryParams });
+    return res.data;
+  } catch (error) {
+    console.error("Error fetching my licks:", error);
+    throw error;
+  }
+};
+
 // Get lick by ID with full details
 export const getLickById = async (lickId) => {
   try {
