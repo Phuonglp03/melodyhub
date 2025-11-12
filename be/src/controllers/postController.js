@@ -1,7 +1,9 @@
+import mongoose from 'mongoose';
 import Post from '../models/Post.js';
 import User from '../models/User.js';
 import PostLike from '../models/PostLike.js';
 import PostComment from '../models/PostComment.js';
+import Lick from '../models/Lick.js';
 import { uploadToCloudinary } from '../middleware/file.js';
 
 // Helper function to detect media type from mimetype
@@ -24,6 +26,38 @@ const parseJsonIfString = (value) => {
   }
 };
 
+const normalizeIdListInput = (raw) => {
+  if (raw === undefined || raw === null) {
+    return { provided: false, ids: [] };
+  }
+
+  const parsed = parseJsonIfString(raw);
+  const arr = Array.isArray(parsed) ? parsed : [parsed];
+
+  const ids = arr
+    .map((item) => {
+      if (item === undefined || item === null) return null;
+      if (typeof item === 'string') return item.trim();
+      if (typeof item === 'number') return String(item);
+      if (item instanceof mongoose.Types.ObjectId) return item.toString();
+      if (typeof item === 'object') {
+        const candidate = item._id || item.id || item.value || item;
+        if (candidate instanceof mongoose.Types.ObjectId) return candidate.toString();
+        if (typeof candidate === 'string') return candidate.trim();
+        if (typeof candidate === 'number') return String(candidate);
+      }
+      try {
+        return String(item).trim();
+      } catch {
+        return null;
+      }
+    })
+    .filter((id) => typeof id === 'string' && id.length > 0);
+
+  const unique = Array.from(new Set(ids));
+  return { provided: true, ids: unique };
+};
+
 // Create a new post
 export const createPost = async (req, res) => {
   try {
@@ -41,6 +75,47 @@ export const createPost = async (req, res) => {
     
     // Parse originalPostId if it's a string
     const originalPostId = req.body.originalPostId;
+
+    const { provided: attachedLicksProvided, ids: attachedLickIdsInput } = normalizeIdListInput(
+      req.body.attachedLickIds ?? req.body.attachedLicks
+    );
+    let validatedAttachedLickIds = null;
+    if (attachedLicksProvided) {
+      if (attachedLickIdsInput.length === 0) {
+        validatedAttachedLickIds = [];
+      } else {
+        const invalidIds = attachedLickIdsInput.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+        if (invalidIds.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'ID của lick không hợp lệ',
+            invalidIds,
+          });
+        }
+
+        const objectIds = attachedLickIdsInput.map((id) => new mongoose.Types.ObjectId(id));
+        const ownedActiveLicks = await Lick.find({
+          _id: { $in: objectIds },
+          userId,
+          status: 'active',
+        })
+          .select('_id')
+          .lean();
+
+        const ownedSet = new Set(ownedActiveLicks.map((lick) => lick._id.toString()));
+        const missing = attachedLickIdsInput.filter((id) => !ownedSet.has(id));
+
+        if (missing.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Bạn chỉ có thể đính kèm những lick active thuộc về bạn',
+            invalidIds: missing,
+          });
+        }
+
+        validatedAttachedLickIds = objectIds;
+      }
+    }
 
     // Validate userId from token
     if (!userId) {
@@ -97,7 +172,6 @@ export const createPost = async (req, res) => {
       }
     }
 
-    // Handle uploaded files
     let mediaArray = [];
     if (req.files && req.files.length > 0) {
       // Upload each file to Cloudinary
@@ -160,7 +234,8 @@ export const createPost = async (req, res) => {
       linkPreview: linkPreviewInput,
       media: mediaArray.length > 0 ? mediaArray : undefined,
       originalPostId,
-      moderationStatus: 'approved' // Default to approved
+      moderationStatus: 'approved', // Default to approved
+      attachedLicks: validatedAttachedLickIds !== null ? validatedAttachedLickIds : undefined,
     });
 
     const savedPost = await newPost.save();
@@ -169,6 +244,7 @@ export const createPost = async (req, res) => {
     const populatedPost = await Post.findById(savedPost._id)
       .populate('userId', 'username displayName avatarUrl')
       .populate('originalPostId')
+      .populate('attachedLicks', 'title description audioUrl waveformData duration tabNotation key tempo difficulty status isPublic createdAt updatedAt')
       .lean();
 
     res.status(201).json({
@@ -204,6 +280,7 @@ export const getPosts = async (req, res) => {
     const posts = await Post.find(visibilityFilter)
       .populate('userId', 'username displayName avatarUrl')
       .populate('originalPostId')
+      .populate('attachedLicks', 'title description audioUrl waveformData duration tabNotation key tempo difficulty status isPublic createdAt updatedAt')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -266,6 +343,7 @@ export const getPostsByUser = async (req, res) => {
     })
       .populate('userId', 'username displayName avatarUrl')
       .populate('originalPostId')
+      .populate('attachedLicks', 'title description audioUrl waveformData duration tabNotation key tempo difficulty status isPublic createdAt updatedAt')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -309,6 +387,7 @@ export const getPostById = async (req, res) => {
     const post = await Post.findById(postId)
       .populate('userId', 'username displayName avatarUrl')
       .populate('originalPostId')
+      .populate('attachedLicks', 'title description audioUrl waveformData duration tabNotation key tempo difficulty status isPublic createdAt updatedAt')
       .lean();
 
     if (!post) {
@@ -338,6 +417,9 @@ export const updatePost = async (req, res) => {
   try {
     const { postId } = req.params;
     const { textContent, linkPreview, postType } = req.body;
+    const { provided: attachedLicksProvided, ids: attachedLickIdsInput } = normalizeIdListInput(
+      req.body.attachedLickIds ?? req.body.attachedLicks
+    );
 
     const post = await Post.findById(postId);
     if (!post) {
@@ -405,6 +487,45 @@ export const updatePost = async (req, res) => {
       }
     }
     
+    if (attachedLicksProvided) {
+      if (attachedLickIdsInput.length === 0) {
+        post.attachedLicks = [];
+      } else {
+        const invalidIds = attachedLickIdsInput.filter((id) => !mongoose.Types.ObjectId.isValid(id));
+        if (invalidIds.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'ID của lick không hợp lệ',
+            invalidIds,
+          });
+        }
+
+        const objectIds = attachedLickIdsInput.map((id) => new mongoose.Types.ObjectId(id));
+        const ownerId = post.userId;
+
+        const ownedActiveLicks = await Lick.find({
+          _id: { $in: objectIds },
+          userId: ownerId,
+          status: 'active',
+        })
+          .select('_id')
+          .lean();
+
+        const ownedSet = new Set(ownedActiveLicks.map((lick) => lick._id.toString()));
+        const missing = attachedLickIdsInput.filter((id) => !ownedSet.has(id));
+
+        if (missing.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Bạn chỉ có thể đính kèm những lick active thuộc về bạn',
+            invalidIds: missing,
+          });
+        }
+
+        post.attachedLicks = objectIds;
+      }
+    }
+
     if (postType !== undefined) {
       const validPostTypes = ['status_update', 'shared_post'];
       if (!validPostTypes.includes(postType)) {
@@ -421,6 +542,7 @@ export const updatePost = async (req, res) => {
     const populatedPost = await Post.findById(updatedPost._id)
       .populate('userId', 'username displayName avatarUrl')
       .populate('originalPostId')
+      .populate('attachedLicks', 'title description audioUrl waveformData duration tabNotation key tempo difficulty status isPublic createdAt updatedAt')
       .lean();
 
     res.status(200).json({

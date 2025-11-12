@@ -1,6 +1,7 @@
 import express from "express";
 import {
   getCommunityLicks,
+  getTopLicksByLikes,
   getMyLicks,
   getLickById,
   toggleLickLike,
@@ -29,6 +30,9 @@ const router = express.Router();
 
 // GET /api/licks/community - Get community licks with search, filter, sort, and pagination
 router.get("/community", getCommunityLicks);
+
+// GET /api/licks/leaderboard - Get top licks by likes
+router.get("/leaderboard", getTopLicksByLikes);
 
 // GET current user's licks (auth) - uses req.userId
 router.get("/user/me", verifyToken, getMyLicks);
