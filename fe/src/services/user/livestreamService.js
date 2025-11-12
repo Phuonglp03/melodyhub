@@ -27,25 +27,6 @@ const getLiveStreamById = async (roomId) => {
   return data; 
 };
 
-const updateLiveStreamDetails = async (roomId, details) => {
-  const { data } = await http.patch(`/livestreams/${roomId}/details`, details);
-  return data;
-};
-
-const goLive = async (roomId) => {
-  const { data } = await http.patch(`/livestreams/${roomId}/go-live`);
-  return data;
-};
-
-const updatePrivacy = async (roomId, privacyType) => {
-  const { data } = await http.patch(`/livestreams/${roomId}/privacy`, { privacyType });
-  return data;
-};
-
-const endLiveStream = async (roomId) => {
-  const { data } = await http.patch(`/livestreams/${roomId}/end`);
-  return data;
-};
 
 const banUser = async (roomId, userId, { messageId }) => {
   const { data } = await http.post(`/livestreams/${roomId}/ban/${userId}`, { messageId });
@@ -56,6 +37,30 @@ const getChatHistory = async (roomId) => {
   const { data } = await http.get(`/livestreams/${roomId}/chat`);
   return data;
 };
+const updateLiveStreamDetails = async (roomId, details) => {
+  const { data } = await http.patch(`/livestreams/${roomId}/details`, details);
+  return data;
+};
+const updatePrivacy = async (roomId, privacyType) => {
+  const { data } = await http.patch(`/livestreams/${roomId}/privacy`, { privacyType });
+  return data;
+};
+
+const endLiveStream = async (roomId) => {
+  const { data } = await http.patch(`/livestreams/${roomId}/end`);
+  return data;
+};
+
+const goLive = async (roomId) => {
+  const { data } = await http.patch(`/livestreams/${roomId}/go-live`);
+  return data;
+};
+
+const getActiveLiveStreams = async () => {
+  const { data } = await http.get('/livestreams'); 
+  return data; 
+};
+
 export const livestreamService = {
   createLiveStream,
   getLiveStreamById,
@@ -65,4 +70,5 @@ export const livestreamService = {
   updatePrivacy,
   getChatHistory,
   banUser,
+  getActiveLiveStreams,
 };

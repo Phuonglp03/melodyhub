@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Layout, Input, Button, Space, Typography, Modal, Avatar, Tooltip, Popover, Badge, Spin, Empty } from 'antd';
 import { FireOutlined, BellOutlined, MessageOutlined, SearchOutlined, UserOutlined, EditOutlined, MoreOutlined, ExpandOutlined } from '@ant-design/icons';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { livestreamService } from '../services/user/livestreamService';
 import useDMConversations from '../hooks/useDMConversations';
 import FloatingChatWindow from './FloatingChatWindow';
@@ -281,7 +281,7 @@ const AppHeader = () => {
             MelodyHub
           </Text>
           <div className="app-header__nav">
-            <Text className="app-header__nav-item">Join Live</Text>
+          <Text className="app-header__nav-item" onClick={() => navigate('/live')}>Join Live</Text>          
             <Text
               className="app-header__nav-item app-header__nav-link"
               onClick={() => navigate('/library/my-licks')}
