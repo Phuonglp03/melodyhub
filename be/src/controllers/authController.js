@@ -111,7 +111,7 @@ export const login = async (req, res) => {
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'Lax',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 ngày
     });
 
@@ -211,7 +211,7 @@ export const logout = async (req, res) => {
     res.clearCookie('refreshToken', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'Lax',
       path: '/'
     });
 
@@ -290,7 +290,7 @@ export const verifyEmail = async (req, res) => {
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'Lax',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
 
