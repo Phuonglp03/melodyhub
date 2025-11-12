@@ -18,6 +18,8 @@ import ProtectedRoute from "../components/common/ProtectedRoute";
 import AdminProtectedRoute from "../components/common/AdminProtectedRoute";
 import LiveStreamCreate from "../pages/user/LiveRoomCreate";
 import LiveStreamLive from "../pages/user/LiveRoomLive";
+import LiveListPage from "../pages/user/LiveListPage";
+import LiveViewPage from "../pages/user/LiveViewPage";
 import { initSocket } from "../services/user/socketService";
 import LickLibraryLayout from "../layouts/LickLibraryLayout";
 import MyLicksPage from "../pages/user/MyLicks";
@@ -125,10 +127,9 @@ const AppRoutes = () => {
         >
           {/* Nested routes accessible when authenticated */}
           <Route index element={<NewsFeed />} />
-          <Route
-            path="livestream/setup/:roomId"
-            element={<LiveStreamCreate />}
-          />
+          <Route path="live/:roomId" element={<LiveViewPage />} />
+          <Route path="live" element={<LiveListPage />} />
+          <Route path="livestream/setup/:roomId" element={<LiveStreamCreate />}  />
           <Route path="livestream/live/:roomId" element={<LiveStreamLive />} />
           <Route path="newfeedspersonal" element={<PersonalFeed />} />
           <Route path="users/:userId/newfeeds" element={<UserFeed />} />

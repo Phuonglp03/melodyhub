@@ -1,5 +1,5 @@
 import { API_CONFIG } from "../../config/api";
-import http from "../../services/http";
+import api from "../../services/api";
 
 const API_BASE_URL = API_CONFIG.API_BASE_URL;
 // Normalize to always include '/api'
@@ -72,7 +72,7 @@ export const getLickById = async (lickId) => {
 export const toggleLickLike = async (lickId, userId) => {
   try {
     // Use shared axios client to include Authorization header
-    const res = await http.post(`/licks/${lickId}/like`, { userId });
+    const res = await api.post(`/licks/${lickId}/like`, { userId });
     return res.data;
   } catch (error) {
     console.error("Error toggling lick like:", error);
@@ -115,7 +115,7 @@ export const addLickComment = async (lickId, commentData) => {
   try {
     const { userId, comment, parentCommentId, timestamp } = commentData;
     // Use axios client to include Authorization
-    const res = await http.post(`/licks/${lickId}/comments`, {
+    const res = await api.post(`/licks/${lickId}/comments`, {
       userId,
       comment,
       parentCommentId,
@@ -131,7 +131,7 @@ export const addLickComment = async (lickId, commentData) => {
 // Update a lick comment
 export const updateLickComment = async (lickId, commentId, comment) => {
   try {
-    const res = await http.put(`/licks/${lickId}/comments/${commentId}`, { comment });
+    const res = await api.put(`/licks/${lickId}/comments/${commentId}`, { comment });
     return res.data;
   } catch (error) {
     console.error("Error updating lick comment:", error);
@@ -142,7 +142,7 @@ export const updateLickComment = async (lickId, commentId, comment) => {
 // Delete a lick comment
 export const deleteLickComment = async (lickId, commentId) => {
   try {
-    const res = await http.delete(`/licks/${lickId}/comments/${commentId}`);
+    const res = await api.delete(`/licks/${lickId}/comments/${commentId}`);
     return res.data;
   } catch (error) {
     console.error("Error deleting lick comment:", error);
@@ -183,7 +183,7 @@ export const playLickAudio = async (lickId, userId = null) => {
 export const createLick = async (formData) => {
   try {
     // Use shared axios client so Authorization header is attached
-    const res = await http.post(`/licks`, formData, {
+    const res = await api.post(`/licks`, formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
     return res.data;

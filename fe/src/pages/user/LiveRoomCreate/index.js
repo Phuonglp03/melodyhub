@@ -10,7 +10,7 @@ import {
   disconnectSocket
 } from '../../../services/user/socketService';
 import videojs from 'video.js';
-import '../../../../node_modules/video.js/dist/video-js.css';
+import 'video.js/dist/video-js.css';
 import { Select, Button } from 'antd';
 import EmojiPicker from 'emoji-picker-react';
 import { useSelector } from 'react-redux';

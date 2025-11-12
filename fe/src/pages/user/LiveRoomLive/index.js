@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import videojs from 'video.js';
-import '../../../../node_modules/video.js/dist/video-js.css';
+import 'video.js/dist/video-js.css';
 import { livestreamService } from '../../../services/user/livestreamService';
 import {
   initSocket,
