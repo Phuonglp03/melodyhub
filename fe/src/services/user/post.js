@@ -1,9 +1,9 @@
-import http from '../http';
+import http from "../http";
 
 export const getStoredUserId = () => {
-  if (typeof window === 'undefined') return undefined;
+  if (typeof window === "undefined") return undefined;
   try {
-    const storedUserRaw = localStorage.getItem('user');
+    const storedUserRaw = localStorage.getItem("user");
     const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : null;
     // Backend stores `id` in auth responses; fallback to `_id` if present
     return (
@@ -19,7 +19,7 @@ export const getStoredUserId = () => {
 };
 
 export const listPosts = async ({ page = 1, limit = 10 } = {}) => {
-  const { data } = await http.get('/posts', { params: { page, limit } });
+  const { data } = await http.get("/posts", { params: { page, limit } });
   return data;
 };
 
@@ -27,10 +27,12 @@ export const listMyPosts = async ({ page = 1, limit = 10 } = {}) => {
   const userId = getStoredUserId();
   if (!userId) {
     // Fallback to public posts if no user in localStorage
-    const { data } = await http.get('/posts', { params: { page, limit } });
+    const { data } = await http.get("/posts", { params: { page, limit } });
     return data;
   }
-  const { data } = await http.get(`/posts/user/${userId}`, { params: { page, limit } });
+  const { data } = await http.get(`/posts/user/${userId}`, {
+    params: { page, limit },
+  });
   return data;
 };
 
@@ -39,29 +41,36 @@ export const getPostById = async (postId) => {
   return data;
 };
 
-export const listPostsByUser = async (userId, { page = 1, limit = 10 } = {}) => {
-  const { data } = await http.get(`/posts/user/${userId}`, { params: { page, limit } });
+export const listPostsByUser = async (
+  userId,
+  { page = 1, limit = 10 } = {}
+) => {
+  const { data } = await http.get(`/posts/user/${userId}`, {
+    params: { page, limit },
+  });
   return data;
 };
 
 export const createPost = async (payload) => {
   // payload can be FormData for media upload or JSON for text-only
-  const isFormData = typeof FormData !== 'undefined' && payload instanceof FormData;
+  const isFormData =
+    typeof FormData !== "undefined" && payload instanceof FormData;
   // Ensure userId exists by defaulting from localStorage if missing
   let finalPayload = payload;
   if (!isFormData) {
-    const userId = (payload && payload.userId) ? payload.userId : getStoredUserId();
+    const userId =
+      payload && payload.userId ? payload.userId : getStoredUserId();
     finalPayload = { ...payload, userId };
   } else {
     // For FormData, only append if not already present
-    const hasUserId = payload.has && payload.has('userId');
+    const hasUserId = payload.has && payload.has("userId");
     if (!hasUserId) {
       const userId = getStoredUserId();
-      if (userId) payload.append('userId', userId);
+      if (userId) payload.append("userId", userId);
     }
   }
   // Do NOT set Content-Type manually for FormData; Axios will add boundary
-  const { data } = await http.post('/posts', finalPayload);
+  const { data } = await http.post("/posts", finalPayload);
   return data;
 };
 
@@ -88,14 +97,20 @@ export const unlikePost = async (postId) => {
 };
 
 // ---- Comments ----
-export const createPostComment = async (postId, { comment, parentCommentId } = {}) => {
+export const createPostComment = async (
+  postId,
+  { comment, parentCommentId } = {}
+) => {
   const payload = { comment };
   if (parentCommentId) payload.parentCommentId = parentCommentId;
   const { data } = await http.post(`/posts/${postId}/comments`, payload);
   return data;
 };
 
-export const getPostComments = async (postId, { parentCommentId, page = 1, limit = 10 } = {}) => {
+export const getPostComments = async (
+  postId,
+  { parentCommentId, page = 1, limit = 10 } = {}
+) => {
   const params = { page, limit };
   if (parentCommentId) params.parentCommentId = parentCommentId;
   const { data } = await http.get(`/posts/${postId}/comments`, { params });
@@ -142,5 +157,3 @@ export default {
   getAllPostComments,
   getStoredUserId,
 };
-
-
