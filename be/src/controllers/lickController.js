@@ -3,7 +3,7 @@ import Lick from "../models/Lick.js";
 import User from "../models/User.js";
 import LickLike from "../models/LickLike.js";
 import LickComment from "../models/LickComment.js";
-import LickTag from "../models/LickTag.js";
+import ContentTag from "../models/ContentTag.js";
 import Tag from "../models/Tag.js";
 import { uploadFromBuffer } from "../utils/cloudinaryUploader.js";
 import {
@@ -52,13 +52,28 @@ export const getCommunityLicks = async (req, res) => {
 
     // Add Tag Filtering (if tags are specified)
     if (tags) {
-      const tagNames = tags.split(",").map((tag) => tag.trim());
+      const tagNames = tags
+        .split(",")
+        .map((tag) => tag.trim().toLowerCase())
+        .filter(Boolean);
       pipeline.push(
         {
           $lookup: {
-            from: "licktags",
-            localField: "_id",
-            foreignField: "lickId",
+            from: "contenttags",
+            let: { lickId: "$_id" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ["$contentId", "$$lickId"] },
+                      { $eq: ["$contentType", "lick"] },
+                    ],
+                  },
+                },
+              },
+              { $project: { tagId: 1 } },
+            ],
             as: "lickTagsJoin",
           },
         },
@@ -71,7 +86,7 @@ export const getCommunityLicks = async (req, res) => {
           },
         },
         {
-          $match: { "tagsJoin.tagName": { $in: tagNames } },
+          $match: { "tagsJoin.name": { $in: tagNames } },
         }
       );
     }
@@ -109,9 +124,21 @@ export const getCommunityLicks = async (req, res) => {
       pipeline.push(
         {
           $lookup: {
-            from: "licktags",
-            localField: "_id",
-            foreignField: "lickId",
+            from: "contenttags",
+            let: { lickId: "$_id" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ["$contentId", "$$lickId"] },
+                      { $eq: ["$contentType", "lick"] },
+                    ],
+                  },
+                },
+              },
+              { $project: { tagId: 1 } },
+            ],
             as: "lickTags",
           },
         },
@@ -159,8 +186,8 @@ export const getCommunityLicks = async (req, res) => {
           },
           tags: {
             _id: 1,
-            tagName: 1,
-            tagType: 1,
+            name: 1,
+            type: 1,
           },
           likesCount: 1,
           commentsCount: 1,
@@ -206,8 +233,8 @@ export const getCommunityLicks = async (req, res) => {
       },
       tags: (lick.tags || []).map((tag) => ({
         tag_id: tag._id,
-        tag_name: tag.tagName,
-        tag_type: tag.tagType,
+        tag_name: tag.name,
+        tag_type: tag.type,
       })),
       likes_count: lick.likesCount,
       comments_count: lick.commentsCount,
@@ -278,31 +305,37 @@ export const getMyLicks = async (req, res) => {
     // Apply tag filter
     let tagFilter = {};
     if (tags) {
-      const tagNames = tags.split(",").map((tag) => tag.trim());
+      const tagNames = tags
+        .split(",")
+        .map((tag) => tag.trim().toLowerCase())
+        .filter(Boolean);
 
-      // Find tag IDs by tag names
-      const tagDocs = await Tag.find({
-        tagName: { $in: tagNames },
-      }).select("_id");
+      if (tagNames.length > 0) {
+        // Find tag IDs by tag names
+        const tagDocs = await Tag.find({
+          name: { $in: tagNames },
+        }).select("_id");
 
-      if (tagDocs.length > 0) {
-        const tagIds = tagDocs.map((tag) => tag._id);
+        if (tagDocs.length > 0) {
+          const tagIds = tagDocs.map((tag) => tag._id);
 
-        // Find lick IDs that have these tags
-        const lickTagDocs = await LickTag.find({
-          tagId: { $in: tagIds },
-        }).select("lickId");
+          // Find lick IDs that have these tags
+          const lickTagDocs = await ContentTag.find({
+            tagId: { $in: tagIds },
+            contentType: "lick",
+          }).select("contentId");
 
-        if (lickTagDocs.length > 0) {
-          const lickIds = lickTagDocs.map((doc) => doc.lickId);
-          tagFilter = { _id: { $in: lickIds } };
+          if (lickTagDocs.length > 0) {
+            const lickIds = lickTagDocs.map((doc) => doc.contentId);
+            tagFilter = { _id: { $in: lickIds } };
+          } else {
+            // No licks found with these tags
+            tagFilter = { _id: { $in: [] } };
+          }
         } else {
-          // No licks found with these tags
+          // No tags found with these names
           tagFilter = { _id: { $in: [] } };
         }
-      } else {
-        // No tags found with these names
-        tagFilter = { _id: { $in: [] } };
       }
     }
 
@@ -356,9 +389,21 @@ export const getMyLicks = async (req, res) => {
       },
       {
         $lookup: {
-          from: "licktags",
-          localField: "_id",
-          foreignField: "lickId",
+          from: "contenttags",
+          let: { lickId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$contentId", "$$lickId"] },
+                    { $eq: ["$contentType", "lick"] },
+                  ],
+                },
+              },
+            },
+            { $project: { tagId: 1 } },
+          ],
           as: "lickTags",
         },
       },
@@ -402,8 +447,8 @@ export const getMyLicks = async (req, res) => {
           },
           tags: {
             _id: 1,
-            tagName: 1,
-            tagType: 1,
+            name: 1,
+            type: 1,
           },
           likesCount: 1,
           commentsCount: 1,
@@ -440,8 +485,8 @@ export const getMyLicks = async (req, res) => {
       },
       tags: (lick.tags || []).map((tag) => ({
         tag_id: tag._id,
-        tag_name: tag.tagName,
-        tag_type: tag.tagType,
+        tag_name: tag.name,
+        tag_type: tag.type,
       })),
       likes_count: lick.likesCount,
       comments_count: lick.commentsCount,
@@ -503,9 +548,21 @@ export const getLickById = async (req, res) => {
       },
       {
         $lookup: {
-          from: "licktags",
-          localField: "_id",
-          foreignField: "lickId",
+          from: "contenttags",
+          let: { lickId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$contentId", "$$lickId"] },
+                    { $eq: ["$contentType", "lick"] },
+                  ],
+                },
+              },
+            },
+            { $project: { tagId: 1 } },
+          ],
           as: "lickTags",
         },
       },
@@ -547,8 +604,8 @@ export const getLickById = async (req, res) => {
           },
           tags: {
             _id: 1,
-            tagName: 1,
-            tagType: 1,
+            name: 1,
+            type: 1,
           },
           likesCount: 1,
           commentsCount: 1,
@@ -595,8 +652,8 @@ export const getLickById = async (req, res) => {
       creator: creatorData,
       tags: lick[0].tags.map((tag) => ({
         tag_id: tag._id,
-        tag_name: tag.tagName,
-        tag_type: tag.tagType,
+        tag_name: tag.name,
+        tag_type: tag.type,
       })),
       likes_count: lick[0].likesCount,
       comments_count: lick[0].commentsCount,
@@ -741,7 +798,7 @@ export const deleteLick = async (req, res) => {
     await Promise.all([
       LickLike.deleteMany({ lickId }),
       LickComment.deleteMany({ lickId }),
-      LickTag.deleteMany({ lickId }),
+      ContentTag.deleteMany({ contentType: "lick", contentId: lickId }),
     ]);
 
     await Lick.findByIdAndDelete(lickId);

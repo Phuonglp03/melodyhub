@@ -25,11 +25,14 @@ export const uploadToCloudinary = async (
       }
     );
 
+    const data = await response.json();
+
     if (!response.ok) {
-      throw new Error(`Upload failed: ${response.statusText}`);
+      const errorMessage =
+        data?.error?.message || response.statusText || "Bad Request";
+      throw new Error(`Upload failed: ${errorMessage}`);
     }
 
-    const data = await response.json();
     return {
       success: true,
       data: {
@@ -74,6 +77,41 @@ export const uploadImage = async (imageFile, options = {}) => {
     folder: "melodyhub/images",
     ...options,
   };
+
+  return await uploadToCloudinary(
+    imageFile,
+    UPLOAD_PRESETS.IMAGE,
+    imageOptions
+  );
+};
+
+// Upload playlist cover image
+export const uploadPlaylistCover = async (imageFile, options = {}) => {
+  const imageOptions = {
+    resource_type: "image",
+    ...options,
+  };
+
+  if (UPLOAD_PRESETS.PLAYLIST_COVER) {
+    const result = await uploadToCloudinary(
+      imageFile,
+      UPLOAD_PRESETS.PLAYLIST_COVER,
+      imageOptions
+    );
+    if (result.success) {
+      return result;
+    }
+    const errMsg = result.error?.toLowerCase() || "";
+    if (
+      !errMsg.includes("upload preset not found") &&
+      !errMsg.includes("invalid upload preset")
+    ) {
+      return result;
+    }
+    console.warn(
+      "[Cloudinary] Playlist cover preset not found – falling back to default image preset."
+    );
+  }
 
   return await uploadToCloudinary(
     imageFile,

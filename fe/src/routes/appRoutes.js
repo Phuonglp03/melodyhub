@@ -1,8 +1,9 @@
 import React, { useEffect } from "react";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { refreshUser } from "../redux/features/auth/authSlice";
+import { refreshUser } from "../redux/authSlice";
 import MainLayout from "../layouts/userLayout";
+import AdminLayout from "../layouts/adminLayout";
 import "bootstrap/dist/css/bootstrap.min.css";
 import NewsFeed from "../pages/user/NewFeed";
 import PersonalFeed from "../pages/user/NewFeed/Personal";
@@ -14,6 +15,7 @@ import VerifyOTP from "../pages/auth/VerifyOTP";
 import ForgotPassword from "../pages/auth/ForgotPassword";
 import ResetPassword from "../pages/auth/ResetPassword";
 import ProtectedRoute from "../components/common/ProtectedRoute";
+import AdminProtectedRoute from "../components/common/AdminProtectedRoute";
 import LiveStreamCreate from "../pages/user/LiveRoomCreate";
 import LiveStreamLive from "../pages/user/LiveRoomLive";
 import { initSocket } from "../services/user/socketService";
@@ -23,6 +25,17 @@ import LickCommunityPage from "../pages/user/LickCommunity";
 import LickUploadPage from "../pages/user/LickUpload";
 import LickDetailPage from "../pages/user/LickDetail";
 import ChatPage from "../pages/user/Chat";
+import MyPlaylistsPage from "../pages/user/MyPlaylists";
+import PlaylistDetailPage from "../pages/user/PlaylistDetail";
+import PlaylistCommunityPage from "../pages/user/PlaylistCommunity";
+
+// Admin Pages
+import AdminDashboard from "../pages/admin/AdminSite/AdminDashboard";
+import AdminCreateAdmin from "../pages/admin/AdminSite/CreateAdmin";
+import AdminUserManagement from "../pages/admin/AdminSite/UserManagement";
+import AdminReportsManagement from "../pages/admin/AdminSite/ReportsManagement";
+import AdminLiveroomManagement from "../pages/admin/AdminSite/LiveRoomManagement";
+import AdminLickApprovement from "../pages/admin/AdminSite/LickApprovement";
 
 const AppRoutes = () => {
   const dispatch = useDispatch();
@@ -83,6 +96,24 @@ const AppRoutes = () => {
           element={!user ? <ResetPassword /> : <Navigate to="/" replace />}
         />
 
+        {/* Admin routes */}
+        <Route
+          path="/admin"
+          element={
+            <AdminProtectedRoute>
+              <AdminLayout />
+            </AdminProtectedRoute>
+          }
+        >
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="create-admin" element={<AdminCreateAdmin />} />
+          <Route path="user-management" element={<AdminUserManagement />} />
+          <Route path="reports-management" element={<AdminReportsManagement />} />
+          <Route path="liveroom-management" element={<AdminLiveroomManagement />} />
+          <Route path="lick-approvement" element={<AdminLickApprovement />} />
+        </Route>
+
         {/* Protected routes */}
         <Route
           path="/"
@@ -118,6 +149,19 @@ const AppRoutes = () => {
             <Route index element={<Navigate to="my-licks" replace />} />
             <Route path="my-licks" element={<MyLicksPage />} />
             <Route path="community" element={<LickCommunityPage />} />
+          </Route>
+          {/* Playlists */}
+          <Route
+            path="playlists"
+            element={
+              <ProtectedRoute>
+                <LickLibraryLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<MyPlaylistsPage />} />
+            <Route path="community" element={<PlaylistCommunityPage />} />
+            <Route path=":playlistId" element={<PlaylistDetailPage />} />
           </Route>
         </Route>
 

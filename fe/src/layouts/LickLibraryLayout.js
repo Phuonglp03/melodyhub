@@ -91,26 +91,55 @@ const LickLibraryLayout = ({ children }) => {
         {/* Sidebar */}
         <aside className="w-60 bg-gray-950 p-4 border-r border-gray-800 flex-shrink-0 overflow-y-auto">
           <div className="space-y-2">
-            <button
-              onClick={() => navigate("/library/my-licks")}
-              className={`w-full text-left px-4 py-2.5 rounded-md text-sm transition-all ${
-                isActive("/library/my-licks")
-                  ? "bg-gray-800 text-white font-semibold"
-                  : "text-gray-400 hover:bg-gray-800 hover:text-white"
-              }`}
-            >
-              My Licks
-            </button>
-            <button
-              onClick={() => navigate("/library/community")}
-              className={`w-full text-left px-4 py-2.5 rounded-md text-sm transition-all ${
-                isActive("/library/community")
-                  ? "bg-gray-800 text-white font-semibold"
-                  : "text-gray-400 hover:bg-gray-800 hover:text-white"
-              }`}
-            >
-              Lick Community
-            </button>
+            {activeTab === "licks" && (
+              <>
+                <button
+                  onClick={() => navigate("/library/my-licks")}
+                  className={`w-full text-left px-4 py-2.5 rounded-md text-sm transition-all ${
+                    isActive("/library/my-licks")
+                      ? "bg-gray-800 text-white font-semibold"
+                      : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                  }`}
+                >
+                  My Licks
+                </button>
+                <button
+                  onClick={() => navigate("/library/community")}
+                  className={`w-full text-left px-4 py-2.5 rounded-md text-sm transition-all ${
+                    isActive("/library/community")
+                      ? "bg-gray-800 text-white font-semibold"
+                      : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                  }`}
+                >
+                  Lick Community
+                </button>
+              </>
+            )}
+            {activeTab === "playlists" && (
+              <>
+                <button
+                  onClick={() => navigate("/playlists")}
+                  className={`w-full text-left px-4 py-2.5 rounded-md text-sm transition-all ${
+                    location.pathname === "/playlists" &&
+                    !location.pathname.includes("/community")
+                      ? "bg-gray-800 text-white font-semibold"
+                      : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                  }`}
+                >
+                  My Playlists
+                </button>
+                <button
+                  onClick={() => navigate("/playlists/community")}
+                  className={`w-full text-left px-4 py-2.5 rounded-md text-sm transition-all ${
+                    location.pathname === "/playlists/community"
+                      ? "bg-gray-800 text-white font-semibold"
+                      : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                  }`}
+                >
+                  Playlist Community
+                </button>
+              </>
+            )}
           </div>
         </aside>
 

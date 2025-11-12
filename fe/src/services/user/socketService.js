@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client';
-
+import { store } from '../../redux/store';
 // URL của server (cổng Express/Socket.IO)
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:9999';
 
@@ -19,10 +19,10 @@ export const initSocket = (explicitUserId) => {
   if (socket) {
     socket.disconnect();
   }
-  const userId = explicitUserId || getUserIdFromStorage();
+  const userId = explicitUserId || store.getState().auth.user?.user?.id;
   if (userId) {
     socket = io(SOCKET_URL, {
-      query: { userId: userId }, 
+      query: { userId: userId },
     });
 
     socket.on('connect', () => {
@@ -42,8 +42,13 @@ export const initSocket = (explicitUserId) => {
 };
 
 export const getSocket = () => {
-  // Trả về socket hiện tại (có thể null). Không tự init để tránh cảnh báo lặp.
-  return socket;
+  // Sửa: Phải kiểm tra 'socket' có tồn tại không trước khi dùng
+  if (!socket) {
+    // Nếu chưa init (ví dụ: F5 trang), hãy init
+    initSocket();
+  }
+  // Có thể vẫn là null nếu user không đăng nhập
+  return socket; 
 };
 
 export const disconnectSocket = () => {
@@ -67,30 +72,45 @@ const safeOn = (event, callback) => {
   const s = getSocket();
   if (s) {
     s.on(event, callback);
+  } else {
+    console.warn(`[Socket.IO] Bỏ qua lắng nghe '${event}' vì socket chưa sẵn sàng.`);
+  }
+};
+
+const safeOff = (event) => {
+  const s = getSocket();
+  if (s) {
+    s.off(event);
   }
 };
 export const onStreamPreviewReady = (callback) => {
-  getSocket().on('stream-preview-ready', callback);
+  safeOn('stream-preview-ready', callback);
 };
 
 export const onStreamStatusLive = (callback) => {
-  getSocket().on('stream-status-live', callback);
+  safeOn('stream-status-live', callback);
 };
 
 export const onStreamEnded = (callback) => {
-  getSocket().on('stream-status-ended', callback);
+  safeOn('stream-status-ended', callback);
 };
 
 export const onStreamDetailsUpdated = (callback) => {
-  getSocket().on('stream-details-updated', callback);
+  safeOn('stream-details-updated', callback);
 };
 
 export const onNewMessage = (callback) => {
-  getSocket().on('new-message-liveroom', callback);
+  safeOn('new-message-liveroom', callback);
 };
 
 export const onStreamPrivacyUpdated = (callback) => {
-  getSocket().on('stream-privacy-updated', callback);
+  safeOn('stream-privacy-updated', callback);
+};
+export const onUserBanned = (callback) => {
+  safeOn('user-banned', callback);
+};
+export const onMessageRemoved = (callback) => {
+  safeOn('message-removed', callback);
 };
 
 // ---- Posts / Comments realtime ----
