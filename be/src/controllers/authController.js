@@ -7,7 +7,7 @@ import crypto from 'crypto';
 
 // Generate access and refresh tokens
 export const generateTokens = async (user) => {
-  // Generate access token (15 minutes)
+  // Generate access token (1 hour)
   const accessToken = jwt.sign(
     {
       userId: user._id,
@@ -15,14 +15,14 @@ export const generateTokens = async (user) => {
       roleId: user.roleId
     },
     process.env.JWT_SECRET || 'your-secret-key',
-    { expiresIn: '1h' }
+    { expiresIn: '1h' } // Access token: 1 giờ
   );
 
   // Generate refresh token (7 days)
   const refreshToken = jwt.sign(
     { userId: user._id },
     process.env.JWT_SECRET || 'your-secret-key',
-    { expiresIn: '7d' }
+    { expiresIn: '7d' } // Refresh token: 7 ngày
   );
 
   // Save refresh token to user
@@ -159,7 +159,7 @@ export const refreshToken = async (req, res) => {
         return res.status(403).json({ message: 'Refresh token không hợp lệ hoặc đã hết hạn' });
       }
 
-      // Tạo access token mới
+      // Tạo access token mới với thời gian ngắn (1 giờ hoặc 15 phút)
       const accessToken = jwt.sign(
         {
           userId: user._id,
@@ -167,11 +167,12 @@ export const refreshToken = async (req, res) => {
           roleId: user.roleId
         },
         process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: '7d' }
+        { expiresIn: '1h' } // ✅ Access token ngắn hạn (1 giờ)
       );
 
       res.json({
         token: accessToken,
+        refreshToken: refreshToken,
         user: {
           id: user._id,
           email: user.email,
