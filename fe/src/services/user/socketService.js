@@ -112,16 +112,25 @@ export const onUserBanned = (callback) => {
 export const onMessageRemoved = (callback) => {
   safeOn('message-removed', callback);
 };
+
+// ---- Posts / Comments realtime ----
+export const onPostCommentNew = (callback) => {
+  getSocket()?.on('post:comment:new', callback);
+};
+export const offPostCommentNew = (callback) => {
+  getSocket()?.off('post:comment:new', callback);
+};
 // Hủy tất cả lắng nghe (dùng khi unmount)
 export const offSocketEvents = () => {
-  safeOff('stream-preview-ready');
-  safeOff('stream-status-live');
-  safeOff('stream-status-ended');
-  safeOff('stream-details-updated');
-  safeOff('new-message-liveroom');
-  safeOff('stream-privacy-updated');
-  safeOff('user-banned');
-  safeOff('message-removed');
+  const s = getSocket();
+  if (!s) return;
+  s.off('stream-preview-ready');
+  s.off('stream-status-live');
+  s.off('stream-status-ended');
+  s.off('stream-details-updated');
+  s.off('new-message-liveroom');
+  s.off('stream-privacy-updated');
+  s.off('post:comment:new');
 };
 
 // ========== DM helpers ==========
