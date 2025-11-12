@@ -304,7 +304,7 @@ const AppHeader = () => {
             MelodyHub
           </Text>
           <div className="app-header__nav">
-            <Text className="app-header__nav-item">Join Live</Text>
+          <Text className="app-header__nav-item" onClick={() => navigate('/live')}>Join Live</Text>          
             <Text
               className="app-header__nav-item app-header__nav-link"
               onClick={() => navigate('/library/my-licks')}

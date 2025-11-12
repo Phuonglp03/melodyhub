@@ -117,15 +117,13 @@ const AppRoutes = () => {
         </Route>
 
         {/* Protected routes */}
-        <Route
-          path="/"
+        <Route path="/"
           element={
             <ProtectedRoute>
               <MainLayout />
             </ProtectedRoute>
           }
         >
-          {/* Nested routes accessible when authenticated */}
           <Route index element={<NewsFeed />} />
           <Route path="live/:roomId" element={<LiveViewPage />} />
           <Route path="live" element={<LiveListPage />} />
@@ -139,27 +137,13 @@ const AppRoutes = () => {
           <Route path="licks/upload" element={<LickUploadPage />} />
           <Route path="licks/:lickId" element={<LickDetailPage />} />
           {/* Lick Library */}
-          <Route
-            path="library"
-            element={
-              <ProtectedRoute>
-                <LickLibraryLayout />
-              </ProtectedRoute>
-            }
-          >
+          <Route path="library" element={ <LickLibraryLayout /> } >
             <Route index element={<Navigate to="my-licks" replace />} />
             <Route path="my-licks" element={<MyLicksPage />} />
             <Route path="community" element={<LickCommunityPage />} />
           </Route>
           {/* Playlists */}
-          <Route
-            path="playlists"
-            element={
-              <ProtectedRoute>
-                <LickLibraryLayout />
-              </ProtectedRoute>
-            }
-          >
+          <Route path="playlists" element={ <LickLibraryLayout /> }  >
             <Route index element={<MyPlaylistsPage />} />
             <Route path="community" element={<PlaylistCommunityPage />} />
             <Route path=":playlistId" element={<PlaylistDetailPage />} />
