@@ -263,6 +263,88 @@ export const getCommunityLicks = async (req, res) => {
   }
 };
 
+// Get top public licks sorted by like count
+export const getTopLicksByLikes = async (req, res) => {
+  try {
+    const rawLimit = parseInt(req.query.limit, 10);
+    const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 50) : 10;
+
+    const leaderboard = await Lick.aggregate([
+      { $match: { isPublic: true, status: "active" } },
+      {
+        $lookup: {
+          from: "licklikes",
+          let: { lickId: "$_id" },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$lickId", "$$lickId"] } } },
+            { $count: "count" },
+          ],
+          as: "likesData",
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "userId",
+          foreignField: "_id",
+          as: "creator",
+        },
+      },
+      {
+        $addFields: {
+          likesCount: { $ifNull: [{ $arrayElemAt: ["$likesData.count", 0] }, 0] },
+          creator: { $arrayElemAt: ["$creator", 0] },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          title: 1,
+          description: 1,
+          audioUrl: 1,
+          duration: 1,
+          createdAt: 1,
+          likesCount: 1,
+          creator: {
+            _id: "$creator._id",
+            username: "$creator.username",
+            displayName: "$creator.displayName",
+            avatarUrl: "$creator.avatarUrl",
+          },
+        },
+      },
+      { $sort: { likesCount: -1, createdAt: -1 } },
+      { $limit: limit },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: leaderboard.map((lick) => ({
+        lick_id: lick._id,
+        title: lick.title,
+        description: lick.description,
+        audio_url: lick.audioUrl,
+        duration: lick.duration,
+        likes_count: lick.likesCount,
+        creator: {
+          user_id: lick.creator?._id,
+          username: lick.creator?.username,
+          display_name: lick.creator?.displayName || lick.creator?.username,
+          avatar_url: lick.creator?.avatarUrl,
+        },
+        created_at: lick.createdAt,
+      })),
+    });
+  } catch (error) {
+    console.error("Lỗi khi lấy danh sách lick có lượt like cao nhất:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Không thể lấy danh sách lick có lượt like cao nhất",
+      error: error.message,
+    });
+  }
+};
+
 // UC-12: Get user's own licks (My Licks) with search, filter, and status
 export const getMyLicks = async (req, res) => {
   try {
