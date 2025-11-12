@@ -55,6 +55,8 @@ import playlistRoutes from "./routes/playlistRoutes.js";
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 import dmRoutes from "./routes/dmRoutes.js";
 
+import adminUserRoutes from './routes/admin/userManageRoute.js';
+
 const app = express();
 const httpServer = http.createServer(app);
 
@@ -100,6 +102,8 @@ app.use("/api/dm", dmRoutes);
 app.use("/api/tags", tagRoutes);
 app.use("/api/playlists", playlistRoutes);
 
+// Admin routes
+app.use('/api/admin', adminUserRoutes);
 // 404 handler - must be after all routes
 app.use((req, res, next) => {
   res.status(404).json({
