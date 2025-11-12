@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { FaCamera, FaTimes, FaLock, FaGlobe } from "react-icons/fa";
 import { updatePlaylist } from "../services/user/playlistService";
+import { uploadPlaylistCover } from "../services/cloudinaryService";
 
 const EditPlaylistModal = ({ isOpen, onClose, playlist, onSuccess }) => {
   const [formData, setFormData] = useState({
@@ -83,12 +84,13 @@ const EditPlaylistModal = ({ isOpen, onClose, playlist, onSuccess }) => {
       // Upload cover image if provided
       let coverImageUrl = formData.coverImageUrl;
       if (coverImage) {
-        const formDataUpload = new FormData();
-        formDataUpload.append("file", coverImage);
-        formDataUpload.append("upload_preset", "melodyhub_playlists");
-        // TODO: Implement Cloudinary upload for playlist covers
-        // For now, we'll keep the existing URL or use the preview
-        coverImageUrl = coverPreview;
+        const uploadRes = await uploadPlaylistCover(coverImage);
+        if (uploadRes.success && uploadRes.data?.secure_url) {
+          coverImageUrl = uploadRes.data.secure_url;
+          setCoverPreview(uploadRes.data.secure_url);
+        } else if (uploadRes.error) {
+          throw new Error(uploadRes.error || "Failed to upload cover image");
+        }
       }
 
       // Update playlist

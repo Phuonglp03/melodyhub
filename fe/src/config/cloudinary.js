@@ -13,6 +13,7 @@ export const UPLOAD_PRESETS = {
   AUDIO: "melodyhub_audio", // Preset cho audio files
   IMAGE: "melodyhub_images", // Preset cho images
   AVATAR: "melodyhub_avatars", // Preset cho user avatars
+  PLAYLIST_COVER: "melodyhub_playlists", // Preset cho playlist covers
 };
 
 // Helper function to get Cloudinary URL
@@ -52,4 +53,3 @@ export const getCloudinaryUrl = (publicId, options = {}) => {
 export const getCloudinaryAudioUrl = (publicId) => {
   return `https://res.cloudinary.com/${CLOUDINARY_CONFIG.cloud_name}/video/upload/${publicId}`;
 };
-

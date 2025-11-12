@@ -2,7 +2,7 @@ import React, { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaCamera, FaTimes, FaLock, FaGlobe } from "react-icons/fa";
 import { createPlaylist } from "../services/user/playlistService";
-import http from "../services/http";
+import { uploadPlaylistCover } from "../services/cloudinaryService";
 
 const CreatePlaylistModal = ({ isOpen, onClose, onSuccess }) => {
   const navigate = useNavigate();
@@ -71,12 +71,12 @@ const CreatePlaylistModal = ({ isOpen, onClose, onSuccess }) => {
       // Upload cover image if provided
       let coverImageUrl = formData.coverImageUrl;
       if (coverImage) {
-        const formDataUpload = new FormData();
-        formDataUpload.append("file", coverImage);
-        formDataUpload.append("upload_preset", "melodyhub_playlists");
-        // You'll need to configure your Cloudinary upload endpoint
-        // For now, we'll skip image upload and use placeholder
-        // TODO: Implement Cloudinary upload for playlist covers
+        const uploadRes = await uploadPlaylistCover(coverImage);
+        if (!uploadRes.success) {
+          throw new Error(uploadRes.error || "Failed to upload cover image");
+        }
+        coverImageUrl = uploadRes.data.secure_url;
+        setCoverPreview(uploadRes.data.secure_url);
       }
 
       // Create playlist (empty playlist, user will add licks later)

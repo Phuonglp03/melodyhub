@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaSearch, FaPlus, FaFilter, FaLock } from "react-icons/fa";
+import { FaSearch, FaPlus, FaFilter, FaLock, FaTimes } from "react-icons/fa";
 import http from "../../../services/http";
 import {
   deleteLick,
   updateLick as apiUpdateLick,
 } from "../../../services/user/lickService";
 import {
+  fetchTagsGrouped,
   upsertTags,
   replaceContentTags,
 } from "../../../services/user/tagService";
 import MyLickCard from "../../../components/MyLickCard";
+import TagFlowBoard from "../../../components/TagFlowBoard";
 
 // --- Main My Licks Page ---
 const MyLicksPage = () => {
@@ -42,9 +44,13 @@ const MyLicksPage = () => {
     status: "",
     isPublic: false,
     isFeatured: false,
-    tagsInput: "",
+    selectedTags: [],
+    customTagInput: "",
   });
   const [saving, setSaving] = useState(false);
+  const [tagGroups, setTagGroups] = useState({});
+  const [tagLookup, setTagLookup] = useState({});
+  const [tagLibraryLoaded, setTagLibraryLoaded] = useState(false);
 
   // Delete confirmation modal
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -110,6 +116,64 @@ const MyLicksPage = () => {
     fetchMyLicks();
   }, [page, statusFilter]);
 
+  // Load available tags for selection in edit modal
+  useEffect(() => {
+    const loadTags = async () => {
+      try {
+        const res = await fetchTagsGrouped();
+        if (res?.success && res.data) {
+          const groups = {};
+          const lookup = {};
+
+          const mapGroupName = (type) => {
+            const lower = String(type || "").toLowerCase();
+            if (lower === "mood" || lower === "emotional") return "Emotional";
+            if (lower === "genre") return "Genre";
+            if (lower === "instrument") return "Type";
+            if (lower === "character") return "Character";
+            if (lower === "articulation") return "Articulation";
+            if (lower === "timbre") return "Timbre";
+            return type || "Other";
+          };
+
+          Object.entries(res.data).forEach(([type, arr]) => {
+            const groupName = mapGroupName(type);
+            const existingNames = new Set(groups[groupName] || []);
+            const names = [];
+
+            arr.forEach((tag) => {
+              const display =
+                tag?.tag_name || tag?.name || tag?.tagName || tag?.label || "";
+              if (!display) return;
+              const normalized = display.toLowerCase();
+              lookup[normalized] = {
+                name: display,
+                type: tag?.tag_type || tag?.type || type || "user_defined",
+              };
+              if (!existingNames.has(display)) {
+                existingNames.add(display);
+                names.push(display);
+              }
+            });
+
+            if (names.length > 0) {
+              groups[groupName] = [...(groups[groupName] || []), ...names];
+            }
+          });
+
+          setTagGroups(groups);
+          setTagLookup(lookup);
+        }
+      } catch (err) {
+        console.error("Error loading tag library:", err);
+      } finally {
+        setTagLibraryLoaded(true);
+      }
+    };
+
+    loadTags();
+  }, []);
+
   // Handle search with debounce
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -133,6 +197,23 @@ const MyLicksPage = () => {
     const lick = licks.find((l) => l.lick_id === lickId);
     if (!lick) return;
 
+    const seen = new Set();
+    const normalizedTags = (lick.tags || [])
+      .map((tag) => tag.tag_name || tag.tagName || tag.name || "")
+      .filter(Boolean)
+      .map((tag) => tag.trim())
+      .filter(Boolean)
+      .reduce((acc, tag) => {
+        const lower = tag.toLowerCase();
+        if (seen.has(lower)) {
+          return acc;
+        }
+        seen.add(lower);
+        const canonical = tagLookup[lower]?.name || tag;
+        acc.push(canonical);
+        return acc;
+      }, []);
+
     setEditingLick(lick);
     setEditForm({
       title: lick.title || "",
@@ -143,10 +224,8 @@ const MyLicksPage = () => {
       status: lick.status || "",
       isPublic: !!lick.is_public,
       isFeatured: !!lick.is_featured,
-      tagsInput: (lick.tags || [])
-        .map((tag) => tag.tag_name || tag.tagName || tag.name || "")
-        .filter(Boolean)
-        .join(", "),
+      selectedTags: normalizedTags,
+      customTagInput: "",
     });
     setIsEditOpen(true);
   };
@@ -190,6 +269,77 @@ const MyLicksPage = () => {
     }));
   };
 
+  const handleToggleTag = (tagName) => {
+    const trimmed = (tagName || "").trim();
+    if (!trimmed) return;
+    const normalized = trimmed.toLowerCase();
+    const canonical = tagLookup[normalized]?.name || trimmed;
+
+    setEditForm((prev) => {
+      const exists = prev.selectedTags.some(
+        (tag) => tag.toLowerCase() === normalized
+      );
+      const selectedTags = exists
+        ? prev.selectedTags.filter((tag) => tag.toLowerCase() !== normalized)
+        : [...prev.selectedTags, canonical];
+      return {
+        ...prev,
+        selectedTags,
+      };
+    });
+  };
+
+  const handleRemoveTag = (tagName) => {
+    const normalized = (tagName || "").trim().toLowerCase();
+    if (!normalized) return;
+    setEditForm((prev) => ({
+      ...prev,
+      selectedTags: prev.selectedTags.filter(
+        (tag) => tag.toLowerCase() !== normalized
+      ),
+    }));
+  };
+
+  const handleAddCustomTags = () => {
+    setEditForm((prev) => {
+      const rawInput = prev.customTagInput || "";
+      const parts = rawInput
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+      if (parts.length === 0) {
+        if (!rawInput) return prev;
+        return { ...prev, customTagInput: "" };
+      }
+
+      const existingSet = new Set(
+        prev.selectedTags.map((tag) => tag.toLowerCase())
+      );
+      const additions = [];
+
+      parts.forEach((part) => {
+        const normalized = part.toLowerCase();
+        const canonical = tagLookup[normalized]?.name || part;
+        const canonicalLower = canonical.toLowerCase();
+        if (!existingSet.has(canonicalLower)) {
+          existingSet.add(canonicalLower);
+          additions.push(canonical);
+        }
+      });
+
+      if (additions.length === 0) {
+        return { ...prev, customTagInput: "" };
+      }
+
+      return {
+        ...prev,
+        selectedTags: [...prev.selectedTags, ...additions],
+        customTagInput: "",
+      };
+    });
+  };
+
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!editingLick) return;
@@ -208,34 +358,49 @@ const MyLicksPage = () => {
 
       const res = await apiUpdateLick(editingLick.lick_id, payload);
       let updatedTags = editingLick.tags || [];
-      const parsedTags = Array.from(
-        new Set(
-          (editForm.tagsInput || "")
-            .split(",")
-            .map((tag) => tag.trim())
-            .filter((tag) => tag.length > 0)
-            .map((tag) => tag.toLowerCase())
-        )
-      );
+      const seenTags = new Set();
+      const collectedTags = [];
 
-      if (parsedTags.length > 0) {
-        const existingTypeMap = {};
-        (editingLick.tags || []).forEach((tag) => {
-          const key = (
-            tag.tag_name ||
-            tag.tagName ||
-            tag.name ||
-            ""
-          ).toLowerCase();
-          if (key) {
-            existingTypeMap[key] =
-              tag.tag_type || tag.tagType || tag.type || "user_defined";
-          }
+      const collectTag = (rawTag) => {
+        const trimmed = (rawTag || "").trim();
+        if (!trimmed) return;
+        const normalized = trimmed.toLowerCase();
+        if (seenTags.has(normalized)) return;
+        seenTags.add(normalized);
+        const lookupEntry = tagLookup[normalized];
+        collectedTags.push({
+          name: lookupEntry?.name || trimmed,
+          lower: normalized,
+          type: lookupEntry?.type,
         });
+      };
 
-        const upsertPayload = parsedTags.map((name) => ({
-          name,
-          type: existingTypeMap[name] || "user_defined",
+      editForm.selectedTags.forEach(collectTag);
+      if (editForm.customTagInput) {
+        editForm.customTagInput
+          .split(",")
+          .map((tag) => tag.trim())
+          .forEach(collectTag);
+      }
+
+      const existingTypeMap = {};
+      (editingLick.tags || []).forEach((tag) => {
+        const key = (
+          tag.tag_name ||
+          tag.tagName ||
+          tag.name ||
+          ""
+        ).toLowerCase();
+        if (key) {
+          existingTypeMap[key] =
+            tag.tag_type || tag.tagType || tag.type || "user_defined";
+        }
+      });
+
+      if (collectedTags.length > 0) {
+        const upsertPayload = collectedTags.map((tag) => ({
+          name: tag.name,
+          type: tag.type || existingTypeMap[tag.lower] || "user_defined",
         }));
 
         try {
@@ -292,6 +457,16 @@ const MyLicksPage = () => {
               : l
           )
         );
+        setEditForm((prev) => ({
+          ...prev,
+          selectedTags: updatedTags
+            .map(
+              (tag) =>
+                tag.tag_name || tag.tagName || tag.name || tag?.label || ""
+            )
+            .filter(Boolean),
+          customTagInput: "",
+        }));
         setIsEditOpen(false);
         setEditingLick(null);
       } else {
@@ -533,17 +708,70 @@ const MyLicksPage = () => {
               </div>
               <div>
                 <label className="block text-sm text-gray-300 mb-1">Tags</label>
-                <input
-                  name="tagsInput"
-                  value={editForm.tagsInput}
-                  onChange={handleEditChange}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="e.g. jazz, swing, upbeat"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Separate tags with commas. They will be saved as user-defined
-                  tags if no type exists.
-                </p>
+                {Object.keys(tagGroups).length > 0 ? (
+                  <div className="bg-gray-900/40 border border-gray-800 rounded-lg p-4">
+                    <TagFlowBoard
+                      groups={tagGroups}
+                      selected={editForm.selectedTags}
+                      onToggle={handleToggleTag}
+                      enableAudio={false}
+                    />
+                  </div>
+                ) : (
+                  <div className="bg-gray-900/40 border border-gray-800 rounded-lg p-4 text-sm text-gray-400">
+                    {tagLibraryLoaded
+                      ? "No preset tags available. Add your own below."
+                      : "Loading preset tags…"}
+                  </div>
+                )}
+                <div className="mt-3">
+                  <label className="block text-xs text-gray-400 mb-1">
+                    Custom tags
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      name="customTagInput"
+                      value={editForm.customTagInput}
+                      onChange={handleEditChange}
+                      className="flex-1 bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="e.g. fusion, swing, upbeat"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomTags}
+                      className="px-3 py-2 bg-orange-600 hover:bg-orange-500 text-white text-sm rounded-md transition-colors"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Choose from the list or add your own tags. Separate multiple
+                    tags with commas.
+                  </p>
+                </div>
+                {editForm.selectedTags.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs text-gray-400 mb-2">Selected tags:</p>
+                    <div className="flex flex-wrap gap-2">
+                      {editForm.selectedTags.map((tag) => (
+                        <span
+                          key={tag.toLowerCase()}
+                          className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-gray-800 border border-gray-700 text-gray-200"
+                        >
+                          #{tag}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveTag(tag)}
+                            className="text-gray-400 hover:text-white transition-colors"
+                            aria-label={`Remove ${tag}`}
+                          >
+                            <FaTimes size={10} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
