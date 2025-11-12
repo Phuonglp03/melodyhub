@@ -8,6 +8,7 @@ import {
   FaTrash,
   FaMusic,
   FaWaveSquare,
+  FaShareAlt,
 } from "react-icons/fa";
 import {
   playLickAudio,
@@ -19,7 +20,14 @@ import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
 import { getStoredUserId } from "../services/user/post";
 import { getProfileById } from "../services/user/profile";
 
-const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
+const MyLickCard = ({
+  lick,
+  onEdit,
+  onDelete,
+  onClick,
+  onShare,
+  shareLoading,
+}) => {
   const {
     lick_id,
     title,
@@ -432,6 +440,21 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShare?.(lick_id);
+              }}
+              disabled={shareLoading || !is_public}
+              className={`px-3 py-1 rounded-md text-xs flex items-center gap-1 ${
+                shareLoading || !is_public
+                  ? "bg-gray-700 text-gray-400 cursor-not-allowed"
+                  : "bg-purple-600 hover:bg-purple-700 text-white"
+              }`}
+            >
+              <FaShareAlt />
+              Share
+            </button>
             <button
               onClick={(e) => {
                 e.stopPropagation();

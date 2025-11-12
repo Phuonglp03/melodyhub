@@ -3,6 +3,7 @@ import LiveRoom from '../../models/LiveRoom.js';
 import UserFollow from '../../models/UserFollow.js';
 import { getSocketIo } from '../../config/socket.js';
 import RoomChat from '../../models/RoomChat.js';
+import User from '../../models/User.js';
 
 export const createLiveStream = async (req, res) => {
   const { title, description, privacyType } = req.body;
@@ -39,24 +40,25 @@ export const createLiveStream = async (req, res) => {
 export const getLiveStreamById = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.userId;
+    const currentUserId = req.query.userId;
     const stream = await LiveRoom.findById(id)
-      .populate('hostId', 'displayName username avatarUrl');
+      .populate('hostId', 'displayName username avatarUrl')
+      .populate('bannedUsers', 'displayName username avatarUrl');
 
     if (!stream || stream.status === 'ended') {
       return res.status(404).json({ message: 'Không tìm thấy phòng live hoặc phòng đã kết thúc.' });
     }
     
     const hostId = stream.hostId._id.toString();
-    const isHost = userId && userId === hostId;
+    const isHost = currentUserId && currentUserId === hostId;
     if (!isHost) {
       if (stream.privacyType === 'follow_only') {
-        if (!userId) {
+        if (!currentUserId) {
           return res.status(401).json({ message: 'Vui lòng đăng nhập để xem stream này.' });
         }
 
         const isFollowing = await UserFollow.findOne({ 
-          followerId: userId, 
+          followerId: currentUserId, 
           followingId: hostId 
         });
         
@@ -153,45 +155,7 @@ export const goLive = async (req, res) => {
   }
 };
 
-export const updateLiveStreamDetails = async (req, res) => {
-  const hostId = req.userId;
-  const { id } = req.params;
-  const { title, description } = req.body;
 
-  try {
-    const room = await LiveRoom.findOne({ _id: id, hostId: hostId });
-
-    if (!room) {
-      return res.status(404).json({ message: 'Không tìm thấy phòng live hoặc bạn không có quyền.' });
-    }
-    
-    if (room.status !== 'live' && room.status !== 'preview' && room.status !== 'waiting') {
-      return res.status(400).json({ message: 'Chỉ có thể cập nhật khi đang ở chế độ xem trước hoặc đang live.' });
-    }
-    
-    if (title) room.title = title;
-    if (description !== undefined) room.description = description;
-    
-    await room.save();
-    
-    const updatedDetails = {
-      roomId: room._id,
-      title: room.title,
-      description: room.description
-    };
-
-    const io = getSocketIo();
-    io.to(room._id.toString()).emit('stream-details-updated', updatedDetails);
-    
-    // io.emit('stream-details-updated-global', updatedDetails);
-
-    res.status(200).json({ message: 'Cập nhật thành công', details: updatedDetails });
-
-  } catch (err) {
-    console.error('Lỗi khi cập nhật chi tiết stream:', err);
-    res.status(500).json({ message: 'Lỗi server.' });
-  }
-};
 export const endLiveStream = async (req, res) => {
   const hostId = req.userId;
   
@@ -231,7 +195,45 @@ export const endLiveStream = async (req, res) => {
   }
 };
 
+export const updateLiveStreamDetails = async (req, res) => {
+  const hostId = req.userId;
+  const { id } = req.params;
+  const { title, description } = req.body;
 
+  try {
+    const room = await LiveRoom.findOne({ _id: id, hostId: hostId });
+
+    if (!room) {
+      return res.status(404).json({ message: 'Không tìm thấy phòng live hoặc bạn không có quyền.' });
+    }
+    
+    if (room.status !== 'live' && room.status !== 'preview' && room.status !== 'waiting') {
+      return res.status(400).json({ message: 'Chỉ có thể cập nhật khi đang ở chế độ xem trước hoặc đang live.' });
+    }
+    
+    if (title) room.title = title;
+    if (description !== undefined) room.description = description;
+    
+    await room.save();
+    
+    const updatedDetails = {
+      roomId: room._id,
+      title: room.title,
+      description: room.description
+    };
+
+    const io = getSocketIo();
+    io.to(room._id.toString()).emit('stream-details-updated', updatedDetails);
+    
+    // io.emit('stream-details-updated-global', updatedDetails);
+
+    res.status(200).json({ message: 'Cập nhật thành công', details: updatedDetails });
+
+  } catch (err) {
+    console.error('Lỗi khi cập nhật chi tiết stream:', err);
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
 export const getActiveLiveStreams = async (req, res) => {
   try {
     // 1. Tìm tất cả các phòng có status là 'live'
@@ -249,8 +251,19 @@ export const getActiveLiveStreams = async (req, res) => {
   }
 };
 
+export const getChatHistory = async (req, res) => {
+  const { roomId } = req.params;
+  try {
+    const messages = await RoomChat.find({ roomId })
+      .sort({ sentAt: 1 })
+      .populate('userId', 'displayName avatarUrl');
 
-
+    res.status(200).json(messages);
+  } catch (err) {
+    console.error('Lỗi khi lấy chat history:', err);
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
 
 export const banUser = async (req, res) => {
   const { roomId, userId } = req.params;
@@ -284,20 +297,6 @@ export const banUser = async (req, res) => {
   }
 };
 
-export const getChatHistory = async (req, res) => {
-  const { roomId } = req.params;
-  try {
-    const messages = await RoomChat.find({ roomId })
-      .sort({ sentAt: 1 })
-      .populate('userId', 'displayName avatarUrl');
-
-    res.status(200).json(messages);
-  } catch (err) {
-    console.error('Lỗi khi lấy chat history:', err);
-    res.status(500).json({ message: 'Lỗi server.' });
-  }
-};
-
 export const unbanUser = async (req, res) => {
   const { roomId, userId } = req.params;
   const hostId = req.userId;
@@ -314,6 +313,56 @@ export const unbanUser = async (req, res) => {
 
     res.status(200).json({ message: 'Đã unban user.' });
   } catch (err) {
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
+
+export const getRoomViewers = async (req, res) => {
+  const { roomId } = req.params;
+  const hostId = req.userId;
+
+  try {
+    const room = await LiveRoom.findOne({ _id: roomId, hostId });
+    if (!room) return res.status(404).json({ message: 'Không tìm thấy phòng hoặc bạn không phải host.' });
+
+    // Get viewer IDs from socket tracking
+    const io = getSocketIo();
+    const roomSockets = await io.in(roomId).fetchSockets();
+    
+    // Extract unique user IDs
+    const userIds = new Set();
+    roomSockets.forEach(socket => {
+      const userId = socket.handshake.query.userId;
+      if (userId && userId !== hostId) {
+        userIds.add(userId);
+      }
+    });
+
+    // Get user details
+    const viewers = await User.find({ _id: { $in: Array.from(userIds) } })
+      .select('displayName username avatarUrl')
+      .lean();
+
+    // Get message counts for each viewer in this room
+    const viewersWithStats = await Promise.all(
+      viewers.map(async (viewer) => {
+        const messageCount = await RoomChat.countDocuments({
+          roomId,
+          userId: viewer._id
+        });
+        return {
+          ...viewer,
+          messageCount
+        };
+      })
+    );
+
+    res.status(200).json({
+      viewers: viewersWithStats,
+      totalCount: viewersWithStats.length
+    });
+  } catch (err) {
+    console.error('Lỗi khi lấy viewers:', err);
     res.status(500).json({ message: 'Lỗi server.' });
   }
 };

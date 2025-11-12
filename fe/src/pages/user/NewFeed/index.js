@@ -5,7 +5,7 @@ import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlin
 import { listPosts, createPost } from '../../../services/user/post';
 import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments } from '../../../services/user/post';
 import { followUser, unfollowUser, getFollowSuggestions, getProfileById } from '../../../services/user/profile';
-import { joinRoom, onPostCommentNew, offPostCommentNew } from '../../../services/user/socketService';
+import PostLickEmbed from '../../../components/PostLickEmbed';
 
 const { Title, Text } = Typography;
 
@@ -201,6 +201,26 @@ const NewsFeed = () => {
     }
   };
 
+  const parseSharedLickId = (urlString) => {
+    if (!urlString) return null;
+    try {
+      const base =
+        typeof window !== 'undefined' && window.location
+          ? window.location.origin
+          : 'https://melodyhub.app';
+      const normalised = urlString.startsWith('http')
+        ? new URL(urlString)
+        : new URL(urlString, base);
+      const segments = normalised.pathname.split('/').filter(Boolean);
+      if (segments.length >= 2 && segments[0] === 'licks') {
+        return segments[1];
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
   const deriveThumbnail = (urlString) => {
     const ytId = getYoutubeId(urlString);
     if (ytId) {
@@ -243,21 +263,6 @@ const NewsFeed = () => {
     } finally {
       setLikingPostId(null);
     }
-  };
-
-  const sortCommentsDesc = (list) => {
-    if (!Array.isArray(list)) return [];
-    return [...list].sort((a, b) => {
-      const aTime = new Date(a?.createdAt || a?.created_at || 0).getTime();
-      const bTime = new Date(b?.createdAt || b?.created_at || 0).getTime();
-      return bTime - aTime;
-    });
-  };
-
-  // Helper to keep only the 3 newest comments for inline display
-  const limitToNewest3 = (list) => {
-    const sorted = sortCommentsDesc(list);
-    return sorted.slice(0, 3);
   };
 
   const getAuthorId = (post) => (post?.userId?._id || post?.userId?.id || post?.userId || '').toString();
@@ -317,11 +322,6 @@ const NewsFeed = () => {
     const p = items.find((it) => it._id === postId) || null;
     setModalPost(p);
     setCommentOpen(true);
-    try {
-      joinRoom(`post:${postId}`);
-    } catch (e) {
-      // ignore
-    }
   };
 
   const submitComment = async () => {
@@ -337,7 +337,7 @@ const NewsFeed = () => {
       setCommentText('');
       // refresh comments and counts
       const all = await getAllPostComments(commentPostId);
-      setPostIdToComments((prev) => ({ ...prev, [commentPostId]: limitToNewest3(all) }));
+      setPostIdToComments((prev) => ({ ...prev, [commentPostId]: all }));
       const statsRes = await getPostStats(commentPostId);
       setPostIdToStats((prev) => ({ ...prev, [commentPostId]: statsRes?.data || prev[commentPostId] }));
     } catch (e) {
@@ -355,7 +355,7 @@ const NewsFeed = () => {
       await createPostComment(postId, { comment: text });
       setPostIdToCommentInput((prev) => ({ ...prev, [postId]: '' }));
       const all = await getAllPostComments(postId);
-      setPostIdToComments((prev) => ({ ...prev, [postId]: limitToNewest3(all) }));
+      setPostIdToComments((prev) => ({ ...prev, [postId]: all }));
       const statsRes = await getPostStats(postId);
       setPostIdToStats((prev) => ({ ...prev, [postId]: statsRes?.data || prev[postId] }));
     } catch (e) {
@@ -364,59 +364,6 @@ const NewsFeed = () => {
       setCommentSubmitting(false);
     }
   };
-
-  // Join socket rooms for all posts currently in the feed to receive inline updates
-  useEffect(() => {
-    if (!Array.isArray(items) || items.length === 0) return;
-    try {
-      items.forEach((it) => it?._id && joinRoom(`post:${it._id}`));
-    } catch (e) {
-      // ignore join errors
-    }
-  }, [items]);
-
-  // Global listener: update inline lists and counters when any post gets a new comment
-  useEffect(() => {
-    const handler = (payload) => {
-      if (!payload?.postId || !payload?.comment) return;
-      const postId = payload.postId;
-      const comment = payload.comment;
-      setPostIdToStats((prev) => {
-        const cur = prev[postId] || { likesCount: 0, commentsCount: 0 };
-        return { ...prev, [postId]: { ...cur, commentsCount: (cur.commentsCount || 0) + 1 } };
-      });
-      // Only prepend if we already have an inline list for that post
-      setPostIdToComments((prev) => {
-        const cur = Array.isArray(prev[postId]) ? prev[postId] : [];
-        return { ...prev, [postId]: limitToNewest3([comment, ...cur]) };
-      });
-    };
-    onPostCommentNew(handler);
-    return () => {
-      offPostCommentNew(handler);
-    };
-  }, []);
-
-  // Listen realtime comments for the currently opened post
-  useEffect(() => {
-    if (!commentOpen || !commentPostId) return;
-    const handler = (payload) => {
-      if (!payload || payload.postId !== commentPostId) return;
-      const newComment = payload.comment;
-      setPostIdToComments((prev) => {
-        const cur = prev[commentPostId] || [];
-        return { ...prev, [commentPostId]: sortCommentsDesc([newComment, ...cur]) };
-      });
-      setPostIdToStats((prev) => {
-        const cur = prev[commentPostId] || { likesCount: 0, commentsCount: 0 };
-        return { ...prev, [commentPostId]: { ...cur, commentsCount: (cur.commentsCount || 0) + 1 } };
-      });
-    };
-    onPostCommentNew(handler);
-    return () => {
-      offPostCommentNew(handler);
-    };
-  }, [commentOpen, commentPostId]);
 
   const fetchProviderOEmbed = async (url) => {
     const tryFetch = async (endpoint) => {
@@ -545,7 +492,7 @@ const NewsFeed = () => {
         }).catch(() => {});
         // fetch all top-level comments
         getAllPostComments(p._id).then((list) => {
-          setPostIdToComments((prev) => ({ ...prev, [p._id]: limitToNewest3(list) }));
+          setPostIdToComments((prev) => ({ ...prev, [p._id]: list }));
         }).catch(() => {});
       }
       const urls = items
@@ -803,6 +750,15 @@ const NewsFeed = () => {
                   {post.textContent}
                 </div>
               )}
+          {(() => {
+            const url = extractFirstUrl(post?.textContent);
+            const sharedLickId = parseSharedLickId(url);
+            return sharedLickId ? (
+              <div style={{ marginBottom: 12 }}>
+                <PostLickEmbed lickId={sharedLickId} url={url} />
+              </div>
+            ) : null;
+          })()}
               {post?.media?.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
                   <WavePlaceholder />
@@ -844,25 +800,19 @@ const NewsFeed = () => {
               </Space>
 
               {/* Danh sách bình luận */}
-              {(() => {
-                const comments = postIdToComments[post._id] || [];
-                if (!comments.length) return null;
-                const visibleComments = comments.slice(0, 3);
-
-                return (
-                  <div style={{ marginTop: 12, background: '#0f0f10', borderTop: '1px solid #1f1f1f', paddingTop: 8 }}>
-                    {visibleComments.map((c) => (
-                      <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                        <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
-                        <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>
-                          <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || 'Người dùng'}</div>
-                          <div>{c.comment}</div>
-                        </div>
+              {postIdToComments[post._id] && postIdToComments[post._id].length > 0 && (
+                <div style={{ marginTop: 12, background: '#0f0f10', borderTop: '1px solid #1f1f1f', paddingTop: 8 }}>
+                  {postIdToComments[post._id].map((c) => (
+                    <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
+                      <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>
+                        <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || 'Người dùng'}</div>
+                        <div>{c.comment}</div>
                       </div>
-                    ))}
-                  </div>
-                );
-              })()}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               
             </Card>
@@ -940,6 +890,15 @@ const NewsFeed = () => {
             {modalPost?.textContent && (
               <div style={{ marginBottom: 8, color: '#e5e7eb' }}>{modalPost.textContent}</div>
             )}
+            {(() => {
+              const url = extractFirstUrl(modalPost?.textContent);
+              const sharedLickId = parseSharedLickId(url);
+              return sharedLickId ? (
+                <div style={{ marginBottom: 12 }}>
+                  <PostLickEmbed lickId={sharedLickId} url={url} />
+                </div>
+              ) : null;
+            })()}
             {modalPost?.media?.length > 0 && (
               <div style={{ marginBottom: 8 }}><WavePlaceholder /></div>
             )}

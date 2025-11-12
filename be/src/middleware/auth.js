@@ -49,7 +49,7 @@ export const verifyToken = (req, res, next) => {
     const decoded = verifyJWT(token);
     if (!decoded) {
       console.error('[verifyToken] Token verification failed - invalid or expired');
-      return res.status(403).json({ message: 'Token không hợp lệ hoặc đã hết hạn' });
+      return res.status(401).json({ message: 'Token không hợp lệ hoặc đã hết hạn' });
     }
 
     // Lưu thông tin user vào request để sử dụng ở các middleware khác
@@ -60,7 +60,11 @@ export const verifyToken = (req, res, next) => {
     next();
   } catch (error) {
     console.error('[verifyToken] Token verification error:', error.message);
-    return res.status(403).json({ message: 'Token không hợp lệ' });
+    // Check if error is token expired
+    if (error.name === 'TokenExpiredError' || error.message.includes('expired')) {
+      return res.status(401).json({ message: 'Token đã hết hạn' });
+    }
+    return res.status(401).json({ message: 'Token không hợp lệ' });
   }
 };
 
