@@ -7,6 +7,43 @@ const API_BASE = (() => {
   return t.endsWith("/api") ? t : `${t}/api`;
 })();
 
+// Get community playlists (public playlists)
+export const getCommunityPlaylists = async (params = {}) => {
+  try {
+    const {
+      search = "",
+      sortBy = "newest",
+      page = 1,
+      limit = 20,
+    } = params;
+
+    const queryParams = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+      sortBy,
+    });
+
+    if (search) queryParams.append("search", search);
+
+    const response = await fetch(`${API_BASE}/playlists/community?${queryParams}`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error fetching community playlists:", error);
+    throw error;
+  }
+};
+
 // Get user's playlists
 export const getMyPlaylists = async (params = {}) => {
   try {

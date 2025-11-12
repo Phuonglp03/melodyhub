@@ -18,44 +18,66 @@ export const listTags = async (req, res) => {
 
 // POST /api/tags/bulk-upsert  body: [{ name, type }]
 export const bulkUpsertTags = async (req, res) => {
-  const items = Array.isArray(req.body) ? req.body : req.body?.items || [];
-  if (!Array.isArray(items) || items.length === 0) {
-    return res
-      .status(400)
-      .json({ success: false, message: "No items provided" });
-  }
-  const ops = items.map((i) => ({
-    updateOne: {
-      filter: {
-        type: i.type,
-        name: String(i.name || "")
-          .trim()
-          .toLowerCase(),
-      },
-      update: {
-        $setOnInsert: {
-          type: i.type,
-          name: String(i.name || "")
-            .trim()
-            .toLowerCase(),
+  try {
+    const items = Array.isArray(req.body) ? req.body : req.body?.items || [];
+    if (!Array.isArray(items) || items.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No items provided" });
+    }
+
+    // Filter out invalid items (empty or null names)
+    const validItems = items.filter(
+      (i) => i && i.name && String(i.name).trim().length > 0 && i.type
+    );
+
+    if (validItems.length === 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No valid items provided" });
+    }
+
+    const ops = validItems.map((i) => {
+      const normalizedName = String(i.name).trim().toLowerCase();
+      const normalizedType = String(i.type).trim();
+      return {
+        updateOne: {
+          filter: {
+            type: normalizedType,
+            name: normalizedName,
+          },
+          update: {
+            $setOnInsert: {
+              type: normalizedType,
+              name: normalizedName,
+            },
+          },
+          upsert: true,
         },
-      },
-      upsert: true,
-    },
-  }));
-  await Tag.bulkWrite(ops, { ordered: false });
-  const names = items.map((i) =>
-    String(i.name || "")
-      .trim()
-      .toLowerCase()
-  );
-  const out = await Tag.find({
-    type: { $in: items.map((i) => i.type) },
-    name: { $in: names },
-  })
-    .sort({ type: 1, name: 1 })
-    .lean();
-  res.json({ success: true, data: out });
+      };
+    });
+
+    await Tag.bulkWrite(ops, { ordered: false });
+
+    const names = validItems.map((i) => String(i.name).trim().toLowerCase());
+    const types = validItems.map((i) => String(i.type).trim());
+
+    const out = await Tag.find({
+      type: { $in: types },
+      name: { $in: names },
+    })
+      .sort({ type: 1, name: 1 })
+      .lean();
+
+    res.json({ success: true, data: out });
+  } catch (error) {
+    console.error("Error in bulkUpsertTags:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to upsert tags",
+      error: error.message,
+    });
+  }
 };
 
 // PUT /api/content/:type/:id/tags  { tagIds: ObjectId[] }

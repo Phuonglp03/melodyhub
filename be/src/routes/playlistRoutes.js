@@ -8,6 +8,7 @@ import {
   addLickToPlaylist,
   removeLickFromPlaylist,
   reorderPlaylistLicks,
+  getCommunityPlaylists,
 } from "../controllers/playlistController.js";
 import { verifyToken, optionalVerifyToken } from "../middleware/auth.js";
 
@@ -18,6 +19,10 @@ const jsonParser = express.json({ limit: "2mb" });
 // POST /api/playlists - Create playlist (authenticated)
 // IMPORTANT: Must be defined BEFORE /:playlistId routes
 router.post("/", verifyToken, jsonParser, createPlaylist);
+
+// Get community playlists (public playlists)
+// GET /api/playlists/community - Get public playlists (optional auth)
+router.get("/community", optionalVerifyToken, getCommunityPlaylists);
 
 // UC-15, Screen 29: Get user's playlists (My Playlists)
 // GET /api/playlists/me - Get current user's playlists (authenticated)

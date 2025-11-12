@@ -116,17 +116,29 @@ const LickLibraryLayout = ({ children }) => {
               </>
             )}
             {activeTab === "playlists" && (
-              <button
-                onClick={() => navigate("/playlists")}
-                className={`w-full text-left px-4 py-2.5 rounded-md text-sm transition-all ${
-                  location.pathname === "/playlists" ||
-                  location.pathname.startsWith("/playlists/")
-                    ? "bg-gray-800 text-white font-semibold"
-                    : "text-gray-400 hover:bg-gray-800 hover:text-white"
-                }`}
-              >
-                My Playlists
-              </button>
+              <>
+                <button
+                  onClick={() => navigate("/playlists")}
+                  className={`w-full text-left px-4 py-2.5 rounded-md text-sm transition-all ${
+                    location.pathname === "/playlists" &&
+                    !location.pathname.includes("/community")
+                      ? "bg-gray-800 text-white font-semibold"
+                      : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                  }`}
+                >
+                  My Playlists
+                </button>
+                <button
+                  onClick={() => navigate("/playlists/community")}
+                  className={`w-full text-left px-4 py-2.5 rounded-md text-sm transition-all ${
+                    location.pathname === "/playlists/community"
+                      ? "bg-gray-800 text-white font-semibold"
+                      : "text-gray-400 hover:bg-gray-800 hover:text-white"
+                  }`}
+                >
+                  Playlist Community
+                </button>
+              </>
             )}
           </div>
         </aside>

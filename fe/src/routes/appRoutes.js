@@ -23,6 +23,7 @@ import LickUploadPage from "../pages/user/LickUpload";
 import LickDetailPage from "../pages/user/LickDetail";
 import MyPlaylistsPage from "../pages/user/MyPlaylists";
 import PlaylistDetailPage from "../pages/user/PlaylistDetail";
+import PlaylistCommunityPage from "../pages/user/PlaylistCommunity";
 
 const AppRoutes = () => {
   const dispatch = useDispatch();
@@ -120,6 +121,7 @@ const AppRoutes = () => {
             }
           >
             <Route index element={<MyPlaylistsPage />} />
+            <Route path="community" element={<PlaylistCommunityPage />} />
             <Route path=":playlistId" element={<PlaylistDetailPage />} />
           </Route>
         </Route>

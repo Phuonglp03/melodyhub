@@ -42,7 +42,23 @@ const MyPlaylistsPage = () => {
       }
     } catch (err) {
       console.error("Error fetching playlists:", err);
-      setError(err.response?.data?.message || "Failed to load playlists");
+      const status = err?.response?.status;
+      const rawMsg = err?.response?.data?.message || err?.message || "";
+      const msg = String(rawMsg);
+      const normalized = msg.toLowerCase();
+      const isAuthError =
+        status === 401 ||
+        status === 403 ||
+        normalized.includes("token") ||
+        normalized.includes("expired") ||
+        normalized.includes("unauthorized") ||
+        normalized.includes("forbidden") ||
+        normalized.includes("hết hạn");
+      if (isAuthError) {
+        setError("You must login to see your playlists");
+      } else {
+        setError(msg || "Failed to load playlists");
+      }
     } finally {
       setLoading(false);
     }
@@ -150,17 +166,43 @@ const MyPlaylistsPage = () => {
       )}
 
       {/* Error State */}
-      {error && (
-        <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6">
-          <p className="text-red-400">{error}</p>
-          <button
-            onClick={fetchPlaylists}
-            className="mt-2 text-sm text-orange-400 hover:text-orange-300"
-          >
-            Try again
-          </button>
-        </div>
-      )}
+      {error &&
+        (() => {
+          const normalizedError = error.toLowerCase();
+          if (normalizedError.includes("login")) {
+            return (
+              <div className="max-w-xl mx-auto bg-gray-900/70 border border-gray-800 rounded-2xl p-10 text-center shadow-lg mb-6">
+                <div className="mx-auto w-14 h-14 flex items-center justify-center rounded-full bg-orange-500/10 text-orange-400 mb-4">
+                  <FaLock size={24} />
+                </div>
+                <h2 className="text-2xl font-semibold text-white mb-2">
+                  Sign in to manage playlists
+                </h2>
+                <p className="text-gray-400 mb-6">
+                  Your playlists are private to you. Log in to create and
+                  organize them.
+                </p>
+                <button
+                  onClick={() => (window.location.href = "/login")}
+                  className="px-6 py-2 rounded-md bg-gradient-to-r from-orange-500 to-red-600 text-white font-medium hover:opacity-90 transition"
+                >
+                  Go to login
+                </button>
+              </div>
+            );
+          }
+          return (
+            <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6">
+              <p className="text-red-400">{error}</p>
+              <button
+                onClick={fetchPlaylists}
+                className="mt-2 text-sm text-orange-400 hover:text-orange-300"
+              >
+                Try again
+              </button>
+            </div>
+          );
+        })()}
 
       {/* Playlists Grid */}
       {!loading && !error && playlists.length > 0 && (
@@ -288,12 +330,14 @@ const MyPlaylistsPage = () => {
           />
           <div className="relative z-10 w-full max-w-md mx-4 bg-gray-900 border border-gray-800 rounded-lg shadow-xl">
             <div className="px-6 py-4 border-b border-gray-800">
-              <h2 className="text-lg font-semibold text-white">Delete Playlist</h2>
+              <h2 className="text-lg font-semibold text-white">
+                Delete Playlist
+              </h2>
             </div>
             <div className="px-6 py-5 space-y-3">
               <p className="text-gray-300 text-sm">
-                Are you sure you want to delete this playlist? This action cannot be
-                undone.
+                Are you sure you want to delete this playlist? This action
+                cannot be undone.
               </p>
             </div>
             <div className="px-6 py-4 border-t border-gray-800 flex justify-end gap-3">
@@ -322,4 +366,3 @@ const MyPlaylistsPage = () => {
 };
 
 export default MyPlaylistsPage;
-

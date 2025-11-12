@@ -8,6 +8,142 @@ import LickComment from "../models/LickComment.js";
 import LickTag from "../models/LickTag.js";
 import Tag from "../models/Tag.js";
 
+// Get community playlists (public playlists)
+export const getCommunityPlaylists = async (req, res) => {
+  try {
+    const { search, sortBy = "newest", page = 1, limit = 20 } = req.query;
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build match stage - only public playlists
+    const matchStage = { isPublic: true };
+
+    // Apply search filter
+    if (search) {
+      matchStage.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Build sort stage
+    let sortStage = {};
+    switch (sortBy) {
+      case "popular":
+        // Sort by licks count (calculated in aggregation)
+        sortStage = { licksCount: -1, createdAt: -1 };
+        break;
+      case "newest":
+      default:
+        sortStage = { createdAt: -1 };
+    }
+
+    // Build aggregation pipeline
+    const pipeline = [
+      { $match: matchStage },
+      {
+        $lookup: {
+          from: "users",
+          localField: "userId",
+          foreignField: "_id",
+          as: "owner",
+        },
+      },
+      {
+        $lookup: {
+          from: "playlistlicks",
+          localField: "_id",
+          foreignField: "playlistId",
+          as: "licks",
+        },
+      },
+      {
+        $addFields: {
+          licksCount: { $size: "$licks" },
+          owner: { $arrayElemAt: ["$owner", 0] },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          name: 1,
+          description: 1,
+          coverImageUrl: 1,
+          isPublic: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          licksCount: 1,
+          owner: {
+            _id: 1,
+            username: 1,
+            displayName: 1,
+            avatarUrl: 1,
+          },
+        },
+      },
+      { $sort: sortStage },
+      { $skip: skip },
+      { $limit: limitNum },
+    ];
+
+    // Get total count
+    const totalCountPipeline = [
+      { $match: matchStage },
+      { $count: "count" },
+    ];
+
+    const [playlists, totalResult] = await Promise.all([
+      Playlist.aggregate(pipeline),
+      Playlist.aggregate(totalCountPipeline),
+    ]);
+
+    const totalPlaylists = totalResult[0]?.count || 0;
+    const totalPages = Math.ceil(totalPlaylists / limitNum);
+
+    // Format response
+    const formattedPlaylists = playlists.map((playlist) => ({
+      playlist_id: playlist._id,
+      name: playlist.name,
+      description: playlist.description,
+      cover_image_url: playlist.coverImageUrl,
+      is_public: playlist.isPublic,
+      licks_count: playlist.licksCount,
+      created_at: playlist.createdAt,
+      updated_at: playlist.updatedAt,
+      owner: playlist.owner
+        ? {
+            user_id: playlist.owner._id,
+            display_name:
+              playlist.owner.displayName || playlist.owner.username || "Unknown",
+            username: playlist.owner.username || "",
+            avatar_url: playlist.owner.avatarUrl || null,
+          }
+        : null,
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: formattedPlaylists,
+      pagination: {
+        currentPage: pageNum,
+        totalPages: totalPages,
+        totalItems: totalPlaylists,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching community playlists:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 // UC-15, Screen 29: Get user's playlists (My Playlists)
 export const getMyPlaylists = async (req, res) => {
   try {
@@ -115,6 +251,14 @@ export const getPlaylistById = async (req, res) => {
   try {
     const { playlistId } = req.params;
     const userId = req.userId || req.user?.id; // Optional: for checking ownership
+
+    // Guard: avoid casting errors when route params are non-ObjectId (e.g., 'community')
+    if (!mongoose.Types.ObjectId.isValid(playlistId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid playlist id",
+      });
+    }
 
     // Get playlist
     const playlist = await Playlist.findById(playlistId);
