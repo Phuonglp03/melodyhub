@@ -1,5 +1,5 @@
 import { io } from 'socket.io-client';
-
+import { store } from '../../redux/store';
 // URL của server (cổng Express/Socket.IO)
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:9999';
 
@@ -15,18 +15,22 @@ const getUserIdFromStorage = () => {
 
 let socket;
 
-export const initSocket = () => {
+export const initSocket = (explicitUserId) => {
   if (socket) {
     socket.disconnect();
   }
-  const userId = getUserIdFromStorage();
+  const userId = explicitUserId || store.getState().auth.user?.user?.id;
   if (userId) {
     socket = io(SOCKET_URL, {
-      query: { userId: userId }, 
+      query: { userId: userId },
     });
 
     socket.on('connect', () => {
-      console.log('[Socket.IO] Đã kết nối:', socket.id);
+      console.log('[Socket.IO] Đã kết nối:', socket.id, 'as user', userId);
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('[Socket.IO] connect_error', err?.message);
     });
 
     socket.on('disconnect', (reason) => {
@@ -68,38 +72,115 @@ const safeOn = (event, callback) => {
   const s = getSocket();
   if (s) {
     s.on(event, callback);
+  } else {
+    console.warn(`[Socket.IO] Bỏ qua lắng nghe '${event}' vì socket chưa sẵn sàng.`);
+  }
+};
+
+const safeOff = (event) => {
+  const s = getSocket();
+  if (s) {
+    s.off(event);
   }
 };
 export const onStreamPreviewReady = (callback) => {
-  getSocket().on('stream-preview-ready', callback);
+  safeOn('stream-preview-ready', callback);
 };
 
 export const onStreamStatusLive = (callback) => {
-  getSocket().on('stream-status-live', callback);
+  safeOn('stream-status-live', callback);
 };
 
 export const onStreamEnded = (callback) => {
-  getSocket().on('stream-status-ended', callback);
+  safeOn('stream-status-ended', callback);
 };
 
 export const onStreamDetailsUpdated = (callback) => {
-  getSocket().on('stream-details-updated', callback);
+  safeOn('stream-details-updated', callback);
 };
 
 export const onNewMessage = (callback) => {
-  getSocket().on('new-message-liveroom', callback);
+  safeOn('new-message-liveroom', callback);
 };
 
 export const onStreamPrivacyUpdated = (callback) => {
-  getSocket().on('stream-privacy-updated', callback);
+  safeOn('stream-privacy-updated', callback);
+};
+export const onUserBanned = (callback) => {
+  safeOn('user-banned', callback);
+};
+export const onMessageRemoved = (callback) => {
+  safeOn('message-removed', callback);
 };
 // Hủy tất cả lắng nghe (dùng khi unmount)
 export const offSocketEvents = () => {
-  const s = getSocket();
-  s.off('stream-preview-ready');
-  s.off('stream-status-live');
-  s.off('stream-status-ended');
-  s.off('stream-details-updated');
-  s.off('new-message-liveroom');
-  s.off('stream-privacy-updated');
+  safeOff('stream-preview-ready');
+  safeOff('stream-status-live');
+  safeOff('stream-status-ended');
+  safeOff('stream-details-updated');
+  safeOff('new-message-liveroom');
+  safeOff('stream-privacy-updated');
+  safeOff('user-banned');
+  safeOff('message-removed');
+};
+
+// ========== DM helpers ==========
+export const dmJoin = (conversationId) => {
+  console.log('[DM] emit dm:join', conversationId);
+  getSocket()?.emit('dm:join', conversationId);
+};
+
+export const dmTyping = (conversationId, typing) => {
+  console.log('[DM] emit dm:typing', { conversationId, typing });
+  getSocket()?.emit('dm:typing', { conversationId, typing: !!typing });
+};
+
+export const dmSend = (conversationId, text) => {
+  console.log('[DM] emit dm:send', { conversationId, text });
+  getSocket()?.emit('dm:send', { conversationId, text });
+};
+
+export const dmSeen = (conversationId) => {
+  console.log('[DM] emit dm:seen', { conversationId });
+  getSocket()?.emit('dm:seen', { conversationId });
+};
+
+export const onDmNew = (callback) => {
+  console.log('[DM] listen dm:new');
+  getSocket()?.on('dm:new', callback);
+};
+
+export const onDmTyping = (callback) => {
+  console.log('[DM] listen dm:typing');
+  getSocket()?.on('dm:typing', callback);
+};
+
+export const onDmSeen = (callback) => {
+  console.log('[DM] listen dm:seen');
+  getSocket()?.on('dm:seen', callback);
+};
+
+export const onDmBadge = (callback) => {
+  console.log('[DM] listen dm:badge');
+  getSocket()?.on('dm:badge', callback);
+};
+
+export const offDmNew = (callback) => {
+  console.log('[DM] off dm:new');
+  getSocket()?.off('dm:new', callback);
+};
+
+export const offDmTyping = (callback) => {
+  console.log('[DM] off dm:typing');
+  getSocket()?.off('dm:typing', callback);
+};
+
+export const offDmSeen = (callback) => {
+  console.log('[DM] off dm:seen');
+  getSocket()?.off('dm:seen', callback);
+};
+
+export const offDmBadge = (callback) => {
+  console.log('[DM] off dm:badge');
+  getSocket()?.off('dm:badge', callback);
 };

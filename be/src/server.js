@@ -41,6 +41,8 @@ import "./models/ProjectTrack.js";
 import "./models/RoomChat.js";
 import "./models/Tag.js";
 import "./models/UserFollow.js";
+import "./models/Conversation.js";
+import "./models/DirectMessage.js";
 
 // Import routes
 import authRoutes from "./routes/authRoutes.js";
@@ -51,6 +53,7 @@ import tagRoutes from "./routes/tagRoutes.js";
 import playlistRoutes from "./routes/playlistRoutes.js";
 
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
+import dmRoutes from "./routes/dmRoutes.js";
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -93,6 +96,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/licks", lickRoutes);
 app.use("/api/livestreams", liveroomRoutes);
+app.use("/api/dm", dmRoutes);
 app.use("/api/tags", tagRoutes);
 app.use("/api/playlists", playlistRoutes);
 

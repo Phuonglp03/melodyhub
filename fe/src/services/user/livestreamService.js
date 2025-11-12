@@ -47,6 +47,15 @@ const endLiveStream = async (roomId) => {
   return data;
 };
 
+const banUser = async (roomId, userId, { messageId }) => {
+  const { data } = await http.post(`/livestreams/${roomId}/ban/${userId}`, { messageId });
+  return data;
+};
+
+const getChatHistory = async (roomId) => {
+  const { data } = await http.get(`/livestreams/${roomId}/chat`);
+  return data;
+};
 export const livestreamService = {
   createLiveStream,
   getLiveStreamById,
@@ -54,4 +63,6 @@ export const livestreamService = {
   goLive,
   endLiveStream,
   updatePrivacy,
+  getChatHistory,
+  banUser,
 };
