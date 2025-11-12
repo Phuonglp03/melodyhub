@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Card, Avatar, Typography, Space, Spin } from "antd";
+import React, { useEffect, useMemo, useState, useRef } from "react";
+import { Card, Avatar, Typography, Space, Spin, Button } from "antd";
+import { PlayCircleOutlined, PauseCircleOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
-import { getLickById } from "../services/user/lickService";
+import { getLickById, playLickAudio } from "../services/user/lickService";
 
 const { Text } = Typography;
 
@@ -21,11 +22,35 @@ const PostLickEmbed = ({ lickId, url }) => {
   );
   const [loading, setLoading] = useState(!data && Boolean(lickId));
   const [error, setError] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [audioUrl, setAudioUrl] = useState(null);
+  const audioRef = useRef(null);
 
   useEffect(() => {
     let active = true;
     if (!lickId) return undefined;
-    if (LICK_CACHE.has(lickId)) return undefined;
+    
+    // If data is already cached, set it and fetch audio URL if needed
+    if (LICK_CACHE.has(lickId)) {
+      const cachedData = LICK_CACHE.get(lickId);
+      setData(cachedData);
+      if (cachedData.audio_url) {
+        setAudioUrl(cachedData.audio_url);
+      } else {
+        // Try to get audio URL from play endpoint
+        playLickAudio(lickId)
+          .then((playRes) => {
+            if (!active) return;
+            if (playRes?.success && playRes.data?.audio_url) {
+              setAudioUrl(playRes.data.audio_url);
+            }
+          })
+          .catch((err) => {
+            console.warn("Could not fetch audio URL from cache:", err);
+          });
+      }
+      return undefined;
+    }
 
     const fetchData = async () => {
       try {
@@ -36,6 +61,20 @@ const PostLickEmbed = ({ lickId, url }) => {
           LICK_CACHE.set(lickId, res.data);
           setData(res.data);
           setError(null);
+          // Set audio URL if available in data
+          if (res.data.audio_url) {
+            setAudioUrl(res.data.audio_url);
+          } else {
+            // Try to get audio URL from play endpoint
+            try {
+              const playRes = await playLickAudio(lickId);
+              if (playRes?.success && playRes.data?.audio_url) {
+                setAudioUrl(playRes.data.audio_url);
+              }
+            } catch (err) {
+              console.warn("Could not fetch audio URL:", err);
+            }
+          }
         } else {
           setError("Lick unavailable");
         }
@@ -69,6 +108,75 @@ const PostLickEmbed = ({ lickId, url }) => {
     }
   };
 
+  const handlePlayPause = async (e) => {
+    e.stopPropagation(); // Prevent navigation when clicking play button
+    if (!audioRef.current) return;
+
+    // If no audio URL yet, try to fetch it
+    if (!audioUrl && lickId) {
+      try {
+        const playRes = await playLickAudio(lickId);
+        if (playRes?.success && playRes.data?.audio_url) {
+          setAudioUrl(playRes.data.audio_url);
+          audioRef.current.src = playRes.data.audio_url;
+        } else {
+          console.error("No audio URL available");
+          return;
+        }
+      } catch (error) {
+        console.error("Error fetching audio URL:", error);
+        return;
+      }
+    }
+
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      if (audioUrl && !audioRef.current.src) {
+        audioRef.current.src = audioUrl;
+      }
+      audioRef.current
+        .play()
+        .then(() => {
+          setIsPlaying(true);
+        })
+        .catch((error) => {
+          console.error("Error playing audio:", error);
+        });
+    }
+  };
+
+  const handleWaveformClick = (e) => {
+    e.stopPropagation(); // Prevent navigation when clicking waveform
+    handlePlayPause(e);
+  };
+
+  useEffect(() => {
+    if (audioRef.current && audioUrl) {
+      audioRef.current.src = audioUrl;
+    }
+  }, [audioUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleEnded = () => setIsPlaying(false);
+    const handlePause = () => setIsPlaying(false);
+    const handlePlay = () => setIsPlaying(true);
+
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("play", handlePlay);
+
+    return () => {
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("play", handlePlay);
+    };
+  }, []);
+
   return (
     <Card
       bordered={false}
@@ -81,6 +189,14 @@ const PostLickEmbed = ({ lickId, url }) => {
       }}
       bodyStyle={{ padding: 16 }}
     >
+      {/* Hidden audio element */}
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        onError={(e) => {
+          console.error("Audio error:", e);
+        }}
+      />
       {loading && (
         <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
           <Spin />
@@ -130,7 +246,9 @@ const PostLickEmbed = ({ lickId, url }) => {
                 alignItems: "flex-end",
                 gap: 2,
                 height: "100%",
+                cursor: "pointer",
               }}
+              onClick={handleWaveformClick}
             >
               {bars.map((height, idx) => (
                 <div
@@ -145,18 +263,42 @@ const PostLickEmbed = ({ lickId, url }) => {
                 />
               ))}
             </div>
-            <div
-              style={{
-                position: "absolute",
-                right: 14,
-                top: "50%",
-                transform: "translateY(-50%)",
-                width: 12,
-                height: 12,
-                borderRadius: "50%",
-                background: "#fb923c",
-              }}
-            />
+            {lickId && (
+              <Button
+                type="text"
+                icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                onClick={handlePlayPause}
+                style={{
+                  position: "absolute",
+                  right: 14,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "#fb923c",
+                  fontSize: 24,
+                  width: 32,
+                  height: 32,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(0, 0, 0, 0.5)",
+                  border: "none",
+                }}
+              />
+            )}
+            {!lickId && (
+              <div
+                style={{
+                  position: "absolute",
+                  right: 14,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  width: 12,
+                  height: 12,
+                  borderRadius: "50%",
+                  background: "#fb923c",
+                }}
+              />
+            )}
           </div>
           <div style={{ color: "#9ca3af", fontSize: 12 }}>
             Tempo:{" "}
