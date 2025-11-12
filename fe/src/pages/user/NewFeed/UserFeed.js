@@ -19,6 +19,7 @@ import {
   createPostComment,
 } from "../../../services/user/post";
 import { getProfileById, followUser, unfollowUser } from "../../../services/user/profile";
+import PostLickEmbed from "../../../components/PostLickEmbed";
 import { useNavigate, useParams } from "react-router-dom";
 
 const { Text } = Typography;
@@ -104,6 +105,26 @@ const deriveThumbnail = (urlString) => {
   const ytId = getYoutubeId(urlString);
   if (ytId) return `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`;
   return "";
+};
+
+const parseSharedLickId = (urlString) => {
+  if (!urlString) return null;
+  try {
+    const base =
+      typeof window !== "undefined" && window.location
+        ? window.location.origin
+        : "https://melodyhub.app";
+    const normalised = urlString.startsWith("http")
+      ? new URL(urlString)
+      : new URL(urlString, base);
+    const segments = normalised.pathname.split("/").filter(Boolean);
+    if (segments.length >= 2 && segments[0] === "licks") {
+      return segments[1];
+    }
+    return null;
+  } catch {
+    return null;
+  }
 };
 
 const UserFeed = () => {
@@ -451,7 +472,10 @@ const UserFeed = () => {
               !error &&
               items.map((post) => {
                 const firstUrl = extractFirstUrl(post?.textContent || "");
-                const previewUrl = post?.linkPreview?.url || firstUrl;
+                const sharedLickId = parseSharedLickId(firstUrl);
+                const previewUrl = sharedLickId
+                  ? null
+                  : post?.linkPreview?.url || firstUrl;
                 const previewData =
                   post?.linkPreview ||
                   (previewUrl ? previewCache[previewUrl] : null);
@@ -510,6 +534,11 @@ const UserFeed = () => {
                         }}
                       >
                         {post.textContent}
+                      </div>
+                    )}
+                    {sharedLickId && (
+                      <div style={{ marginBottom: 12 }}>
+                        <PostLickEmbed lickId={sharedLickId} url={firstUrl} />
                       </div>
                     )}
                     {post?.media?.length > 0 && (

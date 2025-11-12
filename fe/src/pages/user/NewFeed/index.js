@@ -5,6 +5,7 @@ import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlin
 import { listPosts, createPost } from '../../../services/user/post';
 import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments } from '../../../services/user/post';
 import { followUser, unfollowUser, getFollowSuggestions, getProfileById } from '../../../services/user/profile';
+import PostLickEmbed from '../../../components/PostLickEmbed';
 
 const { Title, Text } = Typography;
 
@@ -193,6 +194,26 @@ const NewsFeed = () => {
       }
       if (u.hostname.includes('youtube.com')) {
         return u.searchParams.get('v');
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const parseSharedLickId = (urlString) => {
+    if (!urlString) return null;
+    try {
+      const base =
+        typeof window !== 'undefined' && window.location
+          ? window.location.origin
+          : 'https://melodyhub.app';
+      const normalised = urlString.startsWith('http')
+        ? new URL(urlString)
+        : new URL(urlString, base);
+      const segments = normalised.pathname.split('/').filter(Boolean);
+      if (segments.length >= 2 && segments[0] === 'licks') {
+        return segments[1];
       }
       return null;
     } catch {
@@ -729,6 +750,15 @@ const NewsFeed = () => {
                   {post.textContent}
                 </div>
               )}
+          {(() => {
+            const url = extractFirstUrl(post?.textContent);
+            const sharedLickId = parseSharedLickId(url);
+            return sharedLickId ? (
+              <div style={{ marginBottom: 12 }}>
+                <PostLickEmbed lickId={sharedLickId} url={url} />
+              </div>
+            ) : null;
+          })()}
               {post?.media?.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
                   <WavePlaceholder />
@@ -860,6 +890,15 @@ const NewsFeed = () => {
             {modalPost?.textContent && (
               <div style={{ marginBottom: 8, color: '#e5e7eb' }}>{modalPost.textContent}</div>
             )}
+            {(() => {
+              const url = extractFirstUrl(modalPost?.textContent);
+              const sharedLickId = parseSharedLickId(url);
+              return sharedLickId ? (
+                <div style={{ marginBottom: 12 }}>
+                  <PostLickEmbed lickId={sharedLickId} url={url} />
+                </div>
+              ) : null;
+            })()}
             {modalPost?.media?.length > 0 && (
               <div style={{ marginBottom: 8 }}><WavePlaceholder /></div>
             )}

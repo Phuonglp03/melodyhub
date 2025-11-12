@@ -26,6 +26,7 @@ import CommentSection from "./CommentSection";
 import { getMyProfile } from "../services/user/profile";
 import GuitarTabEditor from "./GuitarTabEditor";
 import { updateLick } from "../services/user/lickService";
+import { createPost as createPostApi } from "../services/user/post";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -59,6 +60,8 @@ const LickDetail = ({
   );
   const [isEditingTab, setIsEditingTab] = useState(false);
   const [savingTab, setSavingTab] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const isPublic = lick?.is_public ?? lick?.isPublic ?? false;
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString("vi-VN", {
       year: "numeric",
@@ -153,6 +156,8 @@ const LickDetail = ({
     }
   };
 
+  const resolvedTags = Array.isArray(lick?.tags) ? lick.tags : [];
+
   const handleLike = async () => {
     const tokenFromStorage = (() => {
       try {
@@ -184,6 +189,33 @@ const LickDetail = ({
     }
   };
 
+  const handleShare = async () => {
+    if (sharing) return;
+    if (!isPublic) {
+      message.warning("Chỉ có thể chia sẻ lick ở trạng thái Public");
+      return;
+    }
+    try {
+      setSharing(true);
+      const origin =
+        typeof window !== "undefined" && window.location
+          ? window.location.origin
+          : "";
+      const shareUrl = origin
+        ? `${origin}/licks/${lick.lick_id}`
+        : `/licks/${lick.lick_id}`;
+      const title = lick?.title || "My new lick";
+      const textContent = `🎸 ${title}\n${shareUrl}`;
+      await createPostApi({ postType: "status_update", textContent });
+      message.success("Đã chia sẻ lên bảng tin của bạn");
+    } catch (error) {
+      console.error("Error sharing lick:", error);
+      message.error(error?.message || "Chia sẻ thất bại");
+    } finally {
+      setSharing(false);
+    }
+  };
+
   if (!lick) {
     return (
       <div style={{ textAlign: "center", padding: "50px" }}>
@@ -193,24 +225,25 @@ const LickDetail = ({
   }
 
   return (
-    <Row gutter={[24, 24]}>
+    <Row gutter={[20, 16]}>
       {/* Main Content */}
       <Col xs={24} lg={showSidebar ? 16 : 24}>
         <Card
           style={{
             backgroundColor: "#111827",
             border: "1px solid #1f2937",
-            borderRadius: "12px",
-            marginBottom: "24px",
+            borderRadius: "16px",
+            marginBottom: "20px",
+            boxShadow: "0 12px 32px rgba(15, 23, 42, 0.25)",
           }}
-          bodyStyle={{ padding: "24px" }}
+          bodyStyle={{ padding: "20px" }}
         >
           {/* Audio Player */}
           {showPlayer && (
-            <div style={{ marginBottom: "24px" }}>
+            <div style={{ marginBottom: "18px" }}>
               <LickPlayer
                 lick={lick}
-                style={{ marginBottom: "16px" }}
+                style={{ marginBottom: "12px" }}
                 audioRef={audioRef}
                 onPlayStateChange={setIsPlaying}
                 onProgress={setProgress}
@@ -219,10 +252,15 @@ const LickDetail = ({
           )}
 
           {/* Lick Info */}
-          <div style={{ marginBottom: "24px" }}>
+          <div style={{ marginBottom: "18px" }}>
             <Title
               level={2}
-              style={{ color: "#f3f4f6", marginBottom: "12px", fontWeight: 600 }}
+              style={{
+                color: "#f3f4f6",
+                marginBottom: "8px",
+                fontWeight: 600,
+                letterSpacing: "-0.01em",
+              }}
             >
               {lick.title}
             </Title>
@@ -232,16 +270,24 @@ const LickDetail = ({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  marginBottom: "20px",
+                  gap: "12px",
+                  marginBottom: "18px",
                 }}
               >
                 {displayAvatar ? (
                   <Avatar
                     src={displayAvatar}
-                    style={{ marginRight: "12px", border: "2px solid #1f2937" }}
+                    size={48}
+                    style={{ border: "2px solid #1f2937" }}
                   />
                 ) : null}
-                <div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                  }}
+                >
                   <Text
                     style={{
                       color: "#e2e8f0",
@@ -262,8 +308,8 @@ const LickDetail = ({
             <div
               style={{
                 display: "flex",
-                gap: "12px",
-                marginBottom: "20px",
+                gap: "10px",
+                marginBottom: "16px",
                 flexWrap: "wrap",
               }}
             >
@@ -273,7 +319,13 @@ const LickDetail = ({
                 onClick={handleLike}
                 style={{
                   color: isLiked ? "#f87171" : "#cbd5f5",
-                  backgroundColor: "transparent",
+                  backgroundColor: "rgba(15, 23, 42, 0.35)",
+                  borderRadius: "999px",
+                  padding: "4px 14px",
+                  border: "1px solid rgba(148, 163, 184, 0.25)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
                 }}
               >
                 {localLikesCount} likes
@@ -281,31 +333,59 @@ const LickDetail = ({
               <Button
                 type="text"
                 icon={<CommentOutlined />}
-                style={{ color: "#cbd5f5" }}
+                style={{
+                  color: "#cbd5f5",
+                  backgroundColor: "rgba(15, 23, 42, 0.35)",
+                  borderRadius: "999px",
+                  padding: "4px 14px",
+                  border: "1px solid rgba(148, 163, 184, 0.25)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
               >
                 {commentsCount} comments
               </Button>
               <Button
                 type="text"
                 icon={<ShareAltOutlined />}
-                style={{ color: "#cbd5f5" }}
+                onClick={handleShare}
+                loading={sharing}
+                disabled={!isPublic || sharing}
+                style={{
+                  color: "#cbd5f5",
+                  backgroundColor: "rgba(15, 23, 42, 0.35)",
+                  borderRadius: "999px",
+                  padding: "4px 14px",
+                  border: "1px solid rgba(148, 163, 184, 0.25)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
               >
                 Share
               </Button>
             </div>
 
             {/* Tags */}
-            <div style={{ marginBottom: "16px" }}>
-              {lick.tags.map((tag) => (
+            <div
+              style={{
+                marginBottom: "14px",
+                display: "flex",
+                gap: "8px",
+                flexWrap: "wrap",
+              }}
+            >
+              {resolvedTags.map((tag) => (
                 <Tag
                   key={tag.tag_id}
                   style={{
-                    marginBottom: "6px",
                     background: "rgba(14, 165, 233, 0.1)",
                     border: "1px solid rgba(14, 165, 233, 0.25)",
                     color: "#38bdf8",
                     borderRadius: "999px",
-                    padding: "2px 10px",
+                    padding: "4px 12px",
+                    fontSize: "12px",
                   }}
                 >
                   #{tag.tag_name}
@@ -316,57 +396,127 @@ const LickDetail = ({
             {/* Description */}
             {lick.description && (
               <Paragraph
-                style={{ color: "#cbd5f5", marginBottom: "20px", lineHeight: 1.6 }}
+                style={{
+                  color: "#cbd5f5",
+                  marginBottom: "18px",
+                  lineHeight: 1.55,
+                }}
               >
                 {lick.description}
               </Paragraph>
             )}
 
             {/* Technical Info */}
-            <Row gutter={[16, 16]}>
+            <Row gutter={[12, 12]} style={{ marginBottom: "4px" }}>
               <Col xs={12} sm={6}>
-                <Text style={{ color: "#94a3b8", fontSize: "12px" }}>Key:</Text>
+                <Text
+                  style={{
+                    color: "#94a3b8",
+                    fontSize: "12px",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Key
+                </Text>
                 <br />
-                <Text style={{ color: "#e5e7eb" }}>{lick.key || "N/A"}</Text>
+                <Text
+                  style={{
+                    color: "#e5e7eb",
+                    fontSize: "14px",
+                    fontWeight: 500,
+                  }}
+                >
+                  {lick.key || "N/A"}
+                </Text>
               </Col>
               <Col xs={12} sm={6}>
-                <Text style={{ color: "#94a3b8", fontSize: "12px" }}>Tempo:</Text>
+                <Text
+                  style={{
+                    color: "#94a3b8",
+                    fontSize: "12px",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Tempo
+                </Text>
                 <br />
-                <Text style={{ color: "#e5e7eb" }}>{lick.tempo || "N/A"} BPM</Text>
+                <Text
+                  style={{
+                    color: "#e5e7eb",
+                    fontSize: "14px",
+                    fontWeight: 500,
+                  }}
+                >
+                  {lick.tempo || "N/A"} BPM
+                </Text>
               </Col>
               <Col xs={12} sm={6}>
-                <Text style={{ color: "#94a3b8", fontSize: "12px" }}>
+                <Text
+                  style={{
+                    color: "#94a3b8",
+                    fontSize: "12px",
+                    textTransform: "uppercase",
+                  }}
+                >
                   Difficulty:
                 </Text>
                 <br />
-                <Text style={{ color: "#e5e7eb" }}>{lick.difficulty || "N/A"}</Text>
+                <Text
+                  style={{
+                    color: "#e5e7eb",
+                    fontSize: "14px",
+                    fontWeight: 500,
+                  }}
+                >
+                  {lick.difficulty || "N/A"}
+                </Text>
               </Col>
               <Col xs={12} sm={6}>
-                <Text style={{ color: "#94a3b8", fontSize: "12px" }}>
+                <Text
+                  style={{
+                    color: "#94a3b8",
+                    fontSize: "12px",
+                    textTransform: "uppercase",
+                  }}
+                >
                   Duration:
                 </Text>
                 <br />
-                <Text style={{ color: "#e5e7eb" }}>{lick.duration || "N/A"}s</Text>
+                <Text
+                  style={{
+                    color: "#e5e7eb",
+                    fontSize: "14px",
+                    fontWeight: 500,
+                  }}
+                >
+                  {lick.duration || "N/A"}s
+                </Text>
               </Col>
             </Row>
           </div>
 
-          <Divider style={{ borderColor: "#1f2937" }} />
+          <Divider style={{ borderColor: "#1f2937", margin: "0 0 18px" }} />
 
           {canEditTab && (
-            <div style={{ marginBottom: "24px" }}>
+            <div style={{ marginBottom: "18px" }}>
               <div
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
-                  marginBottom: "16px",
-                  gap: "16px",
+                  marginBottom: "12px",
+                  gap: "12px",
                 }}
               >
                 <Title
                   level={4}
-                  style={{ color: "#e2e8f0", margin: 0, fontSize: "20px", fontWeight: 500 }}
+                  style={{
+                    color: "#e2e8f0",
+                    margin: 0,
+                    fontSize: "18px",
+                    fontWeight: 500,
+                    letterSpacing: "-0.01em",
+                  }}
                 >
                   Tab Notation Editor
                 </Title>
@@ -376,10 +526,12 @@ const LickDetail = ({
                   disabled={savingTab}
                   style={{
                     padding: "0 12px",
-                    height: "36px",
-                    borderRadius: "8px",
+                    height: "34px",
+                    borderRadius: "10px",
                     color: isEditingTab ? "#e5e7eb" : "#94a3b8",
-                    backgroundColor: isEditingTab ? "rgba(148, 163, 184, 0.12)" : "transparent",
+                    backgroundColor: isEditingTab
+                      ? "rgba(148, 163, 184, 0.12)"
+                      : "transparent",
                     border: "1px solid rgba(148, 163, 184, 0.2)",
                   }}
                 >
@@ -397,8 +549,8 @@ const LickDetail = ({
                   style={{
                     backgroundColor: "#0b1623",
                     border: "1px solid #1f2937",
-                    borderRadius: "10px",
-                    padding: "18px",
+                    borderRadius: "12px",
+                    padding: "16px",
                   }}
                 >
                   {tabContent ? (
@@ -411,8 +563,7 @@ const LickDetail = ({
                     />
                   ) : (
                     <Text style={{ color: "#7f8ea3" }}>
-                      No tab notation available. Click "Edit Tab" to create
-                      one.
+                      No tab notation available. Click "Edit Tab" to create one.
                     </Text>
                   )}
                 </div>
@@ -421,7 +572,7 @@ const LickDetail = ({
           )}
 
           {showComments && (
-            <div style={{ marginTop: "16px" }}>
+            <div style={{ marginTop: "12px" }}>
               <CommentSection
                 lickId={lick.lick_id}
                 currentUser={{ id: currentUserId }}
@@ -440,23 +591,33 @@ const LickDetail = ({
             style={{
               backgroundColor: "#0f172a",
               border: "1px solid #1f2937",
-              borderRadius: "12px",
+              borderRadius: "16px",
+              boxShadow: "0 12px 32px rgba(15, 23, 42, 0.2)",
             }}
             headStyle={{
               color: "#e2e8f0",
-              borderBottom: "1px solid #1f2937",
-              background: "rgba(15, 22, 35, 0.6)",
+              borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
+              background: "rgba(15, 23, 42, 0.55)",
+              padding: "14px 20px",
             }}
-            bodyStyle={{ padding: "24px" }}
+            bodyStyle={{ padding: "20px" }}
           >
             <div style={{ color: "white" }}>
               {canEditTab ? (
-                <div style={{ color: "#94a3b8", lineHeight: 1.6 }}>
-                  <p style={{ marginBottom: "12px" }}>
-                    Use the editor to update notes while listening. Save to
-                    keep the preview in sync.
+                <div
+                  style={{
+                    color: "#94a3b8",
+                    lineHeight: 1.6,
+                    fontSize: "14px",
+                  }}
+                >
+                  <p style={{ marginBottom: "10px" }}>
+                    Use the editor to update notes while listening. Save to keep
+                    the preview in sync.
                   </p>
-                  <Divider style={{ borderColor: "#1f2937" }} />
+                  <Divider
+                    style={{ borderColor: "#1f2937", margin: "12px 0" }}
+                  />
                   <p style={{ marginBottom: 0 }}>
                     Preview closes automatically when you switch back to
                     editing.
@@ -476,8 +637,8 @@ const LickDetail = ({
                     <div
                       style={{
                         backgroundColor: "#0b1623",
-                        padding: "20px",
-                        borderRadius: "10px",
+                        padding: "16px",
+                        borderRadius: "12px",
                         textAlign: "center",
                       }}
                     >

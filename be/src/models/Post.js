@@ -1,14 +1,18 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const postSchema = new mongoose.Schema(
   {
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
 
     // Loại bài đăng
     postType: {
       type: String,
-      enum: ['status_update', 'shared_post'],
-      default: 'status_update',
+      enum: ["status_update", "shared_post"],
+      default: "status_update",
       required: true,
     },
 
@@ -28,18 +32,22 @@ const postSchema = new mongoose.Schema(
     media: [
       {
         url: { type: String, required: true },
-        type: { type: String, enum: ['image', 'video', 'audio'], required: true },
+        type: {
+          type: String,
+          enum: ["image", "video", "audio"],
+          required: true,
+        },
       },
     ],
 
     // Bài chia sẻ lại (nếu có)
-    originalPostId: { type: mongoose.Schema.Types.ObjectId, ref: 'Post' },
+    originalPostId: { type: mongoose.Schema.Types.ObjectId, ref: "Post" },
 
     // Trạng thái kiểm duyệt
     moderationStatus: {
       type: String,
-      enum: ['approved', 'banned'],
-      default: 'approved',
+      enum: ["approved", "banned"],
+      default: "approved",
       required: true,
     },
   },
@@ -49,5 +57,5 @@ const postSchema = new mongoose.Schema(
 postSchema.index({ userId: 1 });
 postSchema.index({ createdAt: -1 });
 
-const Post = mongoose.model('Post', postSchema);
+const Post = mongoose.model("Post", postSchema);
 export default Post;
