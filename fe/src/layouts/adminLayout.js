@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { logout } from "../redux/features/auth/authSlice";
+import { logout } from "../redux/authSlice";
 import { 
   Home, 
   UserPlus, 
