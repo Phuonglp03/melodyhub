@@ -1,16 +1,17 @@
 import { Router } from 'express';
 import middlewareController from '../../middleware/auth.js';
 import {
-    createLiveStream,
-    getLiveStreamById,
-    goLive,
-    endLiveStream,
-    updateLiveStreamDetails,
-    updatePrivacy,
-    getChatHistory,
-    banUser,
-    unbanUser,
-  } from '../../controllers/user/liveroomController.js';
+  createLiveStream,
+  getActiveLiveStreams,
+  getLiveStreamById,
+  goLive,
+  endLiveStream,
+  updateLiveStreamDetails,
+  updatePrivacy,
+  getChatHistory,
+  banUser,
+  unbanUser
+} from  '../../controllers/user/liveroomController.js';
 
 const router = Router();
 const { verifyToken } = middlewareController;
@@ -23,22 +24,25 @@ router.post('/', verifyToken, createLiveStream);
 router.patch('/:id/details', verifyToken, updateLiveStreamDetails);
 
 //  Go live (status'preview' -> 'live')
-router.patch( '/:id/go-live',verifyToken, goLive);
+router.patch('/:id/go-live', verifyToken, goLive);
 
 // Lấy thông tin chi tiết 1 phòng (Viewer)
-router.get('/:id',verifyToken, getLiveStreamById);
+router.get('/:id', verifyToken, getLiveStreamById);
 
 // End live (status'live' -> 'ended')
-router.patch( '/:id/end', verifyToken,endLiveStream);
+router.patch('/:id/end', verifyToken, endLiveStream);
 
 // Update privacy type (Public -> Follow Only)
 router.patch('/:id/privacy', verifyToken, updatePrivacy);
 
+// Get active live streams
+router.get('/', verifyToken, getActiveLiveStreams);
+
 // Get chat history
-router.get('/:roomId/chat',verifyToken, getChatHistory);
+router.get('/:roomId/chat', verifyToken, getChatHistory);
 
 // Ban user
-router.post('/:roomId/ban/:userId', verifyToken, banUser); 
+router.post('/:roomId/ban/:userId', verifyToken, banUser);
 
 // Unban user 
 router.post('/:roomId/unban/:userId', verifyToken, unbanUser);

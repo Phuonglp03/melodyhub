@@ -153,46 +153,6 @@ export const goLive = async (req, res) => {
   }
 };
 
-
-export const endLiveStream = async (req, res) => {
-  const hostId = req.userId;
-  
-  try {
-    const { id } = req.params;
-    const room = await LiveRoom.findOne({ _id: id, hostId: hostId });
-
-    if (!room) {
-      return res.status(404).json({ message: 'Không tìm thấy phòng live hoặc bạn không có quyền.' });
-    }
-    
-    if (room.status === 'ended') {
-       return res.status(400).json({ message: 'Stream đã kết thúc.' });
-    }
-    
-    const wasLive = room.status === 'live';
-
-
-    room.status = 'ended';
-    room.endedAt = new Date();
-    await room.save();
-
-
-    const io = getSocketIo();
-
-    if (wasLive) {
-        io.emit('stream-ended', { roomId: room._id, title: room.title });
-    }
-    io.to(room._id.toString()).emit('stream-status-ended'); 
-    res.status(200).json({ message: 'Đã kết thúc livestream.', room });
-    
-
-
-  } catch (err) {
-    console.error('Lỗi khi end-live:', err);
-    res.status(500).json({ message: 'Lỗi server.' });
-  }
-};
-
 export const updateLiveStreamDetails = async (req, res) => {
   const hostId = req.userId;
   const { id } = req.params;
@@ -232,20 +192,65 @@ export const updateLiveStreamDetails = async (req, res) => {
     res.status(500).json({ message: 'Lỗi server.' });
   }
 };
-
-export const getChatHistory = async (req, res) => {
-  const { roomId } = req.params;
+export const endLiveStream = async (req, res) => {
+  const hostId = req.userId;
+  
   try {
-    const messages = await RoomChat.find({ roomId })
-      .sort({ sentAt: 1 })
-      .populate('userId', 'displayName avatarUrl');
+    const { id } = req.params;
+    const room = await LiveRoom.findOne({ _id: id, hostId: hostId });
 
-    res.status(200).json(messages);
+    if (!room) {
+      return res.status(404).json({ message: 'Không tìm thấy phòng live hoặc bạn không có quyền.' });
+    }
+    
+    if (room.status === 'ended') {
+       return res.status(400).json({ message: 'Stream đã kết thúc.' });
+    }
+    
+    const wasLive = room.status === 'live';
+
+
+    room.status = 'ended';
+    room.endedAt = new Date();
+    await room.save();
+
+
+    const io = getSocketIo();
+
+    if (wasLive) {
+        io.emit('stream-ended', { roomId: room._id, title: room.title });
+    }
+    io.to(room._id.toString()).emit('stream-status-ended'); 
+    res.status(200).json({ message: 'Đã kết thúc livestream.', room });
+    
+
+
   } catch (err) {
-    console.error('Lỗi khi lấy chat history:', err);
+    console.error('Lỗi khi end-live:', err);
     res.status(500).json({ message: 'Lỗi server.' });
   }
 };
+
+
+export const getActiveLiveStreams = async (req, res) => {
+  try {
+    // 1. Tìm tất cả các phòng có status là 'live'
+    const streams = await LiveRoom.find({ status: 'live' })
+      // 2. Lấy thông tin host (giống như hàm getLiveStreamById)
+      .populate('hostId', 'displayName username avatarUrl') 
+      // 3. Sắp xếp stream mới nhất lên đầu
+      .sort({ startedAt: -1 }); 
+
+    res.status(200).json(streams);
+
+  } catch (err) {
+    console.error('Lỗi khi lấy active streams:', err);
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
+
+
+
 
 export const banUser = async (req, res) => {
   const { roomId, userId } = req.params;
@@ -275,6 +280,20 @@ export const banUser = async (req, res) => {
 
     res.status(200).json({ message: 'Đã ban user.' });
   } catch (err) {
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
+
+export const getChatHistory = async (req, res) => {
+  const { roomId } = req.params;
+  try {
+    const messages = await RoomChat.find({ roomId })
+      .sort({ sentAt: 1 })
+      .populate('userId', 'displayName avatarUrl');
+
+    res.status(200).json(messages);
+  } catch (err) {
+    console.error('Lỗi khi lấy chat history:', err);
     res.status(500).json({ message: 'Lỗi server.' });
   }
 };
