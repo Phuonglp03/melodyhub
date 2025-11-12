@@ -9,7 +9,7 @@ export const getCurrentUserProfile = async (req, res) => {
     const userId = req.userId; // From auth middleware
 
     const user = await User.findById(userId).select('-passwordHash');
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -18,7 +18,7 @@ export const getCurrentUserProfile = async (req, res) => {
     }
 
     // Get user's post count
-    const postCount = await Post.countDocuments({ 
+    const postCount = await Post.countDocuments({
       userId,
       $or: [
         { moderationStatus: 'approved' },
@@ -75,7 +75,7 @@ export const getUserProfileById = async (req, res) => {
     const currentUserId = req.userId; // From auth middleware (optional)
 
     const user = await User.findById(userId).select('-passwordHash -email');
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -118,7 +118,7 @@ export const getUserProfileById = async (req, res) => {
     }
 
     // Get user's post count
-    const postCount = await Post.countDocuments({ 
+    const postCount = await Post.countDocuments({
       userId,
       $or: [
         { moderationStatus: 'approved' },
@@ -175,7 +175,7 @@ export const getUserProfileByUsername = async (req, res) => {
     const currentUserId = req.userId; // From auth middleware (optional)
 
     const user = await User.findOne({ username }).select('-passwordHash -email');
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -218,7 +218,7 @@ export const getUserProfileByUsername = async (req, res) => {
     }
 
     // Get user's post count
-    const postCount = await Post.countDocuments({ 
+    const postCount = await Post.countDocuments({
       userId: user._id,
       $or: [
         { moderationStatus: 'approved' },
@@ -272,7 +272,7 @@ export const getUserProfileByUsername = async (req, res) => {
 export const updateUserProfile = async (req, res) => {
   try {
     const userId = req.userId; // From auth middleware
-    
+
     console.log('📝 Update profile - Content-Type:', req.headers['content-type']);
     console.log('📝 Update profile - req.file:', req.file ? 'File exists' : 'No file');
     console.log('📝 Update profile - req.body keys:', Object.keys(req.body || {}));
@@ -281,7 +281,7 @@ export const updateUserProfile = async (req, res) => {
     const { displayName, bio, birthday, avatarUrl, privacyProfile, theme, language, gender, location } = req.body;
 
     const user = await User.findById(userId);
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -293,7 +293,7 @@ export const updateUserProfile = async (req, res) => {
     if (displayName !== undefined) user.displayName = displayName;
     if (bio !== undefined) user.bio = bio;
     if (birthday !== undefined) user.birthday = birthday ? new Date(birthday) : undefined;
-    
+
     // Xử lý avatar: ưu tiên file upload (Cloudinary), sau đó mới đến URL string
     if (req.file) {
       // File đã được upload lên Cloudinary bởi multer-storage-cloudinary
@@ -301,7 +301,7 @@ export const updateUserProfile = async (req, res) => {
       const uploadedUrl = req.file.path || req.file.secure_url || req.file.url;
       console.log('📸 Uploaded file URL:', uploadedUrl);
       console.log('📸 Full file object keys:', Object.keys(req.file || {}));
-      
+
       if (uploadedUrl) {
         user.avatarUrl = uploadedUrl;
         console.log('✅ Avatar URL updated from uploaded file:', uploadedUrl);
@@ -369,9 +369,9 @@ export const uploadAvatar = async (req, res) => {
   try {
     const userId = req.userId;
     const file = req.file;
-    
+
     console.log('📸 Upload avatar - file object:', JSON.stringify(file, null, 2));
-    
+
     if (!file) {
       return res.status(400).json({ success: false, message: 'Missing avatar file' });
     }
@@ -379,13 +379,13 @@ export const uploadAvatar = async (req, res) => {
     // With CloudinaryStorage, the file object should have path or secure_url
     // Try multiple possible properties from Cloudinary response
     const imageUrl = file.path || file.secure_url || file.url || (file.filename ? `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}` : null);
-    
+
     console.log('📸 Extracted imageUrl:', imageUrl);
-    
+
     if (!imageUrl) {
       console.error('❌ No imageUrl found in file object:', file);
-      return res.status(500).json({ 
-        success: false, 
+      return res.status(500).json({
+        success: false,
         message: 'Upload failed - no URL returned from Cloudinary',
         debug: { fileKeys: Object.keys(file || {}) }
       });
@@ -406,17 +406,17 @@ export const uploadAvatar = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: 'Avatar updated',
-      data: { 
-        avatarUrl: user.avatarUrl, 
-        user 
+      data: {
+        avatarUrl: user.avatarUrl,
+        user
       }
     });
   } catch (error) {
     console.error('❌ Error uploading avatar:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Internal server error', 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
     });
   }
 };
@@ -488,7 +488,7 @@ export const followUser = async (req, res) => {
 
   } catch (error) {
     console.error('Error following user:', error);
-    
+
     // Handle duplicate key error
     if (error.code === 11000) {
       return res.status(400).json({

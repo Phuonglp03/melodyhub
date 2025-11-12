@@ -6,7 +6,10 @@ import {
     goLive,
     endLiveStream,
     updateLiveStreamDetails,
-    updatePrivacy
+    updatePrivacy,
+    getChatHistory,
+    banUser,
+    unbanUser,
   } from '../../controllers/user/liveroomController.js';
 
 const router = Router();
@@ -31,6 +34,13 @@ router.patch( '/:id/end', verifyToken,endLiveStream);
 // Update privacy type (Public -> Follow Only)
 router.patch('/:id/privacy', verifyToken, updatePrivacy);
 
+// Get chat history
+router.get('/:roomId/chat',verifyToken, getChatHistory);
 
+// Ban user
+router.post('/:roomId/ban/:userId', verifyToken, banUser); 
+
+// Unban user 
+router.post('/:roomId/unban/:userId', verifyToken, unbanUser);
 
 export default router;

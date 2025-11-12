@@ -1,5 +1,5 @@
 // src/pages/liveroom_create/index.js
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { livestreamService } from '../../../services/user/livestreamService';
 import {
@@ -9,25 +9,18 @@ import {
   offSocketEvents,
   disconnectSocket
 } from '../../../services/user/socketService';
-import ReactPlayer from 'react-player';
-import { Select } from 'antd';
+import videojs from 'video.js';
+import '../../../../node_modules/video.js/dist/video-js.css';
+import { Select, Button } from 'antd';
 import EmojiPicker from 'emoji-picker-react';
+import { useSelector } from 'react-redux';
+import { SmileOutlined } from '@ant-design/icons';
 
-const getUserIdFromStorage = () => {
-  const userString = localStorage.getItem('user'); //
-  if (userString) {
-    try {
-      const user = JSON.parse(userString);
-      return user._id || user.id || null;
-    } catch (e) {
-      return null;
-    }
-  }
-  return null;
-};
+
 const LiveStreamCreate = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
+  const { user } = useSelector((state) => state.auth);
 
   const [room, setRoom] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -44,14 +37,19 @@ const LiveStreamCreate = () => {
   const [showStreamKey, setShowStreamKey] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [descriptionText, setDescriptionText] = useState('');
-
+  
+  // Video.js refs
+  const videoRef = useRef(null);
+  const playerRef = useRef(null);
+  const retryIntervalRef = useRef(null);
+  
   useEffect(() => {
     initSocket();
 
     const fetchRoom = async () => {
       try {
         const roomData = await livestreamService.getLiveStreamById(roomId);
-        const currentUserId = getUserIdFromStorage();
+        const currentUserId = user?.user?.id;
         const hostId = roomData.hostId?._id;
 
         if (hostId !== currentUserId) {
@@ -60,10 +58,12 @@ const LiveStreamCreate = () => {
           return; 
         }
         if (roomData.status === 'live') {
-          navigate(`/livestream/live/${roomId}`); return;
+          navigate(`/livestream/live/${roomId}`);
+          return;
         }
         if (roomData.status === 'ended') {
-          navigate('/'); return;
+          navigate('/');
+          return;
         }
 
         setRoom(roomData);
@@ -83,13 +83,8 @@ const LiveStreamCreate = () => {
     onStreamPreviewReady((roomDataFromServer) => {
       console.log('[Socket] Tín hiệu OBS đã sẵn sàng!', roomDataFromServer);
       setIsPreviewReady(true);
-
-      setTimeout(() => {
-        console.log('[Socket] Đang tải preview video.');
-        setIsPreviewReady(true);
-        setRoom(roomDataFromServer);
-        setPrivacy(roomDataFromServer.privacyType);
-      }, 2000);
+      setRoom(roomDataFromServer);
+      setPrivacy(roomDataFromServer.privacyType);
     });
 
     onStreamPrivacyUpdated((data) => {
@@ -101,8 +96,54 @@ const LiveStreamCreate = () => {
     return () => {
       offSocketEvents();
       disconnectSocket();
+      // Cleanup Video.js player
+      if (playerRef.current) {
+        playerRef.current.dispose();
+        playerRef.current = null;
+      }
     };
   }, [roomId, navigate]);
+
+  // Initialize Video.js player when preview is ready
+  useEffect(() => {
+    if (isPreviewReady && room?.playbackUrls?.hls && videoRef.current && !playerRef.current) {
+      const player = videojs(videoRef.current, {
+        autoplay: true,
+        muted: true,
+        controls: true,
+        fluid: false,
+        fill: true,
+        liveui: true,
+        html5: {
+          vhs: {
+            enableLowInitialPlaylist: true,
+            smoothQualityChange: true,
+            overrideNative: true
+          },
+          nativeAudioTracks: false,
+          nativeVideoTracks: false
+        }
+      });
+
+      player.src({
+        src: room.playbackUrls.hls,
+        type: 'application/x-mpegURL'
+      });
+
+      playerRef.current = player;
+
+      player.on('error', () => {
+        console.error('Video.js error:', player.error());
+      });
+    }
+
+    return () => {
+      if (playerRef.current && !isPreviewReady) {
+        playerRef.current.dispose();
+        playerRef.current = null;
+      }
+    };
+  }, [isPreviewReady, room]);
 
   const handlePrivacyChange = async (newPrivacy) => {
     setIsUpdatingPrivacy(true);
@@ -153,14 +194,44 @@ const LiveStreamCreate = () => {
     setShowEditPopup(true);
   };
 
+  const handleReloadPlayer = () => {
+    if (playerRef.current) {
+      playerRef.current.dispose();
+      playerRef.current = null;
+    }
+    
+    // Re-initialize player
+    if (room?.playbackUrls?.hls && videoRef.current) {
+      const player = videojs(videoRef.current, {
+        autoplay: true,
+        muted: true,
+        controls: true,
+        fluid: false,
+        fill: true,
+        liveui: true,
+        html5: {
+          vhs: {
+            enableLowInitialPlaylist: true,
+            smoothQualityChange: true,
+            overrideNative: true
+          }
+        }
+      });
+
+      player.src({
+        src: room.playbackUrls.hls,
+        type: 'application/x-mpegURL'
+      });
+
+      playerRef.current = player;
+    }
+  };
 
   if (loading) return <div style={{ color: 'white' }}>Đang tải thông tin phòng...</div>;
   if (error) return <div style={{ color: 'red' }}>{error}</div>;
   if (!room) return null;
 
   const isGoLiveDisabled = !hasTitle || !isPreviewReady || isSubmitting;
-
-  // Lấy URL HLS để xem trước
   const previewUrl = room.playbackUrls?.hls;
 
   return (
@@ -170,12 +241,12 @@ const LiveStreamCreate = () => {
       color: 'white',
       padding: '0'
     }}>
-
       <div style={{ 
         display: 'flex', 
         gap: '0',
         height: 'calc(100vh - 60px)'
       }}>
+        {/* Left Panel */}
         <div style={{ 
           width: 'calc(100vw - 80vw)',
           height: '100%',
@@ -185,10 +256,11 @@ const LiveStreamCreate = () => {
           flexDirection: 'column'
         }}>
           <div style={{ 
-        padding: '16px 24px'
-      }}>
-        <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '600' }}>Tạo video trực tiếp</h2>
-      </div>
+            padding: '16px 24px'
+          }}>
+            <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '600' }}>Tạo video trực tiếp</h2>
+          </div>
+          
           <div style={{ padding: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
               <div style={{
@@ -299,47 +371,38 @@ const LiveStreamCreate = () => {
           }}>
             {!isPreviewReady ? (
               <div style={{ textAlign: 'center', color: '#242526' }}>
-                <div style={{ fontSize: '48px', marginBottom: '12px' }}>📹</div>
+                <div style={{ fontSize: '48px', marginBottom: '12px' }}>🔹</div>
                 <p style={{ margin: 0, fontSize: '15px' }}>Đang chờ tín hiệu từ OBS...</p>
               </div>
             ) : previewUrl ? (
-              <ReactPlayer
-                src={previewUrl}
-                playing={true}
-                muted={true}
-                controls={true}
-                width="100%"
-                height="100%"
-                config={{
-                  file: {
-                    forceHLS: true, 
-                    hlsOptions: {
-                      debug: false,
-                      enableWorker: true,
-                      lowLatencyMode: true,
-                      manifestLoadingMaxRetry: 4,
-                      manifestLoadingRetryDelay: 1000,
-                      manifestLoadingTimeOut: 10000,
-                      levelLoadingMaxRetry: 4,
-                      levelLoadingTimeOut: 10000,
-                      fragLoadingMaxRetry: 6,
-                      fragLoadingTimeOut: 20000,
-                      maxBufferLength: 30,
-                      maxMaxBufferLength: 600,
-                      backBufferLength: 90,
-                      liveSyncDuration: 3,
-                      liveMaxLatencyDuration: 5,
-                    },
-                  }
-                }}
-              />
+              <div data-vjs-player style={{ width: '100%', height: '100%' }}>
+                <video
+                  ref={videoRef}
+                  className="video-js vjs-big-play-centered"
+                  style={{ width: '100%', height: '100%' }}
+                />
+              </div>
             ) : (
               <div style={{ textAlign: 'center', color: '#242526' }}>
-                <div style={{ fontSize: '48px', marginBottom: '12px' }}>📹</div>
+                <div style={{ fontSize: '48px', marginBottom: '12px' }}>🔹</div>
                 <p style={{ margin: 0, fontSize: '15px' }}>Kết nối phần mềm phát trực tiếp để tăng sáng</p>
               </div>
             )}
           </div>
+
+          {!isPreviewReady && (
+            <Button
+              onClick={handleReloadPlayer}
+              style={{
+                marginTop: '12px',
+                background: '#3a3b3c',
+                color: '#e4e6eb',
+                border: 'none'
+              }}
+            >
+              Không thấy video? Tải lại trình phát
+            </Button>
+          )}
 
           {/* Bottom Sections */}
           <div style={{ display: 'flex', gap: '16px', marginBottom: '20px' }}>
@@ -359,7 +422,7 @@ const LiveStreamCreate = () => {
                   fontSize: '12px',
                   color: '#b0b3b8',
                   marginTop: '4px'
-                }}>❓</div>
+                }}>ⓘ</div>
                 <div style={{ flex: 1 }}>
                   <h3 style={{ 
                     margin: '0 0 12px 0',
@@ -483,7 +546,7 @@ const LiveStreamCreate = () => {
               </div>
               
               <div style={{ fontSize: '12px', color: '#b0b3b8', marginTop: '12px' }}>
-                Nhấn không nên chia sẻ khóa này với bất kỳ ai khi chưa bạn muốn cản khác hành xâm nhập vào phát trực tiếp. <a href="#" style={{ color: '#0084ff' }}>Sao thẻ hộn nếu cần thiết.</a>
+                Nhấn không nên chia sẻ khóa này với bất kỳ ai khi chưa bạn muốn cản khác hành xâm nhập vào phát trực tiếp. <a href="#" style={{ color: '#0084ff' }}>Sao thế hơn nếu cần thiết.</a>
               </div>
             </div>
           </div>
@@ -502,11 +565,11 @@ const LiveStreamCreate = () => {
             
             {/* Tiêu đề */}
             <div style={{ marginBottom: '15px' }}>
-            <h4 style={{ 
-              margin: '0 0 5px 0',
-              fontSize: '14px',
-              fontWeight: '600'
-            }}>Tiêu đề</h4>
+              <h4 style={{ 
+                margin: '0 0 5px 0',
+                fontSize: '14px',
+                fontWeight: '600'
+              }}>Tiêu đề</h4>
               <div 
                 onClick={handleOpenEditPopup}
                 style={{
@@ -521,18 +584,18 @@ const LiveStreamCreate = () => {
                   fontSize: '15px',
                   color: room.title ? '#e4e6eb' : '#8b9298'
                 }}>
-                  {room.title || 'Tiêu đề (không bắt buộc)'}
+                  {room.title || 'Tiêu đề '}
                 </div>
               </div>
             </div>
 
             {/* Mô tả */}
             <div>
-            <h4 style={{ 
-              margin: '0 0 5px 0',
-              fontSize: '14px',
-              fontWeight: '600'
-            }}>Mô tả</h4>
+              <h4 style={{ 
+                margin: '0 0 5px 0',
+                fontSize: '14px',
+                fontWeight: '600'
+              }}>Mô tả</h4>
               <div 
                 onClick={handleOpenEditPopup}
                 style={{
@@ -640,7 +703,7 @@ const LiveStreamCreate = () => {
                     }}
                     title="Thêm emoji"
                   >
-                    😊
+                    <SmileOutlined />
                   </button>
                 </div>
                 <textarea

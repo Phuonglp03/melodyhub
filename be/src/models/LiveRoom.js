@@ -9,6 +9,7 @@ const liveRoomSchema = new mongoose.Schema(
     status: { type: String, enum: ['waiting','preview', 'live', 'ended'], default: 'waiting', required: true },
     privacyType: { type: String, enum: ['public', 'follow_only'], default: 'public', required: true },
     moderationStatus: { type: String, enum: ['active', 'banned'], default: 'active', required: true },
+    bannedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     recordingUrl: { type: String },
     scheduledAt: { type: Date },
     startedAt: { type: Date },

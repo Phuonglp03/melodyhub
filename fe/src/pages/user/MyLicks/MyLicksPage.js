@@ -1,18 +1,22 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { FaSearch, FaPlus, FaFilter, FaLock } from "react-icons/fa";
+import http from "../../../services/http";
 import {
-  FaSearch,
-  FaPlus,
-  FaFilter,
-} from "react-icons/fa";
-import axios from "axios";
-import { deleteLick, updateLick as apiUpdateLick } from "../../../services/user/lickService";
+  deleteLick,
+  updateLick as apiUpdateLick,
+} from "../../../services/user/lickService";
+import {
+  upsertTags,
+  replaceContentTags,
+} from "../../../services/user/tagService";
 import MyLickCard from "../../../components/MyLickCard";
 
 // --- Main My Licks Page ---
 const MyLicksPage = () => {
-  // Replace with actual user ID from auth context/redux
-  const userId = "507f1f77bcf86cd799439011"; // TODO: Get from auth
+  // userId is resolved server-side via JWT on /user/me
 
+  const navigate = useNavigate();
   const [licks, setLicks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -32,15 +36,21 @@ const MyLicksPage = () => {
   const [editForm, setEditForm] = useState({
     title: "",
     description: "",
-    tabNotation: "",
     key: "",
     tempo: "",
     difficulty: "",
     status: "",
     isPublic: false,
     isFeatured: false,
+    tagsInput: "",
   });
   const [saving, setSaving] = useState(false);
+
+  // Delete confirmation modal
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTargetId, setConfirmTargetId] = useState(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [confirmError, setConfirmError] = useState("");
 
   // Fetch user's licks from API
   const fetchMyLicks = async () => {
@@ -65,20 +75,31 @@ const MyLicksPage = () => {
         params.status = statusFilter;
       }
 
-      const response = await axios.get(
-        `http://localhost:9999/api/licks/user/${userId}`,
-        {
-          params,
-        }
-      );
+      const res = await http.get(`/licks/user/me`, { params });
 
-      if (response.data.success) {
-        setLicks(response.data.data);
-        setPagination(response.data.pagination);
+      if (res.data.success) {
+        setLicks(res.data.data);
+        setPagination(res.data.pagination);
       }
     } catch (err) {
       console.error("Error fetching my licks:", err);
-      setError(err.response?.data?.message || "Failed to load your licks");
+      const status = err?.response?.status;
+      const rawMsg = err?.response?.data?.message || err?.message || "";
+      const msg = String(rawMsg);
+      const normalized = msg.toLowerCase();
+      const isAuthError =
+        status === 401 ||
+        status === 403 ||
+        normalized.includes("token") ||
+        normalized.includes("expired") ||
+        normalized.includes("unauthorized") ||
+        normalized.includes("forbidden") ||
+        normalized.includes("hết hạn");
+      if (isAuthError) {
+        setError("You must login to see your licks");
+      } else {
+        setError(msg || "Failed to load your licks");
+      }
     } finally {
       setLoading(false);
     }
@@ -104,7 +125,7 @@ const MyLicksPage = () => {
 
   // Handle lick click
   const handleLickClick = (lickId) => {
-    window.location.href = `/lick/${lickId}`;
+    navigate(`/licks/${lickId}`);
   };
 
   // Handle edit
@@ -116,37 +137,49 @@ const MyLicksPage = () => {
     setEditForm({
       title: lick.title || "",
       description: lick.description || "",
-      tabNotation: lick.tab_notation || "",
       key: lick.key || "",
       tempo: lick.tempo || "",
       difficulty: lick.difficulty || "",
       status: lick.status || "",
       isPublic: !!lick.is_public,
       isFeatured: !!lick.is_featured,
+      tagsInput: (lick.tags || [])
+        .map((tag) => tag.tag_name || tag.tagName || tag.name || "")
+        .filter(Boolean)
+        .join(", "),
     });
     setIsEditOpen(true);
   };
 
   // Handle delete
-  const handleDelete = async (lickId) => {
-    if (
-      window.confirm(
-        "Are you sure you want to delete this lick? This action cannot be undone."
-      )
-    ) {
-      try {
-        await deleteLick(lickId);
-        setLicks((prevLicks) => prevLicks.filter((lick) => lick.lick_id !== lickId));
-      } catch (err) {
-        console.error("Error deleting lick:", err);
-        alert("Failed to delete lick");
-      }
+  const handleDelete = (lickId) => {
+    setConfirmTargetId(lickId);
+    setConfirmError("");
+    setConfirmOpen(true);
+  };
+
+  const performDelete = async () => {
+    if (!confirmTargetId) return;
+    try {
+      setConfirmLoading(true);
+      setConfirmError("");
+      await deleteLick(confirmTargetId);
+      setLicks((prevLicks) =>
+        prevLicks.filter((lick) => lick.lick_id !== confirmTargetId)
+      );
+      setConfirmOpen(false);
+      setConfirmTargetId(null);
+    } catch (err) {
+      console.error("Error deleting lick:", err);
+      setConfirmError(err?.message || "Failed to delete lick");
+    } finally {
+      setConfirmLoading(false);
     }
   };
 
   // Handle upload
   const handleUpload = () => {
-    window.location.href = "/licks/upload";
+    navigate("/licks/upload");
   };
 
   const handleEditChange = (e) => {
@@ -165,7 +198,6 @@ const MyLicksPage = () => {
       const payload = {
         title: editForm.title,
         description: editForm.description,
-        tabNotation: editForm.tabNotation,
         key: editForm.key,
         tempo: editForm.tempo,
         difficulty: editForm.difficulty,
@@ -175,8 +207,66 @@ const MyLicksPage = () => {
       };
 
       const res = await apiUpdateLick(editingLick.lick_id, payload);
+      let updatedTags = editingLick.tags || [];
+      const parsedTags = Array.from(
+        new Set(
+          (editForm.tagsInput || "")
+            .split(",")
+            .map((tag) => tag.trim())
+            .filter((tag) => tag.length > 0)
+            .map((tag) => tag.toLowerCase())
+        )
+      );
+
+      if (parsedTags.length > 0) {
+        const existingTypeMap = {};
+        (editingLick.tags || []).forEach((tag) => {
+          const key = (
+            tag.tag_name ||
+            tag.tagName ||
+            tag.name ||
+            ""
+          ).toLowerCase();
+          if (key) {
+            existingTypeMap[key] =
+              tag.tag_type || tag.tagType || tag.type || "user_defined";
+          }
+        });
+
+        const upsertPayload = parsedTags.map((name) => ({
+          name,
+          type: existingTypeMap[name] || "user_defined",
+        }));
+
+        try {
+          const upsertRes = await upsertTags(upsertPayload);
+          const tagDocs = upsertRes?.data || [];
+          const tagIds = tagDocs.map((doc) => doc._id);
+          await replaceContentTags("lick", editingLick.lick_id, tagIds);
+          updatedTags = tagDocs.map((doc) => ({
+            tag_id: doc._id,
+            tag_name: doc.name || doc.tag_name || "",
+            tag_type: doc.type || doc.tag_type || "user_defined",
+          }));
+        } catch (tagError) {
+          console.error("Error updating tags:", tagError);
+          alert(tagError?.message || "Failed to update tags");
+        }
+      } else {
+        try {
+          await replaceContentTags("lick", editingLick.lick_id, []);
+          updatedTags = [];
+        } catch (tagError) {
+          console.error("Error clearing tags:", tagError);
+          alert(tagError?.message || "Failed to clear tags");
+        }
+      }
+
       if (res?.success) {
         const updated = res.data || {};
+        setEditingLick((prev) =>
+          prev ? { ...prev, tags: updatedTags } : prev
+        );
         setLicks((prev) =>
           prev.map((l) =>
             l.lick_id === editingLick.lick_id
@@ -184,7 +274,7 @@ const MyLicksPage = () => {
                   ...l,
                   title: updated.title ?? editForm.title,
                   description: updated.description ?? editForm.description,
-                  tab_notation: updated.tabNotation ?? editForm.tabNotation,
+                  tab_notation: updated.tabNotation ?? l.tab_notation,
                   key: updated.key ?? editForm.key,
                   tempo: updated.tempo ?? editForm.tempo,
                   difficulty: updated.difficulty ?? editForm.difficulty,
@@ -197,6 +287,7 @@ const MyLicksPage = () => {
                     typeof updated.isFeatured === "boolean"
                       ? updated.isFeatured
                       : editForm.isFeatured,
+                  tags: updatedTags,
                 }
               : l
           )
@@ -291,17 +382,43 @@ const MyLicksPage = () => {
       )}
 
       {/* Error State */}
-      {error && (
-        <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6">
-          <p className="text-red-400">{error}</p>
-          <button
-            onClick={fetchMyLicks}
-            className="mt-2 text-sm text-orange-400 hover:text-orange-300"
-          >
-            Try again
-          </button>
-        </div>
-      )}
+      {error &&
+        (() => {
+          const normalizedError = error.toLowerCase();
+          if (normalizedError.includes("login")) {
+            return (
+              <div className="max-w-xl mx-auto bg-gray-900/70 border border-gray-800 rounded-2xl p-10 text-center shadow-lg mb-6">
+                <div className="mx-auto w-14 h-14 flex items-center justify-center rounded-full bg-orange-500/10 text-orange-400 mb-4">
+                  <FaLock size={24} />
+                </div>
+                <h2 className="text-2xl font-semibold text-white mb-2">
+                  Sign in to see your licks
+                </h2>
+                <p className="text-gray-400 mb-6">
+                  Your personal licks are protected. Please log in to continue
+                  managing them.
+                </p>
+                <button
+                  onClick={() => (window.location.href = "/login")}
+                  className="px-6 py-2 rounded-md bg-gradient-to-r from-orange-500 to-red-600 text-white font-medium hover:opacity-90 transition"
+                >
+                  Go to login
+                </button>
+              </div>
+            );
+          }
+          return (
+            <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6">
+              <p className="text-red-400">{error}</p>
+              <button
+                onClick={fetchMyLicks}
+                className="mt-2 text-sm text-orange-400 hover:text-orange-300"
+              >
+                Try again
+              </button>
+            </div>
+          );
+        })()}
 
       {/* Lick Cards Grid */}
       {!loading && !error && licks.length > 0 && (
@@ -391,7 +508,9 @@ const MyLicksPage = () => {
             </div>
             <form onSubmit={handleEditSubmit} className="px-6 py-5 space-y-4">
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Title</label>
+                <label className="block text-sm text-gray-300 mb-1">
+                  Title
+                </label>
                 <input
                   name="title"
                   value={editForm.title}
@@ -401,7 +520,9 @@ const MyLicksPage = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Description</label>
+                <label className="block text-sm text-gray-300 mb-1">
+                  Description
+                </label>
                 <textarea
                   name="description"
                   value={editForm.description}
@@ -410,9 +531,25 @@ const MyLicksPage = () => {
                   className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Tags</label>
+                <input
+                  name="tagsInput"
+                  value={editForm.tagsInput}
+                  onChange={handleEditChange}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="e.g. jazz, swing, upbeat"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Separate tags with commas. They will be saved as user-defined
+                  tags if no type exists.
+                </p>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">Key</label>
+                  <label className="block text-sm text-gray-300 mb-1">
+                    Key
+                  </label>
                   <input
                     name="key"
                     value={editForm.key}
@@ -421,7 +558,9 @@ const MyLicksPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">Tempo (BPM)</label>
+                  <label className="block text-sm text-gray-300 mb-1">
+                    Tempo (BPM)
+                  </label>
                   <input
                     name="tempo"
                     value={editForm.tempo}
@@ -430,7 +569,9 @@ const MyLicksPage = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">Difficulty</label>
+                  <label className="block text-sm text-gray-300 mb-1">
+                    Difficulty
+                  </label>
                   <select
                     name="difficulty"
                     value={editForm.difficulty}
@@ -444,7 +585,9 @@ const MyLicksPage = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-300 mb-1">Status</label>
+                  <label className="block text-sm text-gray-300 mb-1">
+                    Status
+                  </label>
                   <select
                     name="status"
                     value={editForm.status}
@@ -457,16 +600,6 @@ const MyLicksPage = () => {
                     <option value="inactive">Inactive</option>
                   </select>
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Tab Notation (optional)</label>
-                <textarea
-                  name="tabNotation"
-                  value={editForm.tabNotation}
-                  onChange={handleEditChange}
-                  rows={4}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
               </div>
               <div className="flex items-center gap-6">
                 <label className="inline-flex items-center gap-2 text-sm text-gray-300">
@@ -513,6 +646,58 @@ const MyLicksPage = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60"
+            onClick={() => {
+              if (!confirmLoading) {
+                setConfirmOpen(false);
+                setConfirmTargetId(null);
+              }
+            }}
+          />
+          <div className="relative z-10 w-full max-w-md mx-4 bg-gray-900 border border-gray-800 rounded-lg shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-800">
+              <h2 className="text-lg font-semibold text-white">Delete Lick</h2>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <p className="text-gray-300 text-sm">
+                Are you sure you want to delete this lick? This action cannot be
+                undone.
+              </p>
+              {confirmError && (
+                <div className="text-red-400 text-sm">{confirmError}</div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-800 flex justify-end gap-3">
+              <button
+                type="button"
+                className="px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-700"
+                onClick={() => {
+                  if (!confirmLoading) {
+                    setConfirmOpen(false);
+                    setConfirmTargetId(null);
+                  }
+                }}
+                disabled={confirmLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md disabled:opacity-50"
+                onClick={performDelete}
+                disabled={confirmLoading}
+              >
+                {confirmLoading ? "Deleting..." : "Delete"}
+              </button>
+            </div>
           </div>
         </div>
       )}

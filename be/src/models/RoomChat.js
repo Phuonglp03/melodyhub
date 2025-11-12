@@ -6,6 +6,7 @@ const roomChatSchema = new mongoose.Schema(
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     message: { type: String, required: true },
     messageType: { type: String, enum: ['text', 'reaction', 'system'], default: 'text', required: true },
+    deleted: { type: Boolean, default: false },
   },
   { timestamps: { createdAt: 'sentAt', updatedAt: false } }
 );

@@ -1,6 +1,6 @@
-import { Navigate, useLocation } from 'react-router-dom';
-import { useSelector } from 'react-redux';
-import { Spin } from 'antd';
+import { Navigate, useLocation } from "react-router-dom";
+import { useSelector } from "react-redux";
+import { Spin } from "antd";
 
 const ProtectedRoute = ({ children, requiredRole }) => {
   const { user, isLoading } = useSelector((state) => state.auth);
@@ -8,7 +8,14 @@ const ProtectedRoute = ({ children, requiredRole }) => {
 
   if (isLoading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100vh",
+        }}
+      >
         <Spin size="large" />
       </div>
     );

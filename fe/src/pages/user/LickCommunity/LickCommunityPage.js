@@ -160,9 +160,9 @@ const LickCommunityPage = () => {
         </div>
       )}
 
-      {/* Lick Cards List */}
+      {/* Lick Cards Grid (match My Licks grid) */}
       {!loading && !error && licks.length > 0 && (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {licks.map((lick) => (
             <LickCard
               key={lick.lick_id}

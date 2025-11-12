@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { refreshUser } from "../redux/features/auth/authSlice";
+import { refreshUser } from "../redux/authSlice";
 import MainLayout from "../layouts/userLayout";
 import AdminLayout from "../layouts/adminLayout";
 import "bootstrap/dist/css/bootstrap.min.css";
@@ -18,11 +18,16 @@ import ProtectedRoute from "../components/common/ProtectedRoute";
 import AdminProtectedRoute from "../components/common/AdminProtectedRoute";
 import LiveStreamCreate from "../pages/user/LiveRoomCreate";
 import LiveStreamLive from "../pages/user/LiveRoomLive";
+import { initSocket } from "../services/user/socketService";
 import LickLibraryLayout from "../layouts/LickLibraryLayout";
 import MyLicksPage from "../pages/user/MyLicks";
 import LickCommunityPage from "../pages/user/LickCommunity";
 import LickUploadPage from "../pages/user/LickUpload";
 import LickDetailPage from "../pages/user/LickDetail";
+import ChatPage from "../pages/user/Chat";
+import MyPlaylistsPage from "../pages/user/MyPlaylists";
+import PlaylistDetailPage from "../pages/user/PlaylistDetail";
+import PlaylistCommunityPage from "../pages/user/PlaylistCommunity";
 
 // Admin Pages
 import AdminDashboard from "../pages/admin/AdminSite/AdminDashboard";
@@ -40,6 +45,14 @@ const AppRoutes = () => {
     // Try to refresh user session on app load
     dispatch(refreshUser());
   }, [dispatch]);
+
+  // Initialize socket globally when user is available
+  useEffect(() => {
+    const uid = user?.id || user?._id;
+    if (uid) {
+      initSocket(uid);
+    }
+  }, [user]);
 
   if (isLoading) {
     return (
@@ -120,6 +133,7 @@ const AppRoutes = () => {
           <Route path="newfeedspersonal" element={<PersonalFeed />} />
           <Route path="users/:userId/newfeeds" element={<UserFeed />} />
           <Route path="profile" element={<ProfilePage />} />
+          <Route path="chat" element={<ChatPage />} />
           {/* Lick detail & upload */}
           <Route path="licks/upload" element={<LickUploadPage />} />
           <Route path="licks/:lickId" element={<LickDetailPage />} />
@@ -135,6 +149,19 @@ const AppRoutes = () => {
             <Route index element={<Navigate to="my-licks" replace />} />
             <Route path="my-licks" element={<MyLicksPage />} />
             <Route path="community" element={<LickCommunityPage />} />
+          </Route>
+          {/* Playlists */}
+          <Route
+            path="playlists"
+            element={
+              <ProtectedRoute>
+                <LickLibraryLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<MyPlaylistsPage />} />
+            <Route path="community" element={<PlaylistCommunityPage />} />
+            <Route path=":playlistId" element={<PlaylistDetailPage />} />
           </Route>
         </Route>
 

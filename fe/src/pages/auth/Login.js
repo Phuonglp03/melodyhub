@@ -3,7 +3,7 @@ import { Form, Input, Button, message, Divider, ConfigProvider } from 'antd';
 import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { login } from '../../redux/features/auth/authSlice';
+import { login } from '../../redux/authSlice';
 import GoogleSignIn from '../../components/GoogleSignIn';
 import './Login.css';
 

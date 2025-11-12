@@ -128,6 +128,28 @@ export const addLickComment = async (lickId, commentData) => {
   }
 };
 
+// Update a lick comment
+export const updateLickComment = async (lickId, commentId, comment) => {
+  try {
+    const res = await http.put(`/licks/${lickId}/comments/${commentId}`, { comment });
+    return res.data;
+  } catch (error) {
+    console.error("Error updating lick comment:", error);
+    throw error;
+  }
+};
+
+// Delete a lick comment
+export const deleteLickComment = async (lickId, commentId) => {
+  try {
+    const res = await http.delete(`/licks/${lickId}/comments/${commentId}`);
+    return res.data;
+  } catch (error) {
+    console.error("Error deleting lick comment:", error);
+    throw error;
+  }
+};
+
 // Play Lick Audio - Get audio URL for playback
 export const playLickAudio = async (lickId, userId = null) => {
   try {
@@ -160,20 +182,11 @@ export const playLickAudio = async (lickId, userId = null) => {
 // Create a new lick with audio file
 export const createLick = async (formData) => {
   try {
-    const response = await fetch(`${API_BASE}/licks`, {
-      method: "POST",
-      body: formData, // Send FormData directly (no Content-Type header needed)
+    // Use shared axios client so Authorization header is attached
+    const res = await http.post(`/licks`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
     });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(
-        errorData.message || `HTTP error! status: ${response.status}`
-      );
-    }
-
-    const data = await response.json();
-    return data;
+    return res.data;
   } catch (error) {
     console.error("Error creating lick:", error);
     throw error;

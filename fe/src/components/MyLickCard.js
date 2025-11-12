@@ -6,8 +6,18 @@ import {
   FaPause,
   FaEdit,
   FaTrash,
+  FaMusic,
+  FaWaveSquare,
 } from "react-icons/fa";
-import { playLickAudio, getLickById } from "../services/user/lickService";
+import {
+  playLickAudio,
+  getLickById,
+  toggleLickLike,
+} from "../services/user/lickService";
+import { useDispatch, useSelector } from "react-redux";
+import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
+import { getStoredUserId } from "../services/user/post";
+import { getProfileById } from "../services/user/profile";
 
 const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
   const {
@@ -23,12 +33,40 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
     status,
     is_public,
     creator,
+    tempo,
+    key,
   } = lick;
+
+  // Resolve userId from payload (DB uses userId)
+  const userId =
+    lick.userId || lick.user_id || creator?.user_id || creator?._id || null;
+
+  const [resolvedCreator, setResolvedCreator] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const needFetch = !creator?.display_name && userId;
+    if (needFetch) {
+      getProfileById(userId)
+        .then((res) => {
+          if (cancelled) return;
+          const u = res?.data?.user || res?.data;
+          if (u) setResolvedCreator(u);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, creator?.display_name]);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0); // Track playback progress (0-1)
   const audioRef = useRef(null);
+  const dispatch = useDispatch();
+  const likeState = useSelector((s) => s.likes.byId[lick_id]);
+  const isLiked = likeState?.liked || false;
+  const localLikesCount = likeState?.count ?? likes_count;
 
   // Normalize id across different payloads
   const effectiveId = lick_id || lick._id || lick.id;
@@ -112,6 +150,15 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
     });
   };
 
+  // Initialize like state for this lick in redux once
+  useEffect(() => {
+    if (!likeState) {
+      dispatch(
+        setLikeState({ id: lick_id, liked: false, count: likes_count || 0 })
+      );
+    }
+  }, [dispatch, likeState, lick_id, likes_count]);
+
   // Status badge color
   const getStatusColor = (status) => {
     switch (status) {
@@ -194,6 +241,31 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
     }
   };
 
+  const handleLike = async (e) => {
+    e.stopPropagation();
+    const userId = getStoredUserId();
+    if (!userId) {
+      alert("You need to be logged in to like licks.");
+      return;
+    }
+    try {
+      // optimistic
+      dispatch(toggleLikeLocal({ id: lick_id }));
+      const res = await toggleLickLike(lick_id, userId);
+      if (res?.success && typeof res.data?.liked === "boolean") {
+        if (res.data.liked !== isLiked) {
+          // state already toggled; if server response differs from previous state, keep; otherwise re-toggle
+        } else {
+          // server says same as previous -> revert
+          dispatch(toggleLikeLocal({ id: lick_id }));
+        }
+      }
+    } catch (err) {
+      // rollback
+      dispatch(toggleLikeLocal({ id: lick_id }));
+    }
+  };
+
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 hover:shadow-lg transition-all relative group">
       {/* Action Buttons (Show on Hover) */}
@@ -265,13 +337,21 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
       <div className="p-4">
         <h3
           onClick={() => onClick(lick_id)}
-          className="text-base font-semibold text-white mb-1 hover:text-cyan-300 cursor-pointer"
+          className="text-base font-semibold text-slate-100 mb-2 hover:text-cyan-300 cursor-pointer"
         >
           {title}
         </h3>
         <div className="flex items-center text-xs text-gray-400 mb-3">
           <span className="truncate">
-            {creator?.display_name ? `By ${creator.display_name}` : "By You"}
+            {creator?.display_name ||
+            resolvedCreator?.displayName ||
+            creator?.displayName
+              ? `By ${
+                  creator?.display_name ||
+                  resolvedCreator?.displayName ||
+                  creator?.displayName
+                }`
+              : "By You"}
           </span>
           <span className="mx-2">•</span>
           <span>{formatDate(created_at)}</span>
@@ -311,29 +391,65 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
         </div>
 
         {tags && tags.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-3">
-            {tags.slice(0, 6).map((tag) => (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-4">
+            {tags.slice(0, 8).map((tag) => (
               <span
                 key={tag.tag_id}
                 onClick={(e) => e.stopPropagation()}
-                className="text-[11px] px-2 py-1 rounded-full bg-gray-800 text-gray-300 hover:bg-gray-700"
+                className="text-[11px] text-slate-300 underline underline-offset-4 decoration-slate-600/50 hover:text-slate-100 transition-colors"
               >
-                #{tag.tag_name}
+                {tag.tag_name}
               </span>
             ))}
           </div>
         )}
 
+        <div className="flex items-center text-xs text-slate-300 mb-4">
+          <span className="flex items-center gap-1 mr-4">
+            <FaWaveSquare className="text-slate-400" size={12} />
+            {tempo ? `${Math.round(tempo)} BPM` : "—"}
+          </span>
+          <span className="flex items-center gap-1">
+            <FaMusic className="text-slate-400" size={12} />
+            {key || "Key N/A"}
+          </span>
+        </div>
+
         <div className="flex items-center justify-between text-sm text-gray-300">
           <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1 text-gray-400">
+            <button
+              onClick={handleLike}
+              className={`flex items-center gap-1 ${
+                isLiked ? "text-rose-400" : "text-gray-400 hover:text-rose-300"
+              }`}
+            >
               <FaHeart />
-              <span>{likes_count || 0}</span>
-            </span>
+              <span>{localLikesCount || 0}</span>
+            </button>
             <span className="flex items-center gap-1 text-gray-400">
               <FaComment />
               <span>{comments_count || 0}</span>
             </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(lick_id);
+              }}
+              className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs"
+            >
+              Update
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(lick_id);
+              }}
+              className="px-3 py-1 rounded-md bg-red-600 hover:bg-red-700 text-white text-xs"
+            >
+              Delete
+            </button>
           </div>
         </div>
       </div>
@@ -342,4 +458,3 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
 };
 
 export default MyLickCard;
-
