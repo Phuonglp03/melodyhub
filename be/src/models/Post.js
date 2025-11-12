@@ -32,6 +32,14 @@ const postSchema = new mongoose.Schema(
       },
     ],
 
+    // 🔹 Danh sách lick đính kèm từ thư viện cá nhân
+    attachedLicks: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Lick',
+      },
+    ],
+
     // Bài chia sẻ lại (nếu có)
     originalPostId: { type: mongoose.Schema.Types.ObjectId, ref: 'Post' },
 
