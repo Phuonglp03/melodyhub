@@ -92,6 +92,14 @@ export const onNewMessage = (callback) => {
 export const onStreamPrivacyUpdated = (callback) => {
   getSocket().on('stream-privacy-updated', callback);
 };
+
+// ---- Posts / Comments realtime ----
+export const onPostCommentNew = (callback) => {
+  getSocket()?.on('post:comment:new', callback);
+};
+export const offPostCommentNew = (callback) => {
+  getSocket()?.off('post:comment:new', callback);
+};
 // Hủy tất cả lắng nghe (dùng khi unmount)
 export const offSocketEvents = () => {
   const s = getSocket();
@@ -102,6 +110,7 @@ export const offSocketEvents = () => {
   s.off('stream-details-updated');
   s.off('new-message-liveroom');
   s.off('stream-privacy-updated');
+  s.off('post:comment:new');
 };
 
 // ========== DM helpers ==========

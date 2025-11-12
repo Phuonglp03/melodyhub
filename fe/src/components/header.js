@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Input, Button, Space, Typography, Modal, Avatar, Tooltip, Popover, Badge, Spin, Empty } from 'antd'; 
+import { Layout, Input, Button, Space, Typography, Modal, Avatar, Tooltip, Popover, Badge, Spin, Empty } from 'antd';
 import { FireOutlined, BellOutlined, MessageOutlined, SearchOutlined, UserOutlined, EditOutlined, MoreOutlined, ExpandOutlined } from '@ant-design/icons';
-import { useNavigate, useLocation } from 'react-router-dom'; 
+import { useNavigate, useLocation } from 'react-router-dom';
 import { livestreamService } from '../services/user/livestreamService';
 import useDMConversations from '../hooks/useDMConversations';
 import FloatingChatWindow from './FloatingChatWindow';
+import './header.css';
 const { Header } = Layout;
 const { Text } = Typography;
 
@@ -271,27 +272,32 @@ const AppHeader = () => {
   };
   return (
     <>
-      <Header style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100, padding: '0 64px', background: '#0b0b0c', borderBottom: '1px solid #1f1f1f', height: 72 }}>
-        <div style={{ display: 'flex', alignItems: 'center', height: '100%', gap: 32, maxWidth: 1680, margin: '0 auto' }}>
-          <Text style={{ color: '#fff', fontWeight: 800, fontSize: 22 }}>MelodyHub</Text>
-          <Space size={28} style={{ color: '#d1d5db' }}>
-            <Text style={{ color: '#d1d5db', fontSize: 16 }}>Join Live</Text>
+      <Header className="app-header">
+        <div className="app-header__content">
+          <Text
+            className="app-header__logo"
+            onClick={() => navigate('/')}
+          >
+            MelodyHub
+          </Text>
+          <div className="app-header__nav">
+            <Text className="app-header__nav-item">Join Live</Text>
             <Text
-              style={{ color: '#d1d5db', fontSize: 16, cursor: 'pointer' }}
+              className="app-header__nav-item app-header__nav-link"
               onClick={() => navigate('/library/my-licks')}
             >
               Library
             </Text>
-          </Space>
-          <div style={{ flex: 1 }} />
+          </div>
+          <div className="app-header__spacer" />
           <Input
+            className="app-header__search"
             placeholder="Tìm kiếm"
             allowClear
-            prefix={<SearchOutlined style={{ color: '#9ca3af' }} />}
-            style={{ maxWidth: 600, background: '#111213', borderColor: '#1f1f1f', color: '#e5e7eb', borderRadius: 999, height: 40 }}
+            prefix={<SearchOutlined />}
           />
-          <Space size={24}>
-            <BellOutlined style={{ color: '#e5e7eb', fontSize: 20, cursor: 'pointer' }} />
+          <div className="app-header__actions">
+            <BellOutlined className="app-header__icon" />
             {!isChatPage && (
             <Popover
               content={
@@ -541,49 +547,50 @@ const AppHeader = () => {
               zIndex={1000}
             >
               <Badge count={totalUnreadCount} offset={[-5, 5]}>
-                <MessageOutlined 
-                  style={{ 
-                    color: '#e5e7eb', 
-                    fontSize: 20, 
-                    cursor: 'pointer' 
-                  }} 
-                />
+                <MessageOutlined className="app-header__icon" />
               </Badge>
             </Popover>
             )}
             {(() => {
-              let avatarUrl; let displayName; let uid;
+              let avatarUrl; let uid;
               try {
                 const raw = localStorage.getItem('user');
                 if (raw) {
                   const obj = JSON.parse(raw);
                   const u = obj?.user || obj; // support both nested and flat shapes
                   avatarUrl = u?.avatarUrl || u?.avatar_url;
-                  displayName = u?.displayName || u?.username || 'Profile';
                   uid = u?.id || u?.userId || u?._id;
                 }
               } catch {}
               return (
                 <Tooltip title="Hồ sơ của tôi">
                   {avatarUrl ? (
-                    <Avatar src={avatarUrl} size={28} style={{ cursor: 'pointer' }} onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')} />
+                    <Avatar
+                      src={avatarUrl}
+                      size={28}
+                      className="app-header__avatar"
+                      onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')}
+                    />
                   ) : (
-                    <UserOutlined style={{ color: '#e5e7eb', fontSize: 20, cursor: 'pointer' }} onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')} />
+                    <UserOutlined
+                      className="app-header__icon"
+                      onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')}
+                    />
                   )}
                 </Tooltip>
               );
             })()}
 
             <Button
-              style={{ color: '#fff', background: '#ef4444', borderColor: '#ef4444', borderRadius: 999, height: 40, padding: '0 20px', fontSize: 14 }}
+              className="app-header__cta"
               icon={<FireOutlined />}
               onClick={handleLiveStreamClick}
             >
               LiveStream
             </Button>
 
-            <Button style={{ color: '#fff', background: '#ef4444', borderColor: '#ef4444', borderRadius: 999, height: 40, padding: '0 20px', fontSize: 14 }}>Creat project</Button>
-          </Space>
+            <Button className="app-header__cta">Creat project</Button>
+          </div>
         </div>
       </Header>
 
