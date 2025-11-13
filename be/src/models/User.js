@@ -54,19 +54,6 @@ const userSchema = new mongoose.Schema(
 
 userSchema.index({ username: 1 });
 
-// Hash password trước khi lưu
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('passwordHash')) return next();
-
-  try {
-    const salt = await bcrypt.genSalt(10);
-    this.passwordHash = await bcrypt.hash(this.passwordHash, salt);
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
-
 // Phương thức kiểm tra mật khẩu
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.passwordHash);
