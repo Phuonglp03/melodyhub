@@ -397,6 +397,8 @@ export const register = async (req, res) => {
         message: 'Email already registered'
       });
     }
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt); // HASH LẦN 1
 
     // Generate OTP and set expiration (10 minutes from now)
     const otp = generateOTP();
@@ -419,7 +421,7 @@ export const register = async (req, res) => {
     // Create new user with OTP
     const newUser = new User({
       email,
-      passwordHash: password,
+      passwordHash,
       username,
       displayName: fullName,
       birthday: birthday ? new Date(birthday) : null,
@@ -571,7 +573,7 @@ export const resetPassword = async (req, res) => {
       email,
       resetPasswordToken: token,
       resetPasswordExpires: { $gt: Date.now() } // Check if token is not expired
-    });
+    }).select('+refreshToken');
 
     if (!user) {
       return res.status(400).json({ 
