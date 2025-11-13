@@ -51,6 +51,7 @@ import lickRoutes from "./routes/lickRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import tagRoutes from "./routes/tagRoutes.js";
 import playlistRoutes from "./routes/playlistRoutes.js";
+import projectRoutes from "./routes/projectRoutes.js";
 
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 import dmRoutes from "./routes/dmRoutes.js";
@@ -101,6 +102,7 @@ app.use("/api/livestreams", liveroomRoutes);
 app.use("/api/dm", dmRoutes);
 app.use("/api/tags", tagRoutes);
 app.use("/api/playlists", playlistRoutes);
+app.use("/api/projects", projectRoutes);
 
 // Admin routes
 app.use('/api/admin', adminUserRoutes);
