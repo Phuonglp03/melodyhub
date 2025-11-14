@@ -60,7 +60,10 @@ export const deleteProject = async (projectId) => {
 // Add lick to timeline
 export const addLickToTimeline = async (projectId, timelineData) => {
   try {
-    const res = await http.post(`/projects/${projectId}/timeline/items`, timelineData);
+    const res = await http.post(
+      `/projects/${projectId}/timeline/items`,
+      timelineData
+    );
     return res.data;
   } catch (error) {
     console.error("Error adding lick to timeline:", error);
@@ -71,7 +74,10 @@ export const addLickToTimeline = async (projectId, timelineData) => {
 // Update timeline item
 export const updateTimelineItem = async (projectId, itemId, updateData) => {
   try {
-    const res = await http.put(`/projects/${projectId}/timeline/items/${itemId}`, updateData);
+    const res = await http.put(
+      `/projects/${projectId}/timeline/items/${itemId}`,
+      updateData
+    );
     return res.data;
   } catch (error) {
     console.error("Error updating timeline item:", error);
@@ -82,7 +88,9 @@ export const updateTimelineItem = async (projectId, itemId, updateData) => {
 // Delete timeline item
 export const deleteTimelineItem = async (projectId, itemId) => {
   try {
-    const res = await http.delete(`/projects/${projectId}/timeline/items/${itemId}`);
+    const res = await http.delete(
+      `/projects/${projectId}/timeline/items/${itemId}`
+    );
     return res.data;
   } catch (error) {
     console.error("Error deleting timeline item:", error);
@@ -117,7 +125,10 @@ export const addTrack = async (projectId, trackData) => {
 // Update track
 export const updateTrack = async (projectId, trackId, trackData) => {
   try {
-    const res = await http.put(`/projects/${projectId}/tracks/${trackId}`, trackData);
+    const res = await http.put(
+      `/projects/${projectId}/tracks/${trackId}`,
+      trackData
+    );
     return res.data;
   } catch (error) {
     console.error("Error updating track:", error);
@@ -136,3 +147,13 @@ export const deleteTrack = async (projectId, trackId) => {
   }
 };
 
+// Get available instruments
+export const getInstruments = async () => {
+  try {
+    const res = await http.get("/projects/instruments");
+    return res.data;
+  } catch (error) {
+    console.error("Error fetching instruments:", error);
+    throw error;
+  }
+};

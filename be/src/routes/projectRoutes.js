@@ -13,6 +13,7 @@ import {
   addTrack,
   updateTrack,
   deleteTrack,
+  getInstruments,
 } from "../controllers/projectController.js";
 import middlewareController from "../middleware/auth.js";
 const { verifyToken } = middlewareController;
@@ -72,14 +73,29 @@ router.put(
 
 router.delete("/:projectId", deleteProject);
 
+// Get available instruments
+router.get("/instruments", getInstruments);
+
 // Timeline operations
 router.post(
   "/:projectId/timeline/items",
   [
-    body("trackId").notEmpty().withMessage("trackId is required"),
-    body("lickId").notEmpty().withMessage("lickId is required"),
-    body("startTime").isNumeric().withMessage("startTime must be a number"),
-    body("duration").isNumeric().withMessage("duration must be a number"),
+    body("trackId")
+      .notEmpty()
+      .withMessage("trackId is required")
+      .isMongoId()
+      .withMessage("trackId must be a valid MongoDB ID"),
+    body("lickId")
+      .notEmpty()
+      .withMessage("lickId is required")
+      .isMongoId()
+      .withMessage("lickId must be a valid MongoDB ID"),
+    body("startTime")
+      .isFloat({ min: 0 })
+      .withMessage("startTime must be a non-negative number"),
+    body("duration")
+      .isFloat({ min: 0.1 })
+      .withMessage("duration must be a positive number"),
   ],
   validate,
   addLickToTimeline

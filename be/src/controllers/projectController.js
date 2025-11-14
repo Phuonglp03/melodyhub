@@ -5,6 +5,7 @@ import ProjectTimelineItem from "../models/ProjectTimelineItem.js";
 import ProjectCollaborator from "../models/ProjectCollaborator.js";
 import User from "../models/User.js";
 import Lick from "../models/Lick.js";
+import Instrument from "../models/Instrument.js";
 
 // Create a new project
 export const createProject = async (req, res) => {
@@ -233,7 +234,7 @@ export const updateProject = async (req, res) => {
   try {
     const { projectId } = req.params;
     const userId = req.userId;
-    const { title, description, tempo, key, timeSignature, isPublic, status } =
+    const { title, description, tempo, key, timeSignature, isPublic, status, backingInstrumentId } =
       req.body;
 
     const project = await Project.findById(projectId);
@@ -261,6 +262,19 @@ export const updateProject = async (req, res) => {
     if (timeSignature !== undefined) project.timeSignature = timeSignature;
     if (isPublic !== undefined) project.isPublic = isPublic;
     if (status !== undefined) project.status = status;
+    if (backingInstrumentId !== undefined) {
+      // Validate instrument exists
+      if (backingInstrumentId) {
+        const instrument = await Instrument.findById(backingInstrumentId);
+        if (!instrument) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid instrument ID",
+          });
+        }
+      }
+      project.backingInstrumentId = backingInstrumentId || null;
+    }
 
     await project.save();
 
@@ -274,6 +288,24 @@ export const updateProject = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to update project",
+      error: error.message,
+    });
+  }
+};
+
+// Get all available instruments
+export const getInstruments = async (req, res) => {
+  try {
+    const instruments = await Instrument.find().sort({ name: 1 });
+    res.json({
+      success: true,
+      data: instruments,
+    });
+  } catch (error) {
+    console.error("Error fetching instruments:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch instruments",
       error: error.message,
     });
   }
