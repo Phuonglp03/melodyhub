@@ -45,7 +45,7 @@ const ResetPassword = () => {
         token,
         email,
         newPassword: values.newPassword,
-      },{withCredentials: true});
+      });
       
       messageApi.success('Password reset successful!');
       

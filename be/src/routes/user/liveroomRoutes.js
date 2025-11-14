@@ -10,8 +10,7 @@ import {
     updatePrivacy,
     getChatHistory,
     banUser,
-    unbanUser,
-    getRoomViewers
+    unbanUser
   } from '../../controllers/user/liveroomController.js';
 
 const router = Router();
@@ -47,8 +46,5 @@ router.post('/:roomId/ban/:userId', verifyToken, banUser);
 
 // Unban user 
 router.post('/:roomId/unban/:userId', verifyToken, unbanUser);
-
-// Get room viewers
-router.get('/:roomId/viewers', verifyToken, getRoomViewers);
 
 export default router;

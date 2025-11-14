@@ -1,33 +1,18 @@
 import axios from 'axios';
-import { store } from '../redux/store';
-import { logout, updateTokens } from '../redux/authSlice';
-
-const API_BASE_URL= 'http://localhost:9999/api';
+import { refreshAccessToken } from './authService';
 
 const api = axios.create({
-  baseURL: API_BASE_URL,
-  withCredentials: true, // Important for sending cookies (refreshToken)
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:9999/api',
+  withCredentials: true, // This is important for sending cookies
 });
 
-// Request interceptor: Add token to headers
+// Add a request interceptor to add the auth token to requests
 api.interceptors.request.use(
   (config) => {
-    // Get token from Redux persist store
-    const state = store.getState();
-    const token = state.auth?.user?.token;
-    
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    const user = JSON.parse(localStorage.getItem('user'));
+    if (user?.token) {
+      config.headers.Authorization = `Bearer ${user.token}`;
     }
-    
-    // Log request (optional, remove in production)
-    console.log('[API]', config.method?.toUpperCase(), config.url);
-    
-    // Handle FormData
-    if (config.data instanceof FormData) {
-      delete config.headers['Content-Type'];
-    }
-    
     return config;
   },
   (error) => {
@@ -35,60 +20,35 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor: Handle 401/403 and refresh token
+// Add a response interceptor to handle token refresh
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
     
-    // If 401 (Unauthorized) or 403 (Forbidden - token expired) and haven't retried yet
-    const shouldRefreshToken = (error.response?.status === 401 || error.response?.status === 403) 
-      && !originalRequest._retry
-      && originalRequest.url !== '/auth/refresh-token'; // Don't retry refresh token endpoint
-    
-    if (shouldRefreshToken) {
+    // If the error is 401 and we haven't already tried to refresh
+    if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
       
       try {
-        console.log('[API] Token expired, refreshing...');
+        // Try to refresh the token
+        const newToken = await refreshAccessToken();
         
-        // Call refresh token endpoint
-        const response = await axios.post(
-          `${API_BASE_URL}/auth/refresh-token`,
-          {},
-          { withCredentials: true }
-        );
+        // Update the authorization header with the new token
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
         
-        const { token, refreshToken, user } = response.data;
-        
-        console.log('[API] Token refreshed successfully');
-        
-        // ✅ Update Redux store immediately (this is the key!)
-        store.dispatch(updateTokens({
-          token,
-          refreshToken,
-          user
-        }));
-        
-        // Retry original request with new token
-        originalRequest.headers.Authorization = `Bearer ${token}`;
+        // Retry the original request with the new token
         return api(originalRequest);
-        
       } catch (refreshError) {
-        console.error('[API] Refresh token failed, logging out...');
-        
-        // Clear everything and redirect to login
-        store.dispatch(logout());
-        localStorage.clear();
+        // If refresh fails, redirect to login
+        console.error('Session expired. Please log in again.');
+        localStorage.removeItem('user');
         window.location.href = '/login';
-        
         return Promise.reject(refreshError);
       }
     }
     
-    // Handle other errors
-    const message = error?.response?.data?.message || error.message || 'Request error';
-    return Promise.reject(new Error(message));
+    return Promise.reject(error);
   }
 );
 

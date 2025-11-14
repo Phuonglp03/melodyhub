@@ -3,7 +3,6 @@ import LiveRoom from '../../models/LiveRoom.js';
 import UserFollow from '../../models/UserFollow.js';
 import { getSocketIo } from '../../config/socket.js';
 import RoomChat from '../../models/RoomChat.js';
-import User from '../../models/User.js';
 
 export const createLiveStream = async (req, res) => {
   const { title, description, privacyType } = req.body;
@@ -42,8 +41,7 @@ export const getLiveStreamById = async (req, res) => {
     const { id } = req.params;
     const currentUserId = req.query.userId;
     const stream = await LiveRoom.findById(id)
-      .populate('hostId', 'displayName username avatarUrl')
-      .populate('bannedUsers', 'displayName username avatarUrl');
+      .populate('hostId', 'displayName username avatarUrl');
 
     if (!stream || stream.status === 'ended') {
       return res.status(404).json({ message: 'Không tìm thấy phòng live hoặc phòng đã kết thúc.' });
@@ -313,56 +311,6 @@ export const unbanUser = async (req, res) => {
 
     res.status(200).json({ message: 'Đã unban user.' });
   } catch (err) {
-    res.status(500).json({ message: 'Lỗi server.' });
-  }
-};
-
-export const getRoomViewers = async (req, res) => {
-  const { roomId } = req.params;
-  const hostId = req.userId;
-
-  try {
-    const room = await LiveRoom.findOne({ _id: roomId, hostId });
-    if (!room) return res.status(404).json({ message: 'Không tìm thấy phòng hoặc bạn không phải host.' });
-
-    // Get viewer IDs from socket tracking
-    const io = getSocketIo();
-    const roomSockets = await io.in(roomId).fetchSockets();
-    
-    // Extract unique user IDs
-    const userIds = new Set();
-    roomSockets.forEach(socket => {
-      const userId = socket.handshake.query.userId;
-      if (userId && userId !== hostId) {
-        userIds.add(userId);
-      }
-    });
-
-    // Get user details
-    const viewers = await User.find({ _id: { $in: Array.from(userIds) } })
-      .select('displayName username avatarUrl')
-      .lean();
-
-    // Get message counts for each viewer in this room
-    const viewersWithStats = await Promise.all(
-      viewers.map(async (viewer) => {
-        const messageCount = await RoomChat.countDocuments({
-          roomId,
-          userId: viewer._id
-        });
-        return {
-          ...viewer,
-          messageCount
-        };
-      })
-    );
-
-    res.status(200).json({
-      viewers: viewersWithStats,
-      totalCount: viewersWithStats.length
-    });
-  } catch (err) {
-    console.error('Lỗi khi lấy viewers:', err);
     res.status(500).json({ message: 'Lỗi server.' });
   }
 };

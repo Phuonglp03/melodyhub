@@ -1,9 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Layout, Input, Button, Space, Typography, Modal, Avatar, Tooltip, Popover, Badge, Spin, Empty, Dropdown } from 'antd';
-import { FireOutlined, BellOutlined, MessageOutlined, SearchOutlined, UserOutlined, EditOutlined, MoreOutlined, ExpandOutlined, LogoutOutlined } from '@ant-design/icons';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { useSelector, useDispatch } from 'react-redux';
-import { logout } from '../redux/authSlice';
+import React, { useState, useEffect } from 'react';
+import { Layout, Input, Button, Space, Typography, Modal, Avatar, Tooltip, Popover, Badge, Spin, Empty } from 'antd';
+import { FireOutlined, BellOutlined, MessageOutlined, SearchOutlined, UserOutlined, EditOutlined, MoreOutlined, ExpandOutlined } from '@ant-design/icons';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { livestreamService } from '../services/user/livestreamService';
 import useDMConversations from '../hooks/useDMConversations';
 import FloatingChatWindow from './FloatingChatWindow';
@@ -15,13 +13,6 @@ const AppHeader = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const isChatPage = location.pathname === '/chat';
-  
-  // Get user from Redux
-  const { user } = useSelector((state) => state.auth);
-  const dispatch = useDispatch();
-  const currentUserId = user?.user?.id;
-  const userInfo = user?.user; // { id, email, username, displayName, ... }
-  
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [chatPopoverVisible, setChatPopoverVisible] = useState(false);
@@ -176,6 +167,20 @@ const AppHeader = () => {
     });
   };
   
+  // Get current user ID
+  const getCurrentUserId = () => {
+    try {
+      const raw = localStorage.getItem('user');
+      if (raw) {
+        const obj = JSON.parse(raw);
+        const u = obj?.user || obj;
+        return u?.id || u?.userId || u?._id;
+      }
+    } catch {}
+    return null;
+  };
+  
+  const currentUserId = getCurrentUserId();
   
   // Get peer info from conversation
   const getPeer = (conv) => {
@@ -265,34 +270,6 @@ const AppHeader = () => {
     if (isCreating) return;
     setIsModalVisible(false);
   };
-
-  const handleLogout = useCallback(() => {
-    dispatch(logout());
-    navigate('/login');
-  }, [dispatch, navigate]);
-
-  
-
-  // Dropdown menu items cho avatar
-  const avatarMenuItems = [
-    {
-      key: 'profile',
-      label: 'Hồ sơ của tôi',
-      icon: <UserOutlined />,
-      onClick: () => navigate(currentUserId ? `/users/${currentUserId}/newfeeds` : '/profile')
-    },
-    {
-      type: 'divider'
-    },
-    {
-      key: 'logout',
-      label: 'Đăng xuất',
-      icon: <LogoutOutlined />,
-      onClick: handleLogout,
-      danger: true
-    }
-  ];
-
   return (
     <>
       <Header className="app-header">
@@ -304,7 +281,7 @@ const AppHeader = () => {
             MelodyHub
           </Text>
           <div className="app-header__nav">
-          <Text className="app-header__nav-item" onClick={() => navigate('/live')}>Join Live</Text>          
+            <Text className="app-header__nav-item">Join Live</Text>
             <Text
               className="app-header__nav-item app-header__nav-link"
               onClick={() => navigate('/library/my-licks')}
@@ -574,25 +551,35 @@ const AppHeader = () => {
               </Badge>
             </Popover>
             )}
-            <Dropdown
-              menu={{ items: avatarMenuItems }}
-              trigger={['hover', 'click']}
-              placement="bottomRight"
-            >
-              {userInfo?.avatarUrl ? (
-                <Avatar
-                  src={userInfo.avatarUrl}
-                  size={28}
-                  className="app-header__avatar"
-                  style={{ cursor: 'pointer' }}
-                />
-              ) : (
-                <UserOutlined
-                  className="app-header__icon"
-                  style={{ cursor: 'pointer' }}
-                />
-              )}
-            </Dropdown>
+            {(() => {
+              let avatarUrl; let uid;
+              try {
+                const raw = localStorage.getItem('user');
+                if (raw) {
+                  const obj = JSON.parse(raw);
+                  const u = obj?.user || obj; // support both nested and flat shapes
+                  avatarUrl = u?.avatarUrl || u?.avatar_url;
+                  uid = u?.id || u?.userId || u?._id;
+                }
+              } catch {}
+              return (
+                <Tooltip title="Hồ sơ của tôi">
+                  {avatarUrl ? (
+                    <Avatar
+                      src={avatarUrl}
+                      size={28}
+                      className="app-header__avatar"
+                      onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')}
+                    />
+                  ) : (
+                    <UserOutlined
+                      className="app-header__icon"
+                      onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')}
+                    />
+                  )}
+                </Tooltip>
+              );
+            })()}
 
             <Button
               className="app-header__cta"
@@ -603,8 +590,6 @@ const AppHeader = () => {
             </Button>
 
             <Button className="app-header__cta">Creat project</Button>
-
-
           </div>
         </div>
       </Header>

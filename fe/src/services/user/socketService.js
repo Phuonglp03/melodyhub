@@ -4,7 +4,14 @@ import { store } from '../../redux/store';
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:9999';
 
 
-
+const getUserIdFromStorage = () => {
+  const userString = localStorage.getItem('user'); //
+  if (userString) {
+    const user = JSON.parse(userString);
+    return user._id || user.id || null;
+  }
+  return null;
+};
 
 let socket;
 
@@ -106,14 +113,6 @@ export const onMessageRemoved = (callback) => {
   safeOn('message-removed', callback);
 };
 
-export const onViewerCountUpdate = (callback) => {
-  safeOn('viewer-count-update', callback);
-};
-
-export const onChatError = (callback) => {
-  safeOn('chat-error', callback);
-};
-
 // ---- Posts / Comments realtime ----
 export const onPostCommentNew = (callback) => {
   getSocket()?.on('post:comment:new', callback);
@@ -131,8 +130,6 @@ export const offSocketEvents = () => {
   s.off('stream-details-updated');
   s.off('new-message-liveroom');
   s.off('stream-privacy-updated');
-  s.off('viewer-count-update');
-  s.off('chat-error');
   s.off('post:comment:new');
 };
 
