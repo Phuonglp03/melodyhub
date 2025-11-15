@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload } from 'antd';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload, Select } from 'antd';
 import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined } from '@ant-design/icons';
 import { listPosts, createPost } from '../../../services/user/post';
 import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments } from '../../../services/user/post';
 import { followUser, unfollowUser, getFollowSuggestions, getProfileById } from '../../../services/user/profile';
+import { onPostCommentNew, offPostCommentNew, joinRoom } from '../../../services/user/socketService';
+import { getMyLicks } from '../../../services/user/lickService';
 import PostLickEmbed from '../../../components/PostLickEmbed';
 
 const { Title, Text } = Typography;
@@ -135,6 +137,21 @@ const formatTime = (isoString) => {
   }
 };
 
+const sortCommentsDesc = (comments) => {
+  if (!Array.isArray(comments)) return [];
+  return [...comments].sort((a, b) => {
+    const timeA = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const timeB = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return timeB - timeA; // descending order (newest first)
+  });
+};
+
+const limitToNewest3 = (comments) => {
+  if (!Array.isArray(comments)) return [];
+  const sorted = sortCommentsDesc(comments);
+  return sorted.slice(0, 3);
+};
+
 const NewsFeed = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -153,6 +170,9 @@ const NewsFeed = () => {
   const [maxChars] = useState(300);
   const [linkPreview, setLinkPreview] = useState(null);
   const [linkLoading, setLinkLoading] = useState(false);
+  const [availableLicks, setAvailableLicks] = useState([]);
+  const [loadingLicks, setLoadingLicks] = useState(false);
+  const [selectedLickIds, setSelectedLickIds] = useState([]);
   const [previewCache, setPreviewCache] = useState({}); // url -> {title, thumbnailUrl}
   const [commentOpen, setCommentOpen] = useState(false);
   const [commentPostId, setCommentPostId] = useState(null);
@@ -317,12 +337,20 @@ const NewsFeed = () => {
 
   useEffect(() => { loadSuggestions(); }, []);
 
-  const openComment = (postId) => {
+  const openComment = async (postId) => {
     setCommentPostId(postId);
     setCommentText('');
     const p = items.find((it) => it._id === postId) || null;
     setModalPost(p);
     setCommentOpen(true);
+    // Fetch tất cả comments để hiển thị trong modal (không giới hạn 3)
+    try {
+      const all = await getAllPostComments(postId);
+      setPostIdToComments((prev) => ({ ...prev, [postId]: Array.isArray(all) ? sortCommentsDesc(all) : [] }));
+    } catch (e) {
+      // Nếu fetch thất bại, vẫn giữ comments hiện có
+      console.warn('Failed to fetch all comments for modal:', e);
+    }
   };
 
   const submitComment = async () => {
@@ -356,7 +384,8 @@ const NewsFeed = () => {
       await createPostComment(postId, { comment: text });
       setPostIdToCommentInput((prev) => ({ ...prev, [postId]: '' }));
       const all = await getAllPostComments(postId);
-      setPostIdToComments((prev) => ({ ...prev, [postId]: all }));
+      const limited = limitToNewest3(Array.isArray(all) ? all : []);
+      setPostIdToComments((prev) => ({ ...prev, [postId]: limited }));
       const statsRes = await getPostStats(postId);
       setPostIdToStats((prev) => ({ ...prev, [postId]: statsRes?.data || prev[postId] }));
     } catch (e) {
@@ -382,13 +411,18 @@ const NewsFeed = () => {
       if (!payload?.postId || !payload?.comment) return;
       const postId = payload.postId;
       const comment = payload.comment;
+      // Đảm bảo comment mới có createdAt (nếu chưa có thì dùng thời gian hiện tại)
+      if (!comment.createdAt) {
+        comment.createdAt = new Date().toISOString();
+      }
       setPostIdToStats((prev) => {
         const cur = prev[postId] || { likesCount: 0, commentsCount: 0 };
         return { ...prev, [postId]: { ...cur, commentsCount: (cur.commentsCount || 0) + 1 } };
       });
-      // Only prepend if we already have an inline list for that post
+      // Cập nhật danh sách comment và chỉ giữ lại 3 comment gần nhất
       setPostIdToComments((prev) => {
         const cur = Array.isArray(prev[postId]) ? prev[postId] : [];
+        // Thêm comment mới vào đầu danh sách và giới hạn 3 comment gần nhất
         return { ...prev, [postId]: limitToNewest3([comment, ...cur]) };
       });
     };
@@ -398,12 +432,17 @@ const NewsFeed = () => {
     };
   }, []);
 
-  // Listen realtime comments for the currently opened post
+  // Listen realtime comments for the currently opened post (modal)
   useEffect(() => {
     if (!commentOpen || !commentPostId) return;
     const handler = (payload) => {
       if (!payload || payload.postId !== commentPostId) return;
       const newComment = payload.comment;
+      // Đảm bảo comment mới có createdAt
+      if (!newComment.createdAt) {
+        newComment.createdAt = new Date().toISOString();
+      }
+      // Trong modal, hiển thị tất cả comments (không giới hạn 3)
       setPostIdToComments((prev) => {
         const cur = prev[commentPostId] || [];
         return { ...prev, [commentPostId]: sortCommentsDesc([newComment, ...cur]) };
@@ -561,11 +600,14 @@ const NewsFeed = () => {
     setError('');
     try {
       const res = await listPosts({ page: p, limit: l });
+      // Posts are already sorted by backend: engagement score (likes + comments) descending, then createdAt descending
+      // Frontend displays posts in the exact order received from backend - no additional sorting
       const posts = res?.data?.posts || [];
       const totalPosts = res?.data?.pagination?.totalPosts || 0;
       if (p === 1) {
         setItems(posts);
       } else {
+        // Append new posts to existing list (maintain backend order)
         setItems((prev) => [...prev, ...posts]);
       }
       setTotal(totalPosts);
@@ -608,9 +650,10 @@ const NewsFeed = () => {
         getPostStats(p._id).then((res) => {
           setPostIdToStats((prev) => ({ ...prev, [p._id]: res?.data || prev[p._id] }));
         }).catch(() => {});
-        // fetch all top-level comments
+        // fetch all top-level comments and limit to 3 newest
         getAllPostComments(p._id).then((list) => {
-          setPostIdToComments((prev) => ({ ...prev, [p._id]: list }));
+          const limited = limitToNewest3(Array.isArray(list) ? list : []);
+          setPostIdToComments((prev) => ({ ...prev, [p._id]: limited }));
         }).catch(() => {});
       }
       const urls = items
@@ -637,6 +680,43 @@ const NewsFeed = () => {
     return () => { if (el) observer.unobserve(el); };
   }, [loading, hasMore, page, limit]);
 
+  const fetchActiveLicks = async () => {
+    try {
+      setLoadingLicks(true);
+      const res = await getMyLicks({ status: 'active', limit: 100 });
+      if (res?.success && Array.isArray(res.data)) {
+        // Format data để Select component có thể sử dụng
+        const formattedLicks = res.data.map((lick) => ({
+          value: lick.lick_id || lick._id,
+          label: lick.title || 'Untitled Lick',
+          ...lick
+        }));
+        setAvailableLicks(formattedLicks);
+      } else {
+        setAvailableLicks([]);
+      }
+    } catch (e) {
+      console.error('Error fetching active licks:', e);
+      setAvailableLicks([]);
+    } finally {
+      setLoadingLicks(false);
+    }
+  };
+
+  const handleModalOpen = () => {
+    setIsModalOpen(true);
+    if (currentUserId) {
+      fetchActiveLicks();
+    }
+  };
+
+  const handleModalClose = () => {
+    if (!posting) {
+      setIsModalOpen(false);
+      setSelectedLickIds([]);
+    }
+  };
+
   const handleCreatePost = async () => {
     if (!newText.trim()) {
       message.warning('Vui lòng nhập nội dung');
@@ -648,6 +728,7 @@ const NewsFeed = () => {
       console.log('[UI] Click Đăng, preparing payload...');
       // Không chặn khi thiếu userId ở UI; service sẽ tự chèn từ localStorage
       // và BE sẽ trả lỗi rõ ràng nếu thiếu
+      let newPost = null;
       if (files.length > 0) {
         const form = new FormData();
         form.append('postType', 'status_update');
@@ -655,23 +736,89 @@ const NewsFeed = () => {
         if (linkPreview) {
           form.append('linkPreview', JSON.stringify(linkPreview));
         }
+        if (selectedLickIds.length > 0) {
+          form.append('attachedLickIds', JSON.stringify(selectedLickIds));
+        }
         files.forEach((f) => {
           if (f.originFileObj) form.append('media', f.originFileObj);
         });
         // eslint-disable-next-line no-console
-        console.log('[UI] Sending multipart createPost...', { fileCount: files.length });
-        await createPost(form);
+        console.log('[UI] Sending multipart createPost...', { fileCount: files.length, lickCount: selectedLickIds.length });
+        const response = await createPost(form);
+        // Service trả về { success: true, data: post } từ axios response.data
+        // axios đã unwrap response.data rồi, nên response chính là { success: true, data: post }
+        newPost = response?.data || response;
+        // eslint-disable-next-line no-console
+        console.log('[UI] Post created response:', { response, newPost, hasId: !!newPost?._id });
       } else {
         // eslint-disable-next-line no-console
         console.log('[UI] Sending JSON createPost...');
-        await createPost({ postType: 'status_update', textContent: newText.trim(), linkPreview });
+        const payload = { postType: 'status_update', textContent: newText.trim(), linkPreview };
+        if (selectedLickIds.length > 0) {
+          payload.attachedLickIds = selectedLickIds;
+        }
+        const response = await createPost(payload);
+        // Service trả về { success: true, data: post } từ axios response.data
+        // axios đã unwrap response.data rồi, nên response chính là { success: true, data: post }
+        newPost = response?.data || response;
+        // eslint-disable-next-line no-console
+        console.log('[UI] Post created response:', { response, newPost, hasId: !!newPost?._id });
       }
+      
+      // Thêm post mới vào đầu danh sách ngay lập tức
+      if (newPost && newPost._id) {
+        // eslint-disable-next-line no-console
+        console.log('[UI] Adding new post to feed:', newPost._id);
+        setItems((prev) => {
+          // Kiểm tra xem post đã tồn tại chưa (tránh duplicate)
+          const exists = prev.some((p) => p._id === newPost._id);
+          if (exists) {
+            // eslint-disable-next-line no-console
+            console.log('[UI] Post already exists, skipping');
+            return prev;
+          }
+          // Thêm post mới vào đầu danh sách
+          // eslint-disable-next-line no-console
+          console.log('[UI] Adding post to beginning of list');
+          return [newPost, ...prev];
+        });
+        
+        // Hydrate following status cho author của post mới
+        const authorId = (newPost?.userId?._id || newPost?.userId?.id || newPost?.userId || '').toString();
+        if (authorId && currentUserId && authorId === currentUserId.toString()) {
+          // Post của chính mình, không cần check following
+        } else if (authorId) {
+          try {
+            const profileRes = await getProfileById(authorId);
+            setUserIdToFollowing((prev) => ({ ...prev, [authorId]: !!profileRes?.data?.isFollowing }));
+          } catch {
+            // Ignore error
+          }
+        }
+        
+        // Initialize stats cho post mới
+        setPostIdToStats((prev) => ({
+          ...prev,
+          [newPost._id]: { likesCount: 0, commentsCount: 0 }
+        }));
+        setPostIdToLiked((prev) => ({ ...prev, [newPost._id]: false }));
+        setPostIdToComments((prev) => ({ ...prev, [newPost._id]: [] }));
+        
+        // Join socket room cho post mới
+        try {
+          joinRoom(`post:${newPost._id}`);
+        } catch {
+          // Ignore socket errors
+        }
+      }
+      
       setNewText('');
       setFiles([]);
+      setSelectedLickIds([]);
       setIsModalOpen(false);
       message.success('Đăng bài thành công');
-      fetchData(1, limit);
-      setPage(1);
+      // KHÔNG fetch lại data - post mới đã được thêm vào đầu danh sách
+      // Chỉ khi refresh trang thì mới sort theo engagement
     } catch (e) {
       message.error(e.message || 'Đăng bài thất bại');
     } finally {
@@ -699,7 +846,7 @@ const NewsFeed = () => {
             display: 'flex',
             alignItems: 'center',
             gap: 16
-          }} onClick={() => setIsModalOpen(true)}>
+          }}             onClick={handleModalOpen}>
             <Avatar size={40} style={{ backgroundColor: '#722ed1' }}>T</Avatar>
             <Input.TextArea 
               placeholder="Có gì mới ?" 
@@ -714,18 +861,18 @@ const NewsFeed = () => {
               }}
               readOnly
             />
-            <Button type="primary" size="large" style={{ borderRadius: 999, background: '#1890ff', padding: '0 22px', height: 44 }} onClick={(e) => { e.stopPropagation(); setIsModalOpen(true); }}>Post</Button>
+            <Button type="primary" size="large" style={{ borderRadius: 999, background: '#1890ff', padding: '0 22px', height: 44 }} onClick={(e) => { e.stopPropagation(); handleModalOpen(); }}>Post</Button>
           </div>
 
           <Modal
             open={isModalOpen}
             title={<span style={{ color: '#fff', fontWeight: 600 }}>Tạo bài đăng</span>}
-            onCancel={() => { if (!posting) { setIsModalOpen(false); } }}
+            onCancel={handleModalClose}
             footer={
               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
                 <Button 
                   shape="round"
-                  onClick={() => { if (!posting) setIsModalOpen(false); }}
+                  onClick={handleModalClose}
                   style={{ height: 44, borderRadius: 22, padding: 0, width: 108, background: '#1f1f1f', color: '#e5e7eb', borderColor: '#303030' }}
                 >Hủy</Button>
                 <Button 
@@ -751,6 +898,23 @@ const NewsFeed = () => {
                 maxLength={maxChars}
                 showCount
               />
+              <div>
+                <Text style={{ color: '#e5e7eb', marginBottom: 8, display: 'block' }}>Đính kèm lick (chỉ licks active của bạn)</Text>
+                <Select
+                  mode="multiple"
+                  placeholder="Chọn lick để đính kèm..."
+                  value={selectedLickIds}
+                  onChange={setSelectedLickIds}
+                  loading={loadingLicks}
+                  style={{ width: '100%' }}
+                  options={availableLicks}
+                  notFoundContent={loadingLicks ? <Spin size="small" /> : <Empty description="Không có lick active nào" />}
+                  filterOption={(input, option) =>
+                    (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                  }
+                  popupClassName="dark-select-dropdown"
+                />
+              </div>
               <Upload.Dragger
                 multiple
                 fileList={files}
@@ -877,6 +1041,20 @@ const NewsFeed = () => {
               </div>
             ) : null;
           })()}
+              {/* Hiển thị attached licks với waveform */}
+              {post?.attachedLicks && Array.isArray(post.attachedLicks) && post.attachedLicks.length > 0 && (
+                <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {post.attachedLicks.map((lick) => {
+                    const lickId = lick?._id || lick?.lick_id || lick;
+                    if (!lickId) return null;
+                    return (
+                      <div key={lickId} style={{ marginBottom: 8 }}>
+                        <PostLickEmbed lickId={lickId} />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {post?.media?.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
                   <WavePlaceholder />
@@ -917,10 +1095,10 @@ const NewsFeed = () => {
                 </Button>
               </Space>
 
-              {/* Danh sách bình luận */}
+              {/* Danh sách bình luận - chỉ hiển thị 3 comment gần nhất */}
               {postIdToComments[post._id] && postIdToComments[post._id].length > 0 && (
                 <div style={{ marginTop: 12, background: '#0f0f10', borderTop: '1px solid #1f1f1f', paddingTop: 8 }}>
-                  {postIdToComments[post._id].map((c) => (
+                  {limitToNewest3(postIdToComments[post._id]).map((c) => (
                     <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                       <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
                       <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>

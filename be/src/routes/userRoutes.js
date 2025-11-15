@@ -8,7 +8,8 @@ import {
   updateUserProfile,
   followUser,
   unfollowUser,
-  getFollowSuggestions
+  getFollowSuggestions,
+  getFollowingList
 } from '../controllers/userController.js';
 import middlewareController from '../middleware/auth.js';
 const { verifyToken, optionalVerifyToken } = middlewareController;
@@ -71,7 +72,15 @@ const validateProfileUpdate = [
 // GET /api/users/profile - Get current user's profile (requires authentication)
 router.get('/profile', verifyToken, getCurrentUserProfile);
 
+// GET /api/users/following - Get list of users that current user is following (requires authentication)
+// MUST be before /:userId route to avoid conflict
+router.get('/following', verifyToken, getFollowingList);
+
+// GET /api/users/suggestions/list - Suggested users to follow (requires authentication)
+router.get('/suggestions/list', verifyToken, getFollowSuggestions);
+
 // GET /api/users/:userId - Get user profile by user ID (public, but parse token if provided)
+// MUST be after specific routes like /following and /suggestions/list
 router.get('/:userId', optionalVerifyToken, getUserProfileById);
 
 // GET /api/users/username/:username - Get user profile by username (public, but parse token if provided)
@@ -170,8 +179,5 @@ router.post('/:userId/follow', verifyToken, followUser);
 
 // DELETE /api/users/:userId/follow - Unfollow a user (requires authentication)
 router.delete('/:userId/follow', verifyToken, unfollowUser);
-
-// GET /api/users/suggestions - Suggested users to follow (requires authentication)
-router.get('/suggestions/list', verifyToken, getFollowSuggestions);
 
 export default router;
