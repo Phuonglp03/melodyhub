@@ -28,6 +28,7 @@ import ChatPage from "../pages/user/Chat";
 import MyPlaylistsPage from "../pages/user/MyPlaylists";
 import PlaylistDetailPage from "../pages/user/PlaylistDetail";
 import PlaylistCommunityPage from "../pages/user/PlaylistCommunity";
+import NotificationsPage from "../pages/user/Notifications";
 import {
   CreateProjectPage,
   ProjectListPage,
@@ -139,6 +140,7 @@ const AppRoutes = () => {
           <Route path="users/:userId/newfeeds" element={<UserFeed />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route path="chat" element={<ChatPage />} />
+          <Route path="notifications" element={<NotificationsPage />} />
           {/* Lick detail & upload */}
           <Route path="licks/upload" element={<LickUploadPage />} />
           <Route path="licks/:lickId" element={<LickDetailPage />} />

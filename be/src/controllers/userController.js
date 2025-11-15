@@ -2,6 +2,15 @@ import User from '../models/User.js';
 import Post from '../models/Post.js';
 import UserFollow from '../models/UserFollow.js';
 import cloudinary, { uploadImage } from '../config/cloudinary.js';
+import { notifyUserFollowed } from '../utils/notificationHelper.js';
+
+// Helper function to normalize avatar URL
+const normalizeAvatarUrl = (avatarUrl) => {
+  if (!avatarUrl || typeof avatarUrl !== 'string' || avatarUrl.trim() === '') {
+    return '/default-avatar.svg';
+  }
+  return avatarUrl.trim();
+};
 
 // Get current user profile (authenticated user)
 export const getCurrentUserProfile = async (req, res) => {
@@ -9,7 +18,7 @@ export const getCurrentUserProfile = async (req, res) => {
     const userId = req.userId; // From auth middleware
 
     const user = await User.findById(userId).select('-passwordHash');
-
+    
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -18,7 +27,7 @@ export const getCurrentUserProfile = async (req, res) => {
     }
 
     // Get user's post count
-    const postCount = await Post.countDocuments({
+    const postCount = await Post.countDocuments({ 
       userId,
       $or: [
         { moderationStatus: 'approved' },
@@ -75,7 +84,7 @@ export const getUserProfileById = async (req, res) => {
     const currentUserId = req.userId; // From auth middleware (optional)
 
     const user = await User.findById(userId).select('-passwordHash -email');
-
+    
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -118,7 +127,7 @@ export const getUserProfileById = async (req, res) => {
     }
 
     // Get user's post count
-    const postCount = await Post.countDocuments({
+    const postCount = await Post.countDocuments({ 
       userId,
       $or: [
         { moderationStatus: 'approved' },
@@ -175,7 +184,7 @@ export const getUserProfileByUsername = async (req, res) => {
     const currentUserId = req.userId; // From auth middleware (optional)
 
     const user = await User.findOne({ username }).select('-passwordHash -email');
-
+    
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -218,7 +227,7 @@ export const getUserProfileByUsername = async (req, res) => {
     }
 
     // Get user's post count
-    const postCount = await Post.countDocuments({
+    const postCount = await Post.countDocuments({ 
       userId: user._id,
       $or: [
         { moderationStatus: 'approved' },
@@ -272,7 +281,7 @@ export const getUserProfileByUsername = async (req, res) => {
 export const updateUserProfile = async (req, res) => {
   try {
     const userId = req.userId; // From auth middleware
-
+    
     console.log('📝 Update profile - Content-Type:', req.headers['content-type']);
     console.log('📝 Update profile - req.file:', req.file ? 'File exists' : 'No file');
     console.log('📝 Update profile - req.body keys:', Object.keys(req.body || {}));
@@ -281,7 +290,7 @@ export const updateUserProfile = async (req, res) => {
     const { displayName, bio, birthday, avatarUrl, privacyProfile, theme, language, gender, location } = req.body;
 
     const user = await User.findById(userId);
-
+    
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -293,7 +302,7 @@ export const updateUserProfile = async (req, res) => {
     if (displayName !== undefined) user.displayName = displayName;
     if (bio !== undefined) user.bio = bio;
     if (birthday !== undefined) user.birthday = birthday ? new Date(birthday) : undefined;
-
+    
     // Xử lý avatar: ưu tiên file upload (Cloudinary), sau đó mới đến URL string
     if (req.file) {
       // File đã được upload lên Cloudinary bởi multer-storage-cloudinary
@@ -301,7 +310,7 @@ export const updateUserProfile = async (req, res) => {
       const uploadedUrl = req.file.path || req.file.secure_url || req.file.url;
       console.log('📸 Uploaded file URL:', uploadedUrl);
       console.log('📸 Full file object keys:', Object.keys(req.file || {}));
-
+      
       if (uploadedUrl) {
         user.avatarUrl = uploadedUrl;
         console.log('✅ Avatar URL updated from uploaded file:', uploadedUrl);
@@ -369,9 +378,9 @@ export const uploadAvatar = async (req, res) => {
   try {
     const userId = req.userId;
     const file = req.file;
-
+    
     console.log('📸 Upload avatar - file object:', JSON.stringify(file, null, 2));
-
+    
     if (!file) {
       return res.status(400).json({ success: false, message: 'Missing avatar file' });
     }
@@ -379,13 +388,13 @@ export const uploadAvatar = async (req, res) => {
     // With CloudinaryStorage, the file object should have path or secure_url
     // Try multiple possible properties from Cloudinary response
     const imageUrl = file.path || file.secure_url || file.url || (file.filename ? `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}` : null);
-
+    
     console.log('📸 Extracted imageUrl:', imageUrl);
-
+    
     if (!imageUrl) {
       console.error('❌ No imageUrl found in file object:', file);
-      return res.status(500).json({
-        success: false,
+      return res.status(500).json({ 
+        success: false, 
         message: 'Upload failed - no URL returned from Cloudinary',
         debug: { fileKeys: Object.keys(file || {}) }
       });
@@ -406,17 +415,20 @@ export const uploadAvatar = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: 'Avatar updated',
-      data: {
-        avatarUrl: user.avatarUrl,
-        user
+      data: { 
+        avatarUrl: normalizeAvatarUrl(user.avatarUrl), 
+        user: {
+          ...user.toObject(),
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl)
+        }
       }
     });
   } catch (error) {
     console.error('❌ Error uploading avatar:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-      error: error.message
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error', 
+      error: error.message 
     });
   }
 };
@@ -424,10 +436,9 @@ export const uploadAvatar = async (req, res) => {
 // Follow a user
 export const followUser = async (req, res) => {
   try {
-    const followerId = req.userId; // Current user (follower)
-    const { userId } = req.params; // User to follow (following)
+    const followerId = req.userId;
+    const { userId } = req.params;
 
-    // Check if trying to follow yourself
     if (followerId === userId) {
       return res.status(400).json({
         success: false,
@@ -435,9 +446,9 @@ export const followUser = async (req, res) => {
       });
     }
 
-    // Check if target user exists
-    const targetUser = await User.findById(userId);
-    if (!targetUser) {
+    // Check if user exists
+    const userToFollow = await User.findById(userId);
+    if (!userToFollow || !userToFollow.isActive) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
@@ -458,45 +469,33 @@ export const followUser = async (req, res) => {
     }
 
     // Create follow relationship
-    const follow = await UserFollow.create({
+    const follow = new UserFollow({
       followerId,
       followingId: userId
     });
+    await follow.save();
 
-    // Update follower's followingCount
-    await User.findByIdAndUpdate(followerId, {
-      $inc: { followingCount: 1 }
-    });
-
-    // Update target user's followersCount
+    // Update followers count
     await User.findByIdAndUpdate(userId, {
       $inc: { followersCount: 1 }
     });
 
-    res.status(201).json({
-      success: true,
-      message: 'Successfully followed user',
-      data: {
-        follow: {
-          id: follow._id,
-          followerId: follow.followerId,
-          followingId: follow.followingId,
-          createdAt: follow.createdAt
-        }
-      }
+    // Update following count
+    await User.findByIdAndUpdate(followerId, {
+      $inc: { followingCount: 1 }
     });
 
+    // Tạo thông báo cho người được follow
+    notifyUserFollowed(userId, followerId).catch(err => {
+      console.error('Lỗi khi tạo thông báo follow:', err);
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Successfully followed user'
+    });
   } catch (error) {
     console.error('Error following user:', error);
-
-    // Handle duplicate key error
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Already following this user'
-      });
-    }
-
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -508,27 +507,10 @@ export const followUser = async (req, res) => {
 // Unfollow a user
 export const unfollowUser = async (req, res) => {
   try {
-    const followerId = req.userId; // Current user (follower)
-    const { userId } = req.params; // User to unfollow (following)
+    const followerId = req.userId;
+    const { userId } = req.params;
 
-    // Check if trying to unfollow yourself
-    if (followerId === userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot unfollow yourself'
-      });
-    }
-
-    // Check if target user exists
-    const targetUser = await User.findById(userId);
-    if (!targetUser) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    // Check if follow relationship exists
+    // Find and delete follow relationship
     const follow = await UserFollow.findOneAndDelete({
       followerId,
       followingId: userId
@@ -541,26 +523,20 @@ export const unfollowUser = async (req, res) => {
       });
     }
 
-    // Update follower's followingCount
-    await User.findByIdAndUpdate(followerId, { $inc: { followingCount: -1 } });
-    // Prevent negative values in case counts were out-of-sync
-    await User.updateOne({ _id: followerId, followingCount: { $lt: 0 } }, { $set: { followingCount: 0 } });
+    // Update followers count
+    await User.findByIdAndUpdate(userId, {
+      $inc: { followersCount: -1 }
+    });
 
-    // Update target user's followersCount
-    await User.findByIdAndUpdate(userId, { $inc: { followersCount: -1 } });
-    await User.updateOne({ _id: userId, followersCount: { $lt: 0 } }, { $set: { followersCount: 0 } });
+    // Update following count
+    await User.findByIdAndUpdate(followerId, {
+      $inc: { followingCount: -1 }
+    });
 
     res.status(200).json({
       success: true,
-      message: 'Successfully unfollowed user',
-      data: {
-        unfollowed: {
-          followerId,
-          followingId: userId
-        }
-      }
+      message: 'Successfully unfollowed user'
     });
-
   } catch (error) {
     console.error('Error unfollowing user:', error);
     res.status(500).json({
@@ -571,20 +547,22 @@ export const unfollowUser = async (req, res) => {
   }
 };
 
-// Get follow suggestions for current user
+// Get follow suggestions - users to follow
 export const getFollowSuggestions = async (req, res) => {
   try {
-    const currentUserId = req.userId; // requires auth
-    const limit = Math.min(parseInt(req.query.limit, 10) || 5, 50);
+    const userId = req.userId;
+    const limit = parseInt(req.query.limit) || 10;
 
-    // Users the current user already follows
-    const following = await UserFollow.find({ followerId: currentUserId }).select('followingId');
-    const followingIds = following.map((f) => f.followingId);
+    // Get users that the current user is already following
+    const followingIds = await UserFollow.find({ followerId: userId })
+      .select('followingId')
+      .lean();
+    const followingIdsArray = followingIds.map(f => f.followingId);
 
-    // Exclude current user and already-following users
+    // Get suggested users (not following, not self, active users)
     const users = await User.find({
-      _id: { $nin: [currentUserId, ...followingIds] },
-      isActive: { $ne: false },
+      _id: { $ne: userId, $nin: followingIdsArray },
+      isActive: true
     })
       .sort({ followersCount: -1, createdAt: -1 })
       .limit(limit)
@@ -596,12 +574,16 @@ export const getFollowSuggestions = async (req, res) => {
         id: u._id,
         username: u.username,
         displayName: u.displayName,
-        avatarUrl: u.avatarUrl,
+        avatarUrl: normalizeAvatarUrl(u.avatarUrl),
         followersCount: u.followersCount,
       }))
     });
   } catch (error) {
     console.error('Error getting follow suggestions:', error);
-    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error', 
+      error: error.message 
+    });
   }
 };

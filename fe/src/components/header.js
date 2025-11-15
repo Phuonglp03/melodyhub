@@ -5,6 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { livestreamService } from '../services/user/livestreamService';
 import useDMConversations from '../hooks/useDMConversations';
 import FloatingChatWindow from './FloatingChatWindow';
+import NotificationBell from './NotificationBell';
 import './header.css';
 const { Header } = Layout;
 const { Text } = Typography;
@@ -297,7 +298,7 @@ const AppHeader = () => {
             prefix={<SearchOutlined />}
           />
           <div className="app-header__actions">
-            <BellOutlined className="app-header__icon" />
+            <NotificationBell />
             {!isChatPage && (
             <Popover
               content={

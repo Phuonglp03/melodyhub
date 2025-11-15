@@ -120,6 +120,17 @@ export const onPostCommentNew = (callback) => {
 export const offPostCommentNew = (callback) => {
   getSocket()?.off('post:comment:new', callback);
 };
+
+// ---- Notifications realtime ----
+export const onNotificationNew = (callback) => {
+  console.log('[Notification] listen notification:new');
+  getSocket()?.on('notification:new', callback);
+};
+export const offNotificationNew = (callback) => {
+  console.log('[Notification] off notification:new');
+  getSocket()?.off('notification:new', callback);
+};
+
 // Hủy tất cả lắng nghe (dùng khi unmount)
 export const offSocketEvents = () => {
   const s = getSocket();
@@ -131,6 +142,7 @@ export const offSocketEvents = () => {
   s.off('new-message-liveroom');
   s.off('stream-privacy-updated');
   s.off('post:comment:new');
+  s.off('notification:new');
 };
 
 // ========== DM helpers ==========

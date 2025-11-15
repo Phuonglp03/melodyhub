@@ -604,6 +604,15 @@ export const likePost = async (req, res) => {
 
     try {
       const like = await PostLike.create({ postId, userId });
+      
+      // Tạo thông báo cho chủ bài đăng (nếu không phải tự like)
+      if (String(post.userId) !== String(userId)) {
+        const { notifyPostLiked } = await import('../utils/notificationHelper.js');
+        notifyPostLiked(post.userId, userId, postId).catch(err => {
+          console.error('Lỗi khi tạo thông báo like:', err);
+        });
+      }
+      
       return res.status(201).json({ success: true, liked: true, data: { id: like._id } });
     } catch (err) {
       if (err && err.code === 11000) {

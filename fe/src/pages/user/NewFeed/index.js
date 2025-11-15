@@ -137,6 +137,7 @@ const formatTime = (isoString) => {
 
 const NewsFeed = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [items, setItems] = useState([]);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
@@ -364,6 +365,123 @@ const NewsFeed = () => {
       setCommentSubmitting(false);
     }
   };
+
+  // Join socket rooms for all posts currently in the feed to receive inline updates
+  useEffect(() => {
+    if (!Array.isArray(items) || items.length === 0) return;
+    try {
+      items.forEach((it) => it?._id && joinRoom(`post:${it._id}`));
+    } catch (e) {
+      // ignore join errors
+    }
+  }, [items]);
+
+  // Global listener: update inline lists and counters when any post gets a new comment
+  useEffect(() => {
+    const handler = (payload) => {
+      if (!payload?.postId || !payload?.comment) return;
+      const postId = payload.postId;
+      const comment = payload.comment;
+      setPostIdToStats((prev) => {
+        const cur = prev[postId] || { likesCount: 0, commentsCount: 0 };
+        return { ...prev, [postId]: { ...cur, commentsCount: (cur.commentsCount || 0) + 1 } };
+      });
+      // Only prepend if we already have an inline list for that post
+      setPostIdToComments((prev) => {
+        const cur = Array.isArray(prev[postId]) ? prev[postId] : [];
+        return { ...prev, [postId]: limitToNewest3([comment, ...cur]) };
+      });
+    };
+    onPostCommentNew(handler);
+    return () => {
+      offPostCommentNew(handler);
+    };
+  }, []);
+
+  // Listen realtime comments for the currently opened post
+  useEffect(() => {
+    if (!commentOpen || !commentPostId) return;
+    const handler = (payload) => {
+      if (!payload || payload.postId !== commentPostId) return;
+      const newComment = payload.comment;
+      setPostIdToComments((prev) => {
+        const cur = prev[commentPostId] || [];
+        return { ...prev, [commentPostId]: sortCommentsDesc([newComment, ...cur]) };
+      });
+      setPostIdToStats((prev) => {
+        const cur = prev[commentPostId] || { likesCount: 0, commentsCount: 0 };
+        return { ...prev, [commentPostId]: { ...cur, commentsCount: (cur.commentsCount || 0) + 1 } };
+      });
+    };
+    onPostCommentNew(handler);
+    return () => {
+      offPostCommentNew(handler);
+    };
+  }, [commentOpen, commentPostId]);
+
+  // Lắng nghe event từ NotificationBell để mở modal comment
+  useEffect(() => {
+    const handleOpenCommentModal = (event) => {
+      const { postId } = event.detail || {};
+      if (postId) {
+        // Nếu post chưa có trong items, cần fetch trước
+        const post = items.find((it) => it._id === postId);
+        if (post) {
+          openComment(postId);
+        } else {
+          // Nếu post chưa có, fetch post và mở modal
+          getPostById(postId).then((result) => {
+            if (result.success && result.data) {
+              // Thêm post vào items nếu chưa có
+              setItems((prev) => {
+                const exists = prev.some((it) => it._id === postId);
+                return exists ? prev : [result.data, ...prev];
+              });
+              openComment(postId);
+            }
+          }).catch((err) => {
+            console.error('Lỗi khi lấy bài viết:', err);
+            message.error('Không tìm thấy bài viết');
+          });
+        }
+      }
+    };
+
+    window.addEventListener('openPostCommentModal', handleOpenCommentModal);
+    return () => {
+      window.removeEventListener('openPostCommentModal', handleOpenCommentModal);
+    };
+  }, [items]);
+
+  // Kiểm tra location.state khi component mount hoặc location thay đổi
+  useEffect(() => {
+    if (location.state?.openCommentModal && location.state?.postId) {
+      const { postId } = location.state;
+      // Clear state để tránh mở lại khi refresh
+      navigate(location.pathname, { replace: true, state: {} });
+      
+      // Nếu post chưa có trong items, fetch trước
+      const post = items.find((it) => it._id === postId);
+      if (post) {
+        openComment(postId);
+      } else {
+        // Nếu post chưa có, fetch post và mở modal
+        getPostById(postId).then((result) => {
+          if (result.success && result.data) {
+            // Thêm post vào items nếu chưa có
+            setItems((prev) => {
+              const exists = prev.some((it) => it._id === postId);
+              return exists ? prev : [result.data, ...prev];
+            });
+            openComment(postId);
+          }
+        }).catch((err) => {
+          console.error('Lỗi khi lấy bài viết:', err);
+          message.error('Không tìm thấy bài viết');
+        });
+      }
+    }
+  }, [location.state, items]);
 
   const fetchProviderOEmbed = async (url) => {
     const tryFetch = async (endpoint) => {
