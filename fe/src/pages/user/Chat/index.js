@@ -20,6 +20,7 @@ import {
 import useDMConversations from '../../../hooks/useDMConversations';
 import useDMConversationMessages from '../../../hooks/useDMConversationMessages';
 import { initSocket } from '../../../services/user/socketService';
+import { getFollowingList } from '../../../services/user/profile';
 import './Chat.css';
 
 const { TextArea } = Input;
@@ -36,6 +37,8 @@ const ChatPage = () => {
   const [peerInput, setPeerInput] = useState('');
   const [searchText, setSearchText] = useState('');
   const [requesterOverride, setRequesterOverride] = useState({}); // conversationId -> true if I just created/requested
+  const [followingUsers, setFollowingUsers] = useState([]);
+  const [loadingFollowing, setLoadingFollowing] = useState(false);
   
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -46,6 +49,38 @@ const ChatPage = () => {
       initSocket(currentUserId);
     }
   }, [currentUserId]);
+
+  // Fetch following users when search text changes
+  useEffect(() => {
+    const fetchFollowing = async () => {
+      if (!currentUserId) {
+        setFollowingUsers([]);
+        return;
+      }
+      try {
+        setLoadingFollowing(true);
+        // Always fetch, even if searchText is empty (will return all following)
+        const res = await getFollowingList(searchText || '', 50);
+        console.log('[Chat] getFollowingList response:', res);
+        if (res?.success && Array.isArray(res.data)) {
+          console.log('[Chat] Found following users:', res.data.length);
+          setFollowingUsers(res.data);
+        } else {
+          console.log('[Chat] No following users found or invalid response');
+          setFollowingUsers([]);
+        }
+      } catch (error) {
+        console.error('Error fetching following users:', error);
+        setFollowingUsers([]);
+      } finally {
+        setLoadingFollowing(false);
+      }
+    };
+
+    // Debounce search
+    const timeoutId = setTimeout(fetchFollowing, 300);
+    return () => clearTimeout(timeoutId);
+  }, [searchText, currentUserId]);
   
   // Handle conversation query parameter from popover navigation
   useEffect(() => {
@@ -227,9 +262,80 @@ const ChatPage = () => {
           </div>
 
           <div className="chat-conversations-list">
+            {/* Show following users when searching or when search is empty but we have results */}
+            {(searchText || followingUsers.length > 0) && (
+              <div style={{ padding: '8px 16px', borderBottom: '1px solid #2a2a2a' }}>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>
+                  {searchText ? 'Tìm kiếm người bạn đang follow' : 'Người bạn đang follow'}
+                </div>
+                {loadingFollowing ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}>
+                    <Spin size="small" />
+                  </div>
+                ) : followingUsers.length === 0 ? (
+                  <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+                    Không tìm thấy người nào
+                  </div>
+                ) : (
+                  followingUsers.map((user) => {
+                    // Check if conversation already exists with this user
+                    const existingConv = conversations.find((c) => {
+                      const peer = getPeer(c);
+                      const peerId = peer?._id || peer?.id || peer;
+                      return String(peerId) === String(user.id);
+                    });
+
+                    return (
+                      <div
+                        key={user.id}
+                        className="chat-conv-item"
+                        onClick={async () => {
+                          if (existingConv) {
+                            setSelectedConvId(existingConv._id);
+                            setSearchText('');
+                          } else {
+                            // Create new conversation
+                            try {
+                              const newConv = await ensureWith(user.id);
+                              const newConvId = newConv?._id || newConv?.id || newConv;
+                              if (newConvId) {
+                                setSelectedConvId(newConvId);
+                                setRequesterOverride((prev) => ({ ...prev, [newConvId]: true }));
+                                setSearchText('');
+                              } else {
+                                message.error('Không thể tạo cuộc trò chuyện');
+                              }
+                            } catch (error) {
+                              console.error('Error creating conversation:', error);
+                              message.error(error.message || 'Không thể tạo cuộc trò chuyện');
+                            }
+                          }
+                        }}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <Avatar 
+                          src={user.avatarUrl} 
+                          icon={<UserOutlined />}
+                          size={50}
+                        />
+                        <div className="chat-conv-info">
+                          <div className="chat-conv-header">
+                            <div className="chat-conv-name">{user.displayName || user.username}</div>
+                          </div>
+                          <div className="chat-conv-preview">
+                            {existingConv ? 'Nhấn để mở cuộc trò chuyện' : 'Nhấn để bắt đầu trò chuyện'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+            {/* Show conversations */}
             {loading ? (
               <div className="chat-loading"><Spin /></div>
-            ) : filteredConvs.length === 0 ? (
+            ) : filteredConvs.length === 0 && !searchText ? (
               <Empty description="Chưa có cuộc trò chuyện" />
             ) : (
               filteredConvs.map((conv) => {

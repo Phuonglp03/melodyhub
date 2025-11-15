@@ -218,8 +218,9 @@ const AppHeader = () => {
   };
   
   // Filter conversations
+  // When searching, show all conversations (search is for filtering, but still show all if needed)
   const filteredConversations = conversations.filter((conv) => {
-    // Search filter
+    // Search filter - if search text exists, filter by name
     if (chatSearchText) {
       const peer = getPeer(conv);
       const peerName = peer?.displayName || peer?.username || '';
@@ -238,6 +239,20 @@ const AppHeader = () => {
     }
     return true;
   });
+  
+  // If search has no results but there are conversations, show all conversations (excluding search filter)
+  const displayConversations = chatSearchText && filteredConversations.length === 0 && conversations.length > 0
+    ? conversations.filter((conv) => {
+        // Apply status filter only (ignore search when no results)
+        if (chatFilter === 'unread') {
+          return getUnreadCount(conv) > 0;
+        }
+        if (chatFilter === 'groups') {
+          return false;
+        }
+        return true;
+      })
+    : filteredConversations;
   
   // Get total unread count
   const totalUnreadCount = conversations.reduce((sum, conv) => sum + getUnreadCount(conv), 0);
@@ -410,14 +425,14 @@ const AppHeader = () => {
                       <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
                         <Spin size="large" />
                       </div>
-                    ) : filteredConversations.length === 0 ? (
+                    ) : displayConversations.length === 0 ? (
                       <Empty 
                         description="Chưa có cuộc trò chuyện" 
                         style={{ color: '#9ca3af', padding: '40px' }}
                         image={Empty.PRESENTED_IMAGE_SIMPLE}
                       />
                     ) : (
-                      filteredConversations.map((conv) => {
+                      displayConversations.map((conv) => {
                         const peer = getPeer(conv);
                         const unread = getUnreadCount(conv);
                         const peerName = peer?.displayName || peer?.username || 'Người dùng';
@@ -620,6 +635,7 @@ const AppHeader = () => {
           onClose={() => closeChatWindow(window.id)}
           onMinimize={() => minimizeChatWindow(window.id)}
           onMaximize={() => maximizeChatWindow(window.id)}
+          onConversationUpdate={refresh}
         />
       ))}
 

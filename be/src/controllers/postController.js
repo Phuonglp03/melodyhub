@@ -277,15 +277,198 @@ export const getPosts = async (req, res) => {
       ],
     };
 
-    const posts = await Post.find(visibilityFilter)
-      .populate('userId', 'username displayName avatarUrl')
-      .populate('originalPostId')
-      .populate('attachedLicks', 'title description audioUrl waveformData duration tabNotation key tempo difficulty status isPublic createdAt updatedAt')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
+    // Get collection names from models to ensure correctness
+    // Mongoose automatically pluralizes model names: PostLike -> postlikes, PostComment -> postcomments
+    const postLikesCollection = PostLike.collection.name || 'postlikes';
+    const postCommentsCollection = PostComment.collection.name || 'postcomments';
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[getPosts] Using collections:', { postLikesCollection, postCommentsCollection });
+    }
+    
+    // Use aggregation pipeline to sort by likes + comments count
+    const pipeline = [
+      // Match posts with visibility filter
+      { $match: visibilityFilter },
+      
+      // Lookup likes count
+      {
+        $lookup: {
+          from: postLikesCollection,
+          let: { postId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$postId', '$$postId'] }
+              }
+            }
+          ],
+          as: 'likes'
+        }
+      },
+      
+      // Lookup comments count (only top-level comments, not replies)
+      {
+        $lookup: {
+          from: postCommentsCollection,
+          let: { postId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$postId', '$$postId'] },
+                    {
+                      $or: [
+                        { $eq: [{ $type: '$parentCommentId' }, 'missing'] },
+                        { $eq: ['$parentCommentId', null] }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          as: 'comments'
+        }
+      },
+      
+      // Calculate engagement score (likes + comments)
+      {
+        $addFields: {
+          likesCount: { $size: '$likes' },
+          commentsCount: { $size: '$comments' },
+          engagementScore: {
+            $add: [
+              { $size: '$likes' },
+              { $size: '$comments' }
+            ]
+          }
+        }
+      },
+      
+      // Sort by engagement score (descending), then by createdAt (descending)
+      {
+        $sort: {
+          engagementScore: -1,
+          createdAt: -1
+        }
+      },
+      
+      // Skip and limit for pagination
+      { $skip: skip },
+      { $limit: limit },
+      
+      // Populate userId
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'userIdData'
+        }
+      },
+      {
+        $unwind: {
+          path: '$userIdData',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $addFields: {
+          userId: {
+            _id: '$userIdData._id',
+            username: '$userIdData.username',
+            displayName: '$userIdData.displayName',
+            avatarUrl: '$userIdData.avatarUrl'
+          }
+        }
+      },
+      
+      // Populate originalPostId if exists
+      {
+        $lookup: {
+          from: 'posts',
+          localField: 'originalPostId',
+          foreignField: '_id',
+          as: 'originalPostData'
+        }
+      },
+      {
+        $addFields: {
+          originalPostId: {
+            $cond: {
+              if: { $gt: [{ $size: '$originalPostData' }, 0] },
+              then: { $arrayElemAt: ['$originalPostData', 0] },
+              else: null
+            }
+          }
+        }
+      },
+      
+      // Populate attachedLicks
+      {
+        $lookup: {
+          from: 'licks',
+          localField: 'attachedLicks',
+          foreignField: '_id',
+          as: 'attachedLicksData'
+        }
+      },
+      {
+        $addFields: {
+          attachedLicks: {
+            $map: {
+              input: '$attachedLicksData',
+              as: 'lick',
+              in: {
+                _id: '$$lick._id',
+                title: '$$lick.title',
+                description: '$$lick.description',
+                audioUrl: '$$lick.audioUrl',
+                waveformData: '$$lick.waveformData',
+                duration: '$$lick.duration',
+                tabNotation: '$$lick.tabNotation',
+                key: '$$lick.key',
+                tempo: '$$lick.tempo',
+                difficulty: '$$lick.difficulty',
+                status: '$$lick.status',
+                isPublic: '$$lick.isPublic',
+                createdAt: '$$lick.createdAt',
+                updatedAt: '$$lick.updatedAt'
+              }
+            }
+          }
+        }
+      },
+      
+      // Remove temporary fields but keep likesCount and commentsCount for debugging
+      {
+        $project: {
+          likes: 0,
+          comments: 0,
+          userIdData: 0,
+          originalPostData: 0,
+          attachedLicksData: 0,
+          engagementScore: 0
+          // Note: likesCount and commentsCount are removed but engagement score is used for sorting
+        }
+      }
+    ];
 
+    const posts = await Post.aggregate(pipeline);
+    
+    // Debug: log first post's engagement score if available
+    if (posts.length > 0 && process.env.NODE_ENV === 'development') {
+      console.log('[getPosts] First post engagement:', {
+        postId: posts[0]._id,
+        likesCount: posts[0].likesCount,
+        commentsCount: posts[0].commentsCount,
+        engagementScore: (posts[0].likesCount || 0) + (posts[0].commentsCount || 0)
+      });
+    }
+
+    // Get total count for pagination
     const totalPosts = await Post.countDocuments(visibilityFilter);
     const totalPages = Math.ceil(totalPosts / limit);
 

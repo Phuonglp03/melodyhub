@@ -186,6 +186,11 @@ export const onDmBadge = (callback) => {
   getSocket()?.on('dm:badge', callback);
 };
 
+export const onDmConversationUpdated = (callback) => {
+  console.log('[DM] listen dm:conversation:updated');
+  getSocket()?.on('dm:conversation:updated', callback);
+};
+
 export const offDmNew = (callback) => {
   console.log('[DM] off dm:new');
   getSocket()?.off('dm:new', callback);
@@ -204,4 +209,9 @@ export const offDmSeen = (callback) => {
 export const offDmBadge = (callback) => {
   console.log('[DM] off dm:badge');
   getSocket()?.off('dm:badge', callback);
+};
+
+export const offDmConversationUpdated = (callback) => {
+  console.log('[DM] off dm:conversation:updated');
+  getSocket()?.off('dm:conversation:updated', callback);
 };

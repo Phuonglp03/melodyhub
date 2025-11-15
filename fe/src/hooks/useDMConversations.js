@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import dm from '../services/dmService';
-import { onDmBadge, offDmBadge, onDmNew, offDmNew } from '../services/user/socketService';
+import { onDmBadge, offDmBadge, onDmNew, offDmNew, onDmConversationUpdated, offDmConversationUpdated } from '../services/user/socketService';
 
 export default function useDMConversations() {
   const [conversations, setConversations] = useState([]);
@@ -29,11 +29,29 @@ export default function useDMConversations() {
       console.log('[DM] conversations refresh on event', payload);
       refresh();
     };
+    const handleConversationUpdated = ({ conversationId, conversation }) => {
+      console.log('[DM] conversation updated', conversationId, conversation);
+      // Update the specific conversation in the list
+      setConversations((prev) => {
+        const updated = prev.map((c) => 
+          c._id === conversationId ? { ...c, ...conversation, status: conversation.status } : c
+        );
+        // If conversation not in list, add it
+        if (!updated.find(c => c._id === conversationId)) {
+          return [...updated, conversation];
+        }
+        return updated;
+      });
+      // Also refresh to ensure consistency
+      refresh();
+    };
     onDmBadge(handleRefresh);
     onDmNew(handleRefresh);
+    onDmConversationUpdated(handleConversationUpdated);
     return () => {
       offDmBadge(handleRefresh);
       offDmNew(handleRefresh);
+      offDmConversationUpdated(handleConversationUpdated);
     };
   }, [refresh]);
 
@@ -58,6 +76,8 @@ export default function useDMConversations() {
     },
   };
 }
+
+
 
 
 

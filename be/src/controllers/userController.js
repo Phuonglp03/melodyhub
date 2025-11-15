@@ -587,3 +587,82 @@ export const getFollowSuggestions = async (req, res) => {
     });
   }
 };
+
+// Get list of users that current user is following
+export const getFollowingList = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const search = req.query.search || '';
+    const limit = parseInt(req.query.limit) || 50;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+      });
+    }
+
+    // Get list of user IDs that current user is following
+    const followingRelations = await UserFollow.find({ followerId: userId })
+      .select('followingId')
+      .lean();
+    
+    const followingIds = followingRelations.map(f => f.followingId);
+
+    console.log('[getFollowingList] userId:', userId);
+    console.log('[getFollowingList] followingIds count:', followingIds.length);
+    console.log('[getFollowingList] search term:', search);
+
+    if (followingIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+      });
+    }
+
+    // Build query for users
+    let userQuery = {
+      _id: { $in: followingIds },
+      isActive: true,
+    };
+
+    // Apply search filter in query if provided
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      userQuery.$or = [
+        { displayName: searchRegex },
+        { username: searchRegex },
+      ];
+    }
+
+    // Fetch users directly
+    const users = await User.find(userQuery)
+      .select('username displayName avatarUrl isActive')
+      .limit(limit)
+      .lean();
+
+    console.log('[getFollowingList] users found:', users.length);
+
+    // Map to response format
+    let followingUsers = users.map((user) => ({
+      id: user._id,
+      username: user.username,
+      displayName: user.displayName,
+      avatarUrl: normalizeAvatarUrl(user.avatarUrl),
+    }));
+
+    console.log('[getFollowingList] followingUsers after mapping:', followingUsers.length);
+
+    res.status(200).json({
+      success: true,
+      data: followingUsers,
+    });
+  } catch (error) {
+    console.error('Error getting following list:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};

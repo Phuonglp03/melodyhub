@@ -90,6 +90,11 @@ export const getFollowSuggestions = async (limit = 5) => {
   return data;
 };
 
-export default { getMyProfile, updateMyProfile, uploadMyAvatar, followUser, unfollowUser, getFollowSuggestions };
+export const getFollowingList = async (search = '', limit = 50) => {
+  const { data } = await http.get(`/users/following`, { params: { search, limit } });
+  return data;
+};
+
+export default { getMyProfile, updateMyProfile, uploadMyAvatar, followUser, unfollowUser, getFollowSuggestions, getFollowingList };
 
 
