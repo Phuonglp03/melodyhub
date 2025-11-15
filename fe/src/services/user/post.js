@@ -123,6 +123,12 @@ export const getPostStats = async (postId) => {
   return data;
 };
 
+// Get list of users who liked a post
+export const getPostLikes = async (postId, { page = 1, limit = 50 } = {}) => {
+  const { data } = await http.get(`/posts/${postId}/likes`, { params: { page, limit } });
+  return data;
+};
+
 // Helper: fetch all comments (paginate until done)
 export const getAllPostComments = async (postId, { parentCommentId } = {}) => {
   const all = [];
@@ -154,6 +160,7 @@ export default {
   createPostComment,
   getPostComments,
   getPostStats,
+  getPostLikes,
   getAllPostComments,
   getStoredUserId,
 };

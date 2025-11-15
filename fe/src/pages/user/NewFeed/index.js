@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload, Select } from 'antd';
 import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined } from '@ant-design/icons';
 import { listPosts, createPost } from '../../../services/user/post';
-import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments } from '../../../services/user/post';
+import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments, getPostLikes } from '../../../services/user/post';
 import { followUser, unfollowUser, getFollowSuggestions, getProfileById } from '../../../services/user/profile';
 import { onPostCommentNew, offPostCommentNew, joinRoom } from '../../../services/user/socketService';
 import { getMyLicks } from '../../../services/user/lickService';
@@ -188,6 +188,10 @@ const NewsFeed = () => {
   const [userIdToFollowLoading, setUserIdToFollowLoading] = useState({}); // userId -> boolean
   const [suggestions, setSuggestions] = useState([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [likesModalOpen, setLikesModalOpen] = useState(false);
+  const [likesPostId, setLikesPostId] = useState(null);
+  const [likesList, setLikesList] = useState([]);
+  const [likesLoading, setLikesLoading] = useState(false);
   const [currentUserId] = useState(() => {
     try {
       const raw = localStorage.getItem('user');
@@ -350,6 +354,23 @@ const NewsFeed = () => {
     } catch (e) {
       // Nếu fetch thất bại, vẫn giữ comments hiện có
       console.warn('Failed to fetch all comments for modal:', e);
+    }
+  };
+
+  const openLikesModal = async (postId) => {
+    setLikesPostId(postId);
+    setLikesModalOpen(true);
+    setLikesList([]);
+    try {
+      setLikesLoading(true);
+      const res = await getPostLikes(postId, { page: 1, limit: 100 });
+      const users = res?.data?.users || [];
+      setLikesList(users);
+    } catch (e) {
+      message.error('Không thể tải danh sách người đã thích');
+      console.error('Failed to fetch likes:', e);
+    } finally {
+      setLikesLoading(false);
     }
   };
 
@@ -613,6 +634,15 @@ const NewsFeed = () => {
       setTotal(totalPosts);
       const totalPages = Math.ceil(totalPosts / l);
       setHasMore(p < totalPages);
+
+      // Set liked status for each post based on isLiked from backend
+      const likedMap = {};
+      posts.forEach((post) => {
+        if (post._id && post.isLiked !== undefined) {
+          likedMap[post._id] = !!post.isLiked;
+        }
+      });
+      setPostIdToLiked((prev) => ({ ...prev, ...likedMap }));
 
       // hydrate following status for authors in loaded posts
       try {
@@ -1078,14 +1108,30 @@ const NewsFeed = () => {
                 </a>
               )}
               <Space style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between' }}>
-                <Button 
-                  icon={<LikeOutlined />} 
-                  style={{ background: 'transparent', border: 'none', color: postIdToLiked[post._id] ? '#1890ff' : '#fff' }}
-                  loading={likingPostId === post._id}
-                  onClick={() => handleLike(post._id)}
-                >
-                  Thích {Number(postIdToStats[post._id]?.likesCount ?? 0) > 0 ? `(${postIdToStats[post._id].likesCount})` : ''}
-                </Button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Button 
+                    icon={<LikeOutlined />} 
+                    style={{ background: 'transparent', border: 'none', color: postIdToLiked[post._id] ? '#1890ff' : '#fff' }}
+                    loading={likingPostId === post._id}
+                    onClick={() => handleLike(post._id)}
+                  >
+                    Thích
+                  </Button>
+                  {Number(postIdToStats[post._id]?.likesCount ?? 0) > 0 && (
+                    <span
+                      onClick={() => openLikesModal(post._id)}
+                      style={{
+                        color: '#1890ff',
+                        cursor: 'pointer',
+                        fontSize: 14,
+                        fontWeight: 500,
+                        userSelect: 'none'
+                      }}
+                    >
+                      {postIdToStats[post._id].likesCount} lượt thích
+                    </span>
+                  )}
+                </div>
                 <Button 
                   icon={<MessageOutlined />} 
                   style={{ background: 'transparent', border: 'none', color: '#fff' }}
@@ -1157,6 +1203,82 @@ const NewsFeed = () => {
         </div>
       </div>
     </div>
+
+      <Modal
+        title={<span style={{ color: '#fff', fontWeight: 700 }}>Người đã thích</span>}
+        open={likesModalOpen}
+        onCancel={() => {
+          setLikesModalOpen(false);
+          setLikesPostId(null);
+          setLikesList([]);
+        }}
+        footer={null}
+        width={500}
+        styles={{
+          header: { background: '#0f0f10', borderBottom: '1px solid #1f1f1f' },
+          content: { background: '#0f0f10', borderRadius: 12 },
+          body: { background: '#0f0f10', maxHeight: '60vh', overflowY: 'auto' }
+        }}
+      >
+        {likesLoading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+            <Spin />
+          </div>
+        ) : likesList.length === 0 ? (
+          <Empty description={<span style={{ color: '#9ca3af' }}>Chưa có ai thích bài viết này</span>} />
+        ) : (
+          <List
+            dataSource={likesList}
+            renderItem={(user) => {
+              const isCurrentUser = currentUserId && user.id && user.id.toString() === currentUserId.toString();
+              return (
+              <List.Item
+                style={{ padding: '12px 0', borderBottom: '1px solid #1f1f1f' }}
+                actions={
+                  isCurrentUser ? null : [
+                    <Button
+                      key="follow"
+                      size="small"
+                      type={userIdToFollowing[user.id] ? 'default' : 'primary'}
+                      loading={!!userIdToFollowLoading[user.id]}
+                      onClick={() => toggleFollow(user.id)}
+                      style={{
+                        background: userIdToFollowing[user.id] ? '#111' : '#7c3aed',
+                        borderColor: userIdToFollowing[user.id] ? '#444' : '#7c3aed',
+                        color: '#fff',
+                      }}
+                    >
+                      {userIdToFollowing[user.id] ? 'Đang theo dõi' : 'Follow'}
+                    </Button>
+                  ]
+                }
+              >
+                <List.Item.Meta
+                  avatar={
+                    <Avatar
+                      size={40}
+                      src={user.avatarUrl}
+                      style={{ background: '#2db7f5', cursor: 'pointer' }}
+                      onClick={() => navigate(`/users/${user.id}/newfeeds`)}
+                    >
+                      {user.displayName?.[0] || user.username?.[0] || 'U'}
+                    </Avatar>
+                  }
+                  title={
+                    <span
+                      style={{ color: '#fff', cursor: 'pointer' }}
+                      onClick={() => navigate(`/users/${user.id}/newfeeds`)}
+                    >
+                      {user.displayName || user.username || 'Người dùng'}
+                    </span>
+                  }
+                />
+              </List.Item>
+              );
+            }}
+          />
+        )}
+      </Modal>
 
       <Modal
         title={<span style={{ color: '#fff', fontWeight: 700 }}>Bình luận bài viết</span>}
