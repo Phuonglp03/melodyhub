@@ -11,6 +11,7 @@ import {
   upsertTags,
   replaceContentTags,
 } from "../../../services/user/tagService";
+import { createPost as createPostApi } from "../../../services/user/post";
 import MyLickCard from "../../../components/MyLickCard";
 import TagFlowBoard from "../../../components/TagFlowBoard";
 
@@ -51,6 +52,7 @@ const MyLicksPage = () => {
   const [tagGroups, setTagGroups] = useState({});
   const [tagLookup, setTagLookup] = useState({});
   const [tagLibraryLoaded, setTagLibraryLoaded] = useState(false);
+  const [sharingLickId, setSharingLickId] = useState(null);
 
   // Delete confirmation modal
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -235,6 +237,32 @@ const MyLicksPage = () => {
     setConfirmTargetId(lickId);
     setConfirmError("");
     setConfirmOpen(true);
+  };
+
+  const handleShare = async (lickId) => {
+    const lick = licks.find((l) => l.lick_id === lickId);
+    if (!lick || sharingLickId) return;
+    if (!lick.is_public) {
+      alert("Only public licks can be shared to your feed.");
+      return;
+    }
+    try {
+      setSharingLickId(lickId);
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
+      const shareUrl = origin
+        ? `${origin}/licks/${lickId}`
+        : `/licks/${lickId}`;
+      const title = lick.title || "My new lick";
+      const textContent = `🎸 ${title}\n${shareUrl}`;
+      await createPostApi({ postType: "status_update", textContent });
+      alert("Shared to your feed!"); // replace with toast if available
+    } catch (err) {
+      console.error("Error sharing lick:", err);
+      alert(err?.message || "Failed to share lick");
+    } finally {
+      setSharingLickId(null);
+    }
   };
 
   const performDelete = async () => {
@@ -605,6 +633,8 @@ const MyLicksPage = () => {
               onClick={handleLickClick}
               onEdit={handleEdit}
               onDelete={handleDelete}
+              onShare={handleShare}
+              shareLoading={sharingLickId === lick.lick_id}
             />
           ))}
         </div>

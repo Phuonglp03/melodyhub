@@ -46,6 +46,10 @@ import authRoutes from "./routes/authRoutes.js";
 import postRoutes from "./routes/postRoutes.js";
 import lickRoutes from "./routes/lickRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
+import tagRoutes from "./routes/tagRoutes.js";
+import playlistRoutes from "./routes/playlistRoutes.js";
+import projectRoutes from "./routes/projectRoutes.js";
+
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import dmRoutes from "./routes/dmRoutes.js";
@@ -99,6 +103,9 @@ app.use("/api/licks", lickRoutes);
 app.use("/api/livestreams", liveroomRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/dm", dmRoutes);
+app.use("/api/tags", tagRoutes);
+app.use("/api/playlists", playlistRoutes);
+app.use("/api/projects", projectRoutes);
 
 // 404 handler - must be after all routes
 app.use((req, res, next) => {

@@ -172,7 +172,6 @@ export const createPost = async (req, res) => {
       }
     }
 
-    // Handle uploaded files
     let mediaArray = [];
     if (req.files && req.files.length > 0) {
       // Upload each file to Cloudinary

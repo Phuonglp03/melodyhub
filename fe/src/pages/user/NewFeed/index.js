@@ -1,13 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload, Select } from 'antd';
-import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined, CaretRightFilled, PauseOutlined } from '@ant-design/icons';
-import { listPosts, createPost, getPostById } from '../../../services/user/post';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload } from 'antd';
+import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined } from '@ant-design/icons';
+import { listPosts, createPost } from '../../../services/user/post';
 import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments } from '../../../services/user/post';
 import { followUser, unfollowUser, getFollowSuggestions, getProfileById } from '../../../services/user/profile';
-import { joinRoom, onPostCommentNew, offPostCommentNew } from '../../../services/user/socketService';
-import { getMyLicks } from '../../../services/user/lickService';
-import SimpleWaveform from '../../../components/SimpleWaveform';
+import PostLickEmbed from '../../../components/PostLickEmbed';
 
 const { Title, Text } = Typography;
 
@@ -170,12 +168,6 @@ const NewsFeed = () => {
   const [userIdToFollowLoading, setUserIdToFollowLoading] = useState({}); // userId -> boolean
   const [suggestions, setSuggestions] = useState([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  const [selectedLickIds, setSelectedLickIds] = useState([]);
-  const [lickOptions, setLickOptions] = useState([]);
-  const [licksLoading, setLicksLoading] = useState(false);
-  const [licksError, setLicksError] = useState('');
-  const audioRef = useRef(null);
-  const [playingLickId, setPlayingLickId] = useState(null);
   const [currentUserId] = useState(() => {
     try {
       const raw = localStorage.getItem('user');
@@ -187,18 +179,6 @@ const NewsFeed = () => {
       return undefined;
     }
   });
-
-  const lickSelectOptions = useMemo(() => {
-    if (!Array.isArray(lickOptions)) return [];
-    return lickOptions
-      .map((lick) => {
-        const id = lick?.lick_id || lick?._id || lick?.id;
-        if (!id) return null;
-        const label = lick?.title || 'Lick không tiêu đề';
-        return { value: id.toString(), label };
-      })
-      .filter(Boolean);
-  }, [lickOptions]);
 
   const extractFirstUrl = (text) => {
     if (!text) return null;
@@ -215,6 +195,26 @@ const NewsFeed = () => {
       }
       if (u.hostname.includes('youtube.com')) {
         return u.searchParams.get('v');
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const parseSharedLickId = (urlString) => {
+    if (!urlString) return null;
+    try {
+      const base =
+        typeof window !== 'undefined' && window.location
+          ? window.location.origin
+          : 'https://melodyhub.app';
+      const normalised = urlString.startsWith('http')
+        ? new URL(urlString)
+        : new URL(urlString, base);
+      const segments = normalised.pathname.split('/').filter(Boolean);
+      if (segments.length >= 2 && segments[0] === 'licks') {
+        return segments[1];
       }
       return null;
     } catch {
@@ -263,89 +263,6 @@ const NewsFeed = () => {
       message.error(e.message || 'Không thể thích bài viết');
     } finally {
       setLikingPostId(null);
-    }
-  };
-
-  const sortCommentsDesc = (list) => {
-    if (!Array.isArray(list)) return [];
-    return [...list].sort((a, b) => {
-      const aTime = new Date(a?.createdAt || a?.created_at || 0).getTime();
-      const bTime = new Date(b?.createdAt || b?.created_at || 0).getTime();
-      return bTime - aTime;
-    });
-  };
-
-  // Helper to keep only the 3 newest comments for inline display
-  const limitToNewest3 = (list) => {
-    const sorted = sortCommentsDesc(list);
-    return sorted.slice(0, 3);
-  };
-
-  const getLickId = (lick) => {
-    if (!lick) return null;
-    const id =
-      lick?._id ||
-      lick?.lick_id ||
-      lick?.id ||
-      lick?.lickId ||
-      (typeof lick === 'object' && lick?.toString && lick.toString());
-    return id ? id.toString() : null;
-  };
-
-  const getLickAudioUrl = (lick) => {
-    if (!lick) return undefined;
-    return lick?.audioUrl || lick?.audio_url || lick?.audioURL || lick?.audio?.url || undefined;
-  };
-
-  const normalizeWaveformData = (data) => {
-    if (!Array.isArray(data)) return [];
-    return data
-      .map((value) => {
-        const num = typeof value === 'number' ? value : parseFloat(value);
-        if (!Number.isFinite(num)) return 0;
-        if (num > 1) return Math.min(num / 100, 1);
-        if (num < 0) return 0;
-        return num;
-      })
-      .slice(0, 256);
-  };
-
-  const formatDuration = (seconds) => {
-    const numeric = Number(seconds);
-    if (!Number.isFinite(numeric) || numeric <= 0) return '';
-    const total = Math.round(numeric);
-    const mins = Math.floor(total / 60);
-    const secs = total % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const togglePlayLick = async (lick) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const lickId = getLickId(lick);
-    const audioUrl = getLickAudioUrl(lick);
-    if (!lickId || !audioUrl) {
-      message.warning('Lick này chưa có file audio hợp lệ');
-      return;
-    }
-
-    if (playingLickId === lickId) {
-      audio.pause();
-      audio.currentTime = 0;
-      setPlayingLickId(null);
-      return;
-    }
-
-    try {
-      audio.pause();
-      audio.currentTime = 0;
-      audio.src = audioUrl;
-      await audio.play();
-      setPlayingLickId(lickId);
-    } catch (err) {
-      console.error('Không thể phát lick:', err);
-      message.error('Không phát được audio của lick');
-      setPlayingLickId(null);
     }
   };
 
@@ -400,160 +317,12 @@ const NewsFeed = () => {
 
   useEffect(() => { loadSuggestions(); }, []);
 
-  useEffect(() => {
-    const audio = new Audio();
-    audio.preload = 'auto';
-    audio.crossOrigin = 'anonymous';
-    const handleEnded = () => setPlayingLickId(null);
-    audio.addEventListener('ended', handleEnded);
-    audioRef.current = audio;
-    return () => {
-      audio.removeEventListener('ended', handleEnded);
-      audio.pause();
-      audioRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isModalOpen) return;
-    let cancelled = false;
-    const loadMyActiveLicks = async () => {
-      try {
-        setLicksLoading(true);
-        setLicksError('');
-        const res = await getMyLicks({ status: 'active', page: 1, limit: 100 });
-        if (cancelled) return;
-        const list = Array.isArray(res?.data) ? res.data : [];
-        setLickOptions(list);
-      } catch (e) {
-        if (cancelled) return;
-        setLicksError(e.message || 'Không thể tải danh sách lick của bạn');
-        setLickOptions([]);
-      } finally {
-        if (!cancelled) {
-          setLicksLoading(false);
-        }
-      }
-    };
-
-    loadMyActiveLicks();
-    return () => { cancelled = true; };
-  }, [isModalOpen]);
-
-  const renderAttachedLicksBlock = (attachedLicks, keyPrefix = 'main') => {
-    if (!Array.isArray(attachedLicks) || attachedLicks.length === 0) return null;
-
-    return (
-      <div style={{ marginBottom: 12, border: '1px solid #1f1f1f', borderRadius: 12, background: '#0c0f1a', padding: 16 }}>
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          {attachedLicks.map((lick, index) => {
-            const lickId = getLickId(lick);
-            if (!lickId) return null;
-            const title = lick?.title || 'Lick không tiêu đề';
-            const description = lick?.description;
-            const waveform = normalizeWaveformData(lick?.waveformData || lick?.waveform_data || []);
-            const durationText = formatDuration(lick?.duration || lick?.duration_seconds);
-            const isPlaying = playingLickId === lickId;
-            const audioUrl = getLickAudioUrl(lick);
-
-            return (
-              <div
-                key={`${keyPrefix}-${lickId}-${index}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => navigate(`/licks/${lickId}`)}
-                onKeyDown={(evt) => {
-                  if (evt.key === 'Enter' || evt.key === ' ') {
-                    evt.preventDefault();
-                    navigate(`/licks/${lickId}`);
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  padding: 14,
-                  borderRadius: 12,
-                  background: '#111827',
-                  border: '1px solid #1f2937',
-                  boxShadow: isPlaying ? '0 0 0 1px rgba(124,58,237,0.35)' : 'none',
-                  transition: 'box-shadow 0.2s ease, transform 0.2s ease',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: '#fff', fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
-                    {description && (
-                      <div style={{ color: '#9ca3af', fontSize: 13, marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {description}
-                      </div>
-                    )}
-                    {durationText && (
-                      <div style={{ color: '#6b7280', fontSize: 12, marginTop: 6 }}>
-                        {durationText}
-                      </div>
-                    )}
-                  </div>
-                  <Button
-                    shape="circle"
-                    icon={isPlaying ? <PauseOutlined /> : <CaretRightFilled />}
-                    disabled={!audioUrl}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      togglePlayLick(lick);
-                    }}
-                    style={{
-                      background: '#1f2937',
-                      borderColor: '#374151',
-                      color: '#f97316',
-                    }}
-                  />
-                </div>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    togglePlayLick(lick);
-                  }}
-                  onKeyDown={(evt) => {
-                    if (evt.key === 'Enter' || evt.key === ' ') {
-                      evt.preventDefault();
-                      evt.stopPropagation();
-                      togglePlayLick(lick);
-                    }
-                  }}
-                >
-                  <SimpleWaveform
-                    waveformData={waveform}
-                    height={70}
-                    color={isPlaying ? '#f97316' : '#475569'}
-                    backgroundColor="#0b1220"
-                    isPlaying={isPlaying}
-                    style={{
-                      width: '100%',
-                      border: '1px solid #1f2937',
-                      padding: '10px 12px',
-                      borderRadius: 10,
-                    }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </Space>
-      </div>
-    );
-  };
   const openComment = (postId) => {
     setCommentPostId(postId);
     setCommentText('');
     const p = items.find((it) => it._id === postId) || null;
     setModalPost(p);
     setCommentOpen(true);
-    try {
-      joinRoom(`post:${postId}`);
-    } catch (e) {
-      // ignore
-    }
   };
 
   const submitComment = async () => {
@@ -569,7 +338,7 @@ const NewsFeed = () => {
       setCommentText('');
       // refresh comments and counts
       const all = await getAllPostComments(commentPostId);
-      setPostIdToComments((prev) => ({ ...prev, [commentPostId]: limitToNewest3(all) }));
+      setPostIdToComments((prev) => ({ ...prev, [commentPostId]: all }));
       const statsRes = await getPostStats(commentPostId);
       setPostIdToStats((prev) => ({ ...prev, [commentPostId]: statsRes?.data || prev[commentPostId] }));
     } catch (e) {
@@ -587,7 +356,7 @@ const NewsFeed = () => {
       await createPostComment(postId, { comment: text });
       setPostIdToCommentInput((prev) => ({ ...prev, [postId]: '' }));
       const all = await getAllPostComments(postId);
-      setPostIdToComments((prev) => ({ ...prev, [postId]: limitToNewest3(all) }));
+      setPostIdToComments((prev) => ({ ...prev, [postId]: all }));
       const statsRes = await getPostStats(postId);
       setPostIdToStats((prev) => ({ ...prev, [postId]: statsRes?.data || prev[postId] }));
     } catch (e) {
@@ -841,7 +610,7 @@ const NewsFeed = () => {
         }).catch(() => {});
         // fetch all top-level comments
         getAllPostComments(p._id).then((list) => {
-          setPostIdToComments((prev) => ({ ...prev, [p._id]: limitToNewest3(list) }));
+          setPostIdToComments((prev) => ({ ...prev, [p._id]: list }));
         }).catch(() => {});
       }
       const urls = items
@@ -886,9 +655,6 @@ const NewsFeed = () => {
         if (linkPreview) {
           form.append('linkPreview', JSON.stringify(linkPreview));
         }
-        if (selectedLickIds.length > 0) {
-          form.append('attachedLickIds', JSON.stringify(selectedLickIds));
-        }
         files.forEach((f) => {
           if (f.originFileObj) form.append('media', f.originFileObj);
         });
@@ -898,20 +664,10 @@ const NewsFeed = () => {
       } else {
         // eslint-disable-next-line no-console
         console.log('[UI] Sending JSON createPost...');
-        const payload = {
-          postType: 'status_update',
-          textContent: newText.trim(),
-          linkPreview,
-        };
-        if (selectedLickIds.length > 0) {
-          payload.attachedLickIds = selectedLickIds;
-        }
-        await createPost(payload);
+        await createPost({ postType: 'status_update', textContent: newText.trim(), linkPreview });
       }
       setNewText('');
       setFiles([]);
-      setSelectedLickIds([]);
-      setLicksError('');
       setIsModalOpen(false);
       message.success('Đăng bài thành công');
       fetchData(1, limit);
@@ -964,7 +720,7 @@ const NewsFeed = () => {
           <Modal
             open={isModalOpen}
             title={<span style={{ color: '#fff', fontWeight: 600 }}>Tạo bài đăng</span>}
-            onCancel={() => { if (!posting) { setIsModalOpen(false); setSelectedLickIds([]); setLicksError(''); } }}
+            onCancel={() => { if (!posting) { setIsModalOpen(false); } }}
             footer={
               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
                 <Button 
@@ -995,27 +751,6 @@ const NewsFeed = () => {
                 maxLength={maxChars}
                 showCount
               />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <Text style={{ color: '#e5e7eb', fontWeight: 600 }}>Đính kèm lick (đang ở trạng thái active)</Text>
-                <Select
-                  mode="multiple"
-                  placeholder="Chọn lick active từ thư viện của bạn"
-                  value={selectedLickIds}
-                  onChange={(values) => setSelectedLickIds((values || []).map((val) => val?.toString?.() ?? String(val)))}
-                  loading={licksLoading}
-                  options={lickSelectOptions}
-                  allowClear
-                  style={{ width: '100%' }}
-                  optionFilterProp="label"
-                  maxTagCount="responsive"
-                  notFoundContent={licksLoading ? 'Đang tải...' : 'Không tìm thấy lick phù hợp'}
-                />
-                {licksError && (
-                  <Text type="secondary" style={{ color: '#f87171' }}>
-                    {licksError}
-                  </Text>
-                )}
-              </div>
               <Upload.Dragger
                 multiple
                 fileList={files}
@@ -1133,12 +868,20 @@ const NewsFeed = () => {
                   {post.textContent}
                 </div>
               )}
+          {(() => {
+            const url = extractFirstUrl(post?.textContent);
+            const sharedLickId = parseSharedLickId(url);
+            return sharedLickId ? (
+              <div style={{ marginBottom: 12 }}>
+                <PostLickEmbed lickId={sharedLickId} url={url} />
+              </div>
+            ) : null;
+          })()}
               {post?.media?.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
                   <WavePlaceholder />
                 </div>
               )}
-              {renderAttachedLicksBlock(post?.attachedLicks, `main-${post._id}`)}
               {post?.linkPreview && (
                 <a href={post.linkPreview?.url || '#'} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
                   <div style={{ border: '1px solid #303030', borderRadius: 8, padding: 12, background: '#111', color: '#e5e7eb', marginTop: 8 }}>
@@ -1175,25 +918,19 @@ const NewsFeed = () => {
               </Space>
 
               {/* Danh sách bình luận */}
-              {(() => {
-                const comments = postIdToComments[post._id] || [];
-                if (!comments.length) return null;
-                const visibleComments = comments.slice(0, 3);
-
-                return (
-                  <div style={{ marginTop: 12, background: '#0f0f10', borderTop: '1px solid #1f1f1f', paddingTop: 8 }}>
-                    {visibleComments.map((c) => (
-                      <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                        <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
-                        <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>
-                          <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || 'Người dùng'}</div>
-                          <div>{c.comment}</div>
-                        </div>
+              {postIdToComments[post._id] && postIdToComments[post._id].length > 0 && (
+                <div style={{ marginTop: 12, background: '#0f0f10', borderTop: '1px solid #1f1f1f', paddingTop: 8 }}>
+                  {postIdToComments[post._id].map((c) => (
+                    <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
+                      <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>
+                        <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || 'Người dùng'}</div>
+                        <div>{c.comment}</div>
                       </div>
-                    ))}
-                  </div>
-                );
-              })()}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               
             </Card>
@@ -1271,10 +1008,18 @@ const NewsFeed = () => {
             {modalPost?.textContent && (
               <div style={{ marginBottom: 8, color: '#e5e7eb' }}>{modalPost.textContent}</div>
             )}
+            {(() => {
+              const url = extractFirstUrl(modalPost?.textContent);
+              const sharedLickId = parseSharedLickId(url);
+              return sharedLickId ? (
+                <div style={{ marginBottom: 12 }}>
+                  <PostLickEmbed lickId={sharedLickId} url={url} />
+                </div>
+              ) : null;
+            })()}
             {modalPost?.media?.length > 0 && (
               <div style={{ marginBottom: 8 }}><WavePlaceholder /></div>
             )}
-            {renderAttachedLicksBlock(modalPost?.attachedLicks, `modal-${modalPost?._id || ''}`)}
             {modalPost?.linkPreview && (
               <a href={modalPost.linkPreview?.url || '#'} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
                 <div style={{ border: '1px solid #303030', borderRadius: 8, padding: 12, background: '#111', color: '#e5e7eb', marginTop: 8 }}>
