@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload, Select } from 'antd';
 import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined, CaretRightFilled, PauseOutlined } from '@ant-design/icons';
-import { listPosts, createPost } from '../../../services/user/post';
+import { listPosts, createPost, getPostById } from '../../../services/user/post';
 import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments } from '../../../services/user/post';
 import { followUser, unfollowUser, getFollowSuggestions, getProfileById } from '../../../services/user/profile';
 import { joinRoom, onPostCommentNew, offPostCommentNew } from '../../../services/user/socketService';
@@ -139,6 +139,7 @@ const formatTime = (isoString) => {
 
 const NewsFeed = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [items, setItems] = useState([]);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
@@ -648,6 +649,70 @@ const NewsFeed = () => {
       offPostCommentNew(handler);
     };
   }, [commentOpen, commentPostId]);
+
+  // Lắng nghe event từ NotificationBell để mở modal comment
+  useEffect(() => {
+    const handleOpenCommentModal = (event) => {
+      const { postId } = event.detail || {};
+      if (postId) {
+        // Nếu post chưa có trong items, cần fetch trước
+        const post = items.find((it) => it._id === postId);
+        if (post) {
+          openComment(postId);
+        } else {
+          // Nếu post chưa có, fetch post và mở modal
+          getPostById(postId).then((result) => {
+            if (result.success && result.data) {
+              // Thêm post vào items nếu chưa có
+              setItems((prev) => {
+                const exists = prev.some((it) => it._id === postId);
+                return exists ? prev : [result.data, ...prev];
+              });
+              openComment(postId);
+            }
+          }).catch((err) => {
+            console.error('Lỗi khi lấy bài viết:', err);
+            message.error('Không tìm thấy bài viết');
+          });
+        }
+      }
+    };
+
+    window.addEventListener('openPostCommentModal', handleOpenCommentModal);
+    return () => {
+      window.removeEventListener('openPostCommentModal', handleOpenCommentModal);
+    };
+  }, [items]);
+
+  // Kiểm tra location.state khi component mount hoặc location thay đổi
+  useEffect(() => {
+    if (location.state?.openCommentModal && location.state?.postId) {
+      const { postId } = location.state;
+      // Clear state để tránh mở lại khi refresh
+      navigate(location.pathname, { replace: true, state: {} });
+      
+      // Nếu post chưa có trong items, fetch trước
+      const post = items.find((it) => it._id === postId);
+      if (post) {
+        openComment(postId);
+      } else {
+        // Nếu post chưa có, fetch post và mở modal
+        getPostById(postId).then((result) => {
+          if (result.success && result.data) {
+            // Thêm post vào items nếu chưa có
+            setItems((prev) => {
+              const exists = prev.some((it) => it._id === postId);
+              return exists ? prev : [result.data, ...prev];
+            });
+            openComment(postId);
+          }
+        }).catch((err) => {
+          console.error('Lỗi khi lấy bài viết:', err);
+          message.error('Không tìm thấy bài viết');
+        });
+      }
+    }
+  }, [location.state, items]);
 
   const fetchProviderOEmbed = async (url) => {
     const tryFetch = async (endpoint) => {

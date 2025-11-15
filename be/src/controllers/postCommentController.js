@@ -1,6 +1,7 @@
 import Post from '../models/Post.js';
 import PostComment from '../models/PostComment.js';
 import { getSocketIo } from '../config/socket.js';
+import { notifyPostCommented } from '../utils/notificationHelper.js';
 
 // Create a new comment on a post
 export const createPostComment = async (req, res) => {
@@ -30,6 +31,13 @@ export const createPostComment = async (req, res) => {
     const populated = await PostComment.findById(doc._id)
       .populate('userId', 'username displayName avatarUrl')
       .lean();
+
+    // Tạo thông báo cho chủ bài đăng (nếu không phải tự comment)
+    if (String(post.userId) !== String(userId)) {
+      notifyPostCommented(post.userId, userId, postId).catch(err => {
+        console.error('Lỗi khi tạo thông báo comment:', err);
+      });
+    }
 
     // Emit realtime event to all clients joined to this post room
     try {
