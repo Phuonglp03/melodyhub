@@ -269,6 +269,12 @@ export const getPosts = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
+    
+    // Convert userId to ObjectId if available and valid
+    let currentUserIdObj = null;
+    if (req.userId && mongoose.Types.ObjectId.isValid(req.userId)) {
+      currentUserIdObj = new mongoose.Types.ObjectId(req.userId);
+    }
     // Include legacy posts that may not have moderationStatus field
     const visibilityFilter = {
       $or: [
@@ -346,6 +352,34 @@ export const getPosts = async (req, res) => {
           }
         }
       },
+      
+      // Check if current user has liked this post (if userId is available)
+      ...(currentUserIdObj ? [{
+        $lookup: {
+          from: postLikesCollection,
+          let: { 
+            postId: '$_id', 
+            currentUserId: currentUserIdObj
+          },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$postId', '$$postId'] },
+                    { $eq: ['$userId', '$$currentUserId'] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: 'userLike'
+        }
+      }, {
+        $addFields: {
+          isLiked: { $gt: [{ $size: '$userLike' }, 0] }
+        }
+      }] : []),
       
       // Sort by engagement score (descending), then by createdAt (descending)
       {
@@ -450,8 +484,10 @@ export const getPosts = async (req, res) => {
           userIdData: 0,
           originalPostData: 0,
           attachedLicksData: 0,
-          engagementScore: 0
+          engagementScore: 0,
+          userLike: 0
           // Note: likesCount and commentsCount are removed but engagement score is used for sorting
+          // isLiked is kept if userId is available
         }
       }
     ];
@@ -847,5 +883,56 @@ export const getPostStats = async (req, res) => {
   } catch (error) {
     console.error('getPostStats error:', error);
     return res.status(500).json({ success: false, message: 'Failed to get post stats' });
+  }
+};
+
+// Get list of users who liked a post
+export const getPostLikes = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    const post = await Post.findById(postId).lean();
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
+
+    const likes = await PostLike.find({ postId })
+      .populate('userId', 'username displayName avatarUrl')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalLikes = await PostLike.countDocuments({ postId });
+
+    const users = likes
+      .filter(like => like.userId && like.userId._id) // Filter out deleted users
+      .map(like => ({
+        id: like.userId._id,
+        username: like.userId.username,
+        displayName: like.userId.displayName,
+        avatarUrl: like.userId.avatarUrl,
+        likedAt: like.createdAt
+      }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        users,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(totalLikes / limit),
+          totalLikes,
+          hasNextPage: page < Math.ceil(totalLikes / limit),
+          hasPrevPage: page > 1
+        }
+      }
+    });
+  } catch (error) {
+    console.error('getPostLikes error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to get post likes' });
   }
 };

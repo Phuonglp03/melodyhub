@@ -9,6 +9,7 @@ import {
   likePost,
   unlikePost,
   getPostStats,
+  getPostLikes,
 } from '../controllers/postController.js';
 import middlewareController from '../middleware/auth.js';
 import { 
@@ -19,7 +20,7 @@ import {
 import { handlePostMediaUpload, handleUploadError } from '../middleware/file.js';
 
 const router = express.Router();
-const { verifyToken } = middlewareController;
+const { verifyToken, optionalVerifyToken } = middlewareController;
 
 // POST /api/posts - Create a new post with media upload (requires authentication)
 router.post('/', verifyToken, (req, res, next) => {
@@ -35,8 +36,8 @@ router.post('/', verifyToken, (req, res, next) => {
   next();
 }, handleUploadError, createPost);
 
-// GET /api/posts - Get all posts with pagination
-router.get('/', getPosts);
+// GET /api/posts - Get all posts with pagination (optional auth to include isLiked)
+router.get('/', optionalVerifyToken, getPosts);
 
 // GET /api/posts/user/:userId - Get posts by user ID
 router.get('/user/:userId', getPostsByUser);
@@ -46,6 +47,9 @@ router.get('/:postId', getPostById);
 
 // GET /api/posts/:postId/stats - likesCount & commentsCount
 router.get('/:postId/stats', getPostStats);
+
+// GET /api/posts/:postId/likes - Get list of users who liked the post
+router.get('/:postId/likes', getPostLikes);
 
 // PUT /api/posts/:postId - Update post with media upload
 router.put('/:postId', handlePostMediaUpload, handleUploadError, updatePost);
