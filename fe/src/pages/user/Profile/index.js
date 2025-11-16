@@ -1,18 +1,21 @@
 import React, { useEffect } from 'react';
 import { Card, Form, Input, Button, Typography, message, Avatar, Layout, Space, Select, Upload } from 'antd';
-import { ArrowLeftOutlined, UserOutlined, KeyOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, UserOutlined, KeyOutlined, DeleteOutlined } from '@ant-design/icons';
 import { InfoCircleOutlined, SmileOutlined } from '@ant-design/icons';
-import { getMyProfile, updateMyProfile, uploadMyAvatar } from '../../../services/user/profile';
+import { getMyProfile, updateMyProfile, uploadMyAvatar, uploadMyCoverPhoto } from '../../../services/user/profile';
+import { useNavigate } from 'react-router-dom';
 
 const { Title, Text } = Typography;
 
 const ProfilePage = () => {
+  const navigate = useNavigate();
   const [form] = Form.useForm();
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [aboutCount, setAboutCount] = React.useState(0);
   const [profile, setProfile] = React.useState(null);
   const [uploadingAvatar, setUploadingAvatar] = React.useState(false);
+  const [uploadingCoverPhoto, setUploadingCoverPhoto] = React.useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -26,8 +29,10 @@ const ProfilePage = () => {
         email: u.email,
         bio: u.bio,
         avatarUrl: u.avatarUrl,
+        coverPhotoUrl: u.coverPhotoUrl,
         location: u.location,
         gender: u.gender,
+        links: u.links && u.links.length > 0 ? u.links : ['', ''],
       });
       setAboutCount((u.bio || '').length);
     } catch (e) {
@@ -48,9 +53,12 @@ const ProfilePage = () => {
         location: values.location,
         gender: values.gender,
       };
-      // Chỉ gửi avatarUrl nếu là string hợp lệ và không rỗng
-      if (typeof values.avatarUrl === 'string' && values.avatarUrl.trim() !== '') {
-        payload.avatarUrl = values.avatarUrl.trim();
+      // Avatar và Cover Photo chỉ được upload qua file, không gửi trong JSON payload
+      // Xử lý links: filter bỏ các link rỗng và trim
+      if (values.links && Array.isArray(values.links)) {
+        payload.links = values.links
+          .map(link => typeof link === 'string' ? link.trim() : '')
+          .filter(link => link !== '');
       }
       await updateMyProfile(payload);
       message.success('Cập nhật hồ sơ thành công');
@@ -82,12 +90,88 @@ const ProfilePage = () => {
                 <KeyOutlined style={{ fontSize: 20, color: '#9ca3af' }} />
                 <div style={{ color: '#9ca3af' }}>Change Password</div>
               </div>
+              <div 
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16, cursor: 'pointer' }}
+                onClick={() => navigate('/archived-posts')}
+              >
+                <DeleteOutlined style={{ fontSize: 20, color: '#9ca3af' }} />
+                <div style={{ color: '#9ca3af' }}>Bài viết đã lưu trữ</div>
+              </div>
             </Card>
           </Space>
         </Layout.Sider>
         <Layout.Content>
           <Title level={2} style={{ color: '#fff', marginBottom: 16 }}>Profile Settings</Title>
           <Card loading={loading} style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>
+            {/* Cover Photo Section */}
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ position: 'relative', width: '100%', height: 200, borderRadius: 8, overflow: 'hidden', background: '#1f1f1f', marginBottom: 16 }}>
+                {form.getFieldValue('coverPhotoUrl') ? (
+                  <img 
+                    src={form.getFieldValue('coverPhotoUrl')} 
+                    alt="Cover" 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                ) : (
+                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
+                    No cover photo
+                  </div>
+                )}
+                <Upload
+                  showUploadList={false}
+                  accept="image/*"
+                  beforeUpload={() => {
+                    return false;
+                  }}
+                  onChange={async (info) => {
+                    const { file } = info;
+                    const fileToUpload = file?.originFileObj || file;
+                    
+                    if (!fileToUpload) {
+                      return;
+                    }
+                    
+                    if (file?.status === 'done' || file?.status === 'uploading') {
+                      return;
+                    }
+                    
+                    try {
+                      setUploadingCoverPhoto(true);
+                      const res = await uploadMyCoverPhoto(fileToUpload);
+                      const url = res?.data?.coverPhotoUrl || res?.data?.user?.coverPhotoUrl;
+                      if (url) {
+                        form.setFieldsValue({ coverPhotoUrl: url });
+                        message.success('Cập nhật ảnh bìa thành công');
+                        if (file) file.status = 'done';
+                      } else {
+                        if (file) file.status = 'error';
+                      }
+                    } catch (e) {
+                      message.error(e.message || 'Tải ảnh bìa thất bại');
+                      if (file) file.status = 'error';
+                    } finally {
+                      setUploadingCoverPhoto(false);
+                    }
+                  }}
+                >
+                  <Button 
+                    loading={uploadingCoverPhoto}
+                    type="primary"
+                    style={{ 
+                      position: 'absolute', 
+                      bottom: 16, 
+                      right: 16,
+                      background: 'rgba(0, 0, 0, 0.6)',
+                      borderColor: '#fff',
+                      color: '#fff'
+                    }}
+                  >
+                    {form.getFieldValue('coverPhotoUrl') ? 'Thay đổi ảnh bìa' : 'Thêm ảnh bìa'}
+                  </Button>
+                </Upload>
+              </div>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 24, alignItems: 'start' }}>
               <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                 <Avatar shape="square" size={160} src={form.getFieldValue('avatarUrl')} style={{ background: '#4b5563', borderRadius: 28 }}>
@@ -136,10 +220,29 @@ const ProfilePage = () => {
           </div>
 
           <Title level={4} style={{ color: '#fff', marginTop: 16 }}>Links</Title>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Input placeholder="https://www.facebook.com/quy.trantrong.9862" style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
-            <Input placeholder="Tran Trong Quy( K17 HL )" style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
-          </div>
+          <Form.List name="links">
+            {(fields, { add, remove }) => (
+              <>
+                {fields.map((field, index) => (
+                  <Form.Item key={field.key} name={[field.name]} style={{ marginBottom: 12 }}>
+                    <Input 
+                      placeholder={index === 0 ? "https://www.facebook.com/quy.trantrong.9862" : "https://www.example.com"} 
+                      style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} 
+                    />
+                  </Form.Item>
+                ))}
+                {fields.length < 2 && (
+                  <Button 
+                    type="dashed" 
+                    onClick={() => add()} 
+                    style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb', marginBottom: 12 }}
+                  >
+                    + Add Link
+                  </Button>
+                )}
+              </>
+            )}
+          </Form.List>
 
           <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Avatar</Text>}> 
             <Upload
@@ -226,6 +329,9 @@ const ProfilePage = () => {
             </Upload>
           </Form.Item>
           <Form.Item name="avatarUrl" hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item name="coverPhotoUrl" hidden>
             <Input />
           </Form.Item>
 

@@ -276,10 +276,21 @@ export const getPosts = async (req, res) => {
       currentUserIdObj = new mongoose.Types.ObjectId(req.userId);
     }
     // Include legacy posts that may not have moderationStatus field
+    // Exclude archived posts
     const visibilityFilter = {
-      $or: [
-        { moderationStatus: 'approved' },
-        { moderationStatus: { $exists: false } },
+      $and: [
+        {
+          $or: [
+            { moderationStatus: 'approved' },
+            { moderationStatus: { $exists: false } },
+          ],
+        },
+        {
+          $or: [
+            { archived: false },
+            { archived: { $exists: false } },
+          ],
+        },
       ],
     };
 
@@ -550,9 +561,19 @@ export const getPostsByUser = async (req, res) => {
     }
 
     const visibilityFilter = {
-      $or: [
-        { moderationStatus: 'approved' },
-        { moderationStatus: { $exists: false } },
+      $and: [
+        {
+          $or: [
+            { moderationStatus: 'approved' },
+            { moderationStatus: { $exists: false } },
+          ],
+        },
+        {
+          $or: [
+            { archived: false },
+            { archived: { $exists: false } },
+          ],
+        },
       ],
     };
 
@@ -780,10 +801,18 @@ export const updatePost = async (req, res) => {
   }
 };
 
-// Delete post
+// Archive post (move to archive, will be auto-deleted after 30 days)
 export const deletePost = async (req, res) => {
   try {
     const { postId } = req.params;
+    const requesterId = req.userId; // From auth middleware
+
+    if (!requesterId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
 
     const post = await Post.findById(postId);
     if (!post) {
@@ -793,15 +822,213 @@ export const deletePost = async (req, res) => {
       });
     }
 
+    // Check if requester is the owner of the post
+    const isOwner = String(post.userId) === String(requesterId);
+    if (!isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to archive this post'
+      });
+    }
+
+    // Check if already archived
+    if (post.archived) {
+      return res.status(400).json({
+        success: false,
+        message: 'Post is already archived'
+      });
+    }
+
+    // Archive the post instead of deleting
+    post.archived = true;
+    post.archivedAt = new Date();
+    await post.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Post archived successfully. It will be permanently deleted after 30 days if not restored.'
+    });
+
+  } catch (error) {
+    console.error('Error archiving post:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Permanently delete archived post (only for archived posts)
+export const permanentlyDeletePost = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const requesterId = req.userId;
+
+    if (!requesterId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: 'Post not found'
+      });
+    }
+
+    // Check if requester is the owner
+    const isOwner = String(post.userId) === String(requesterId);
+    if (!isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to delete this post'
+      });
+    }
+
+    // Check if post is archived
+    if (!post.archived) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only archived posts can be permanently deleted'
+      });
+    }
+
+    // Delete related data
+    await Promise.all([
+      PostLike.deleteMany({ postId }),
+      PostComment.deleteMany({ postId }),
+    ]);
+
+    // Delete the post
     await Post.findByIdAndDelete(postId);
 
     res.status(200).json({
       success: true,
-      message: 'Post deleted successfully'
+      message: 'Post permanently deleted'
     });
 
   } catch (error) {
-    console.error('Error deleting post:', error);
+    console.error('Error permanently deleting post:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Restore archived post
+export const restorePost = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const requesterId = req.userId;
+
+    if (!requesterId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: 'Post not found'
+      });
+    }
+
+    // Check if requester is the owner
+    const isOwner = String(post.userId) === String(requesterId);
+    if (!isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to restore this post'
+      });
+    }
+
+    // Check if post is archived
+    if (!post.archived) {
+      return res.status(400).json({
+        success: false,
+        message: 'Post is not archived'
+      });
+    }
+
+    // Restore the post
+    post.archived = false;
+    post.archivedAt = null;
+    await post.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Post restored successfully'
+    });
+
+  } catch (error) {
+    console.error('Error restoring post:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Get archived posts for current user
+export const getArchivedPosts = async (req, res) => {
+  try {
+    const requesterId = req.userId;
+    
+    if (!requesterId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized'
+      });
+    }
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const posts = await Post.find({
+      userId: requesterId,
+      archived: true,
+    })
+      .populate('userId', 'username displayName avatarUrl')
+      .populate('originalPostId')
+      .populate('attachedLicks', 'title description audioUrl waveformData duration tabNotation key tempo difficulty status isPublic createdAt updatedAt')
+      .sort({ archivedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalPosts = await Post.countDocuments({
+      userId: requesterId,
+      archived: true,
+    });
+    const totalPages = Math.ceil(totalPosts / limit);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        posts,
+        pagination: {
+          currentPage: page,
+          totalPages,
+          totalPosts,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching archived posts:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',

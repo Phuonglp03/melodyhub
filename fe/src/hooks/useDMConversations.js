@@ -12,8 +12,13 @@ export default function useDMConversations() {
     setError(null);
     try {
       const data = await dm.listConversations();
+      console.log('[useDMConversations] Received conversations:', data);
+      if (data && data.length > 0) {
+        console.log('[useDMConversations] First conversation participants:', data[0]?.participants);
+      }
       setConversations(data);
     } catch (e) {
+      console.error('[useDMConversations] Error:', e);
       setError(e);
     } finally {
       setLoading(false);

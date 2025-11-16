@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Input, Button, Space, Typography, Modal, Avatar, Tooltip, Popover, Badge, Spin, Empty } from 'antd';
-import { FireOutlined, BellOutlined, MessageOutlined, SearchOutlined, UserOutlined, EditOutlined, MoreOutlined, ExpandOutlined } from '@ant-design/icons';
+import { Layout, Input, Button, Space, Typography, Modal, Avatar, Tooltip, Popover, Badge, Spin, Empty, Dropdown } from 'antd';
+import { FireOutlined, BellOutlined, MessageOutlined, SearchOutlined, UserOutlined, EditOutlined, MoreOutlined, ExpandOutlined, LogoutOutlined, FolderOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useDispatch } from 'react-redux';
+import { logout } from '../redux/authSlice';
 import { livestreamService } from '../services/user/livestreamService';
 import useDMConversations from '../hooks/useDMConversations';
 import FloatingChatWindow from './FloatingChatWindow';
@@ -13,6 +15,7 @@ const { Text } = Typography;
 const AppHeader = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const dispatch = useDispatch();
   const isChatPage = location.pathname === '/chat';
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -33,7 +36,7 @@ const AppHeader = () => {
       return window;
     }));
   }, [conversations]);
-  
+
   // Calculate position for new window
   const getNewWindowPosition = (isMinimized = false, windowsArray = null, targetIndex = null) => {
     const windowWidth = 340;
@@ -91,6 +94,22 @@ const AppHeader = () => {
     
     setActiveChatWindows(prev => [...prev, newWindow]);
   };
+
+  // Listen for custom event to open chat window from other components
+  useEffect(() => {
+    const handleOpenChatWindow = (event) => {
+      const { conversation } = event.detail;
+      if (conversation) {
+        openChatWindow(conversation);
+      }
+    };
+
+    window.addEventListener('openChatWindow', handleOpenChatWindow);
+    return () => {
+      window.removeEventListener('openChatWindow', handleOpenChatWindow);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChatWindows]);
   
   // Close chat window and recalculate positions
   const closeChatWindow = (windowId) => {
@@ -578,22 +597,57 @@ const AppHeader = () => {
                   uid = u?.id || u?.userId || u?._id;
                 }
               } catch {}
+              
+              const handleLogout = () => {
+                dispatch(logout());
+                navigate('/login');
+              };
+
+              const menuItems = [
+                {
+                  key: 'profile',
+                  label: 'Hồ sơ của tôi',
+                  icon: <UserOutlined />,
+                  onClick: () => navigate(uid ? `/users/${uid}/newfeeds` : '/profile'),
+                },
+                {
+                  key: 'archived',
+                  label: 'Xem kho lưu trữ',
+                  icon: <FolderOutlined />,
+                  onClick: () => navigate('/archived-posts'),
+                },
+                {
+                  type: 'divider',
+                },
+                {
+                  key: 'logout',
+                  label: 'Đăng xuất',
+                  icon: <LogoutOutlined />,
+                  danger: true,
+                  onClick: handleLogout,
+                },
+              ];
+
               return (
-                <Tooltip title="Hồ sơ của tôi">
+                <Dropdown
+                  menu={{ items: menuItems }}
+                  placement="bottomRight"
+                  trigger={['click']}
+                >
                   {avatarUrl ? (
                     <Avatar
                       src={avatarUrl}
                       size={28}
                       className="app-header__avatar"
-                      onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')}
+                      style={{ cursor: 'pointer' }}
                     />
                   ) : (
                     <UserOutlined
                       className="app-header__icon"
-                      onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')}
+                      style={{ cursor: 'pointer' }}
                     />
                   )}
-                </Tooltip>
+                </Dropdown>
               );
             })()}
 

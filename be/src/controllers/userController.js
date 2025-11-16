@@ -47,7 +47,9 @@ export const getCurrentUserProfile = async (req, res) => {
           gender: user.gender,
           location: user.location,
           bio: user.bio,
+          links: user.links || [],
           avatarUrl: user.avatarUrl,
+          coverPhotoUrl: user.coverPhotoUrl,
           roleId: user.roleId,
           isActive: user.isActive,
           verifiedEmail: user.verifiedEmail,
@@ -80,8 +82,21 @@ export const getCurrentUserProfile = async (req, res) => {
 // Get other user profile by user ID
 export const getUserProfileById = async (req, res) => {
   try {
-    const { userId } = req.params;
+    let { userId } = req.params;
     const currentUserId = req.userId; // From auth middleware (optional)
+
+    // Ensure userId is a string, not an object
+    if (typeof userId !== 'string') {
+      userId = String(userId);
+    }
+    
+    // Validate userId format (MongoDB ObjectId is 24 hex characters)
+    if (!userId || userId.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID format'
+      });
+    }
 
     const user = await User.findById(userId).select('-passwordHash -email');
     
@@ -153,7 +168,9 @@ export const getUserProfileById = async (req, res) => {
           displayName: user.displayName,
           birthday: user.birthday,
           bio: user.bio,
+          links: user.links || [],
           avatarUrl: user.avatarUrl,
+          coverPhotoUrl: user.coverPhotoUrl,
           verifiedEmail: user.verifiedEmail,
           totalLikesReceived: user.totalLikesReceived,
           totalCommentsReceived: user.totalCommentsReceived,
@@ -253,7 +270,9 @@ export const getUserProfileByUsername = async (req, res) => {
           displayName: user.displayName,
           birthday: user.birthday,
           bio: user.bio,
+          links: user.links || [],
           avatarUrl: user.avatarUrl,
+          coverPhotoUrl: user.coverPhotoUrl,
           verifiedEmail: user.verifiedEmail,
           totalLikesReceived: user.totalLikesReceived,
           totalCommentsReceived: user.totalCommentsReceived,
@@ -287,7 +306,7 @@ export const updateUserProfile = async (req, res) => {
     console.log('📝 Update profile - req.body keys:', Object.keys(req.body || {}));
 
     // Parse body fields (có thể từ JSON hoặc multipart)
-    const { displayName, bio, birthday, avatarUrl, privacyProfile, theme, language, gender, location } = req.body;
+    const { displayName, bio, birthday, avatarUrl, coverPhotoUrl, privacyProfile, theme, language, gender, location, links } = req.body;
 
     const user = await User.findById(userId);
     
@@ -303,7 +322,7 @@ export const updateUserProfile = async (req, res) => {
     if (bio !== undefined) user.bio = bio;
     if (birthday !== undefined) user.birthday = birthday ? new Date(birthday) : undefined;
     
-    // Xử lý avatar: ưu tiên file upload (Cloudinary), sau đó mới đến URL string
+    // Xử lý avatar: CHỈ cho phép upload file, KHÔNG cho phép URL string từ JSON
     if (req.file) {
       // File đã được upload lên Cloudinary bởi multer-storage-cloudinary
       // CloudinaryStorage trả về file object với path (URL) hoặc secure_url
@@ -317,19 +336,49 @@ export const updateUserProfile = async (req, res) => {
       } else {
         console.error('❌ No URL found in uploaded file object:', req.file);
       }
-    } else if (avatarUrl !== undefined) {
-      // Nếu là JSON và có avatarUrl string
-      if (typeof avatarUrl === 'string' && avatarUrl.trim() !== '') {
-        user.avatarUrl = avatarUrl.trim();
-        console.log('✅ Avatar URL updated from body:', avatarUrl.trim());
-      }
-      // If empty string is sent, ignore to prevent accidental clearing
+    } else if (avatarUrl !== undefined && avatarUrl !== null && avatarUrl !== '') {
+      // Reject nếu có avatarUrl trong JSON body (chỉ cho phép upload file)
+      return res.status(400).json({
+        success: false,
+        message: 'Avatar can only be updated via file upload. Please use POST /api/users/profile/avatar endpoint.'
+      });
     }
+    
+    // Xử lý cover photo: CHỈ cho phép upload file, KHÔNG cho phép URL string từ JSON
+    if (req.files && req.files.coverPhoto) {
+      // File đã được upload lên Cloudinary bởi multer-storage-cloudinary
+      const uploadedUrl = req.files.coverPhoto.path || req.files.coverPhoto.secure_url || req.files.coverPhoto.url;
+      console.log('📸 Uploaded cover photo URL:', uploadedUrl);
+      
+      if (uploadedUrl) {
+        user.coverPhotoUrl = uploadedUrl;
+        console.log('✅ Cover photo URL updated from uploaded file:', uploadedUrl);
+      } else {
+        console.error('❌ No URL found in uploaded cover photo file object:', req.files.coverPhoto);
+      }
+    } else if (coverPhotoUrl !== undefined && coverPhotoUrl !== null && coverPhotoUrl !== '') {
+      // Reject nếu có coverPhotoUrl trong JSON body (chỉ cho phép upload file)
+      return res.status(400).json({
+        success: false,
+        message: 'Cover photo can only be updated via file upload. Please use POST /api/users/profile/cover-photo endpoint.'
+      });
+    }
+    
     if (privacyProfile !== undefined) user.privacyProfile = privacyProfile;
     if (theme !== undefined) user.theme = theme;
     if (language !== undefined) user.language = language;
     if (gender !== undefined) user.gender = gender;
     if (location !== undefined) user.location = location;
+    if (links !== undefined) {
+      // Validate links là array và filter bỏ các link rỗng
+      if (Array.isArray(links)) {
+        user.links = links
+          .map(link => typeof link === 'string' ? link.trim() : '')
+          .filter(link => link !== '');
+      } else {
+        user.links = [];
+      }
+    }
 
     await user.save();
 
@@ -346,7 +395,9 @@ export const updateUserProfile = async (req, res) => {
           gender: user.gender,
           location: user.location,
           bio: user.bio,
+          links: user.links || [],
           avatarUrl: user.avatarUrl,
+          coverPhotoUrl: user.coverPhotoUrl,
           roleId: user.roleId,
           verifiedEmail: user.verifiedEmail,
           totalLikesReceived: user.totalLikesReceived,
@@ -425,6 +476,66 @@ export const uploadAvatar = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error uploading avatar:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error', 
+      error: error.message 
+    });
+  }
+};
+
+// Upload cover photo image and update user's coverPhotoUrl
+export const uploadCoverPhoto = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const file = req.file;
+    
+    console.log('📸 Upload cover photo - file object:', JSON.stringify(file, null, 2));
+    
+    if (!file) {
+      return res.status(400).json({ success: false, message: 'Missing cover photo file' });
+    }
+
+    // With CloudinaryStorage, the file object should have path or secure_url
+    // Try multiple possible properties from Cloudinary response
+    const imageUrl = file.path || file.secure_url || file.url || (file.filename ? `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}` : null);
+    
+    console.log('📸 Extracted cover photo imageUrl:', imageUrl);
+    
+    if (!imageUrl) {
+      console.error('❌ No imageUrl found in file object:', file);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Upload failed - no URL returned from Cloudinary',
+        debug: { fileKeys: Object.keys(file || {}) }
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { coverPhotoUrl: imageUrl },
+      { new: true }
+    ).select('-passwordHash');
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    console.log('✅ Cover photo updated successfully:', imageUrl);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Cover photo updated',
+      data: { 
+        coverPhotoUrl: user.coverPhotoUrl || '', 
+        user: {
+          ...user.toObject(),
+          coverPhotoUrl: user.coverPhotoUrl || ''
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error uploading cover photo:', error);
     res.status(500).json({ 
       success: false, 
       message: 'Internal server error', 

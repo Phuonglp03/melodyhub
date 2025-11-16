@@ -12,6 +12,7 @@ import cors from "cors";
 import { connectToDatabase } from "./config/db.js";
 import { socketServer } from "./config/socket.js";
 import { nodeMediaServer } from "./config/media.js";
+import { deleteOldArchivedPosts } from "./services/postArchiveService.js";
 // Import all models to ensure they are registered with Mongoose
 import "./models/User.js";
 import "./models/Role.js";
@@ -53,6 +54,7 @@ import projectRoutes from "./routes/projectRoutes.js";
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import dmRoutes from "./routes/dmRoutes.js";
+import reportRoutes from "./routes/reportRoutes.js";
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -111,6 +113,7 @@ app.use("/api/dm", dmRoutes);
 app.use("/api/tags", tagRoutes);
 app.use("/api/playlists", playlistRoutes);
 app.use("/api/projects", projectRoutes);
+app.use("/api/reports", reportRoutes);
 
 // 404 handler - must be after all routes
 app.use((req, res, next) => {
@@ -159,6 +162,39 @@ async function start() {
     httpServer.listen(port, () => {
       console.log(`melodyhub-be listening on port ${port}`);
       nodeMediaServer();
+      
+      // Schedule job to delete old archived posts (run daily at 2 AM)
+      // Run immediately on startup, then schedule daily
+      deleteOldArchivedPosts().catch((err) => {
+        console.error('[PostArchive] Error in initial cleanup:', err);
+      });
+      
+      // Run daily at 2 AM
+      const scheduleDailyCleanup = () => {
+        const now = new Date();
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(2, 0, 0, 0);
+        
+        const msUntil2AM = tomorrow.getTime() - now.getTime();
+        
+        setTimeout(() => {
+          // Run cleanup
+          deleteOldArchivedPosts().catch((err) => {
+            console.error('[PostArchive] Error in scheduled cleanup:', err);
+          });
+          
+          // Schedule next run (24 hours later)
+          setInterval(() => {
+            deleteOldArchivedPosts().catch((err) => {
+              console.error('[PostArchive] Error in scheduled cleanup:', err);
+            });
+          }, 24 * 60 * 60 * 1000); // 24 hours
+        }, msUntil2AM);
+      };
+      
+      scheduleDailyCleanup();
+      console.log('[PostArchive] Scheduled job initialized - will delete archived posts older than 30 days daily at 2 AM');
     });
   } catch (err) {
     console.error("Failed to start server:", err);

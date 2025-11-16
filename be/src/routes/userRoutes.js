@@ -6,6 +6,8 @@ import {
   getUserProfileById, 
   getUserProfileByUsername, 
   updateUserProfile,
+  uploadAvatar,
+  uploadCoverPhoto,
   followUser,
   unfollowUser,
   getFollowSuggestions,
@@ -21,8 +23,12 @@ const validateProfileUpdate = [
   body('displayName')
     .optional()
     .trim()
+    .notEmpty()
+    .withMessage('Display name cannot be empty')
     .isLength({ min: 2, max: 100 })
-    .withMessage('Display name must be between 2 and 100 characters'),
+    .withMessage('Display name must be between 2 and 100 characters')
+    .matches(/^[a-zA-Z0-9\s\u00C0-\u1EF9\-_.,()]+$/)
+    .withMessage('Display name contains invalid characters'),
     
   body('bio')
     .optional()
@@ -35,10 +41,26 @@ const validateProfileUpdate = [
     .isISO8601()
     .withMessage('Please enter a valid date in YYYY-MM-DD format'),
     
+  // Avatar và Cover Photo chỉ được upload qua file, không cho phép URL string
   body('avatarUrl')
     .optional()
-    .isURL()
-    .withMessage('Please enter a valid URL for avatar'),
+    .custom((value) => {
+      // Reject nếu có avatarUrl trong JSON body (chỉ cho phép upload file)
+      if (value !== undefined && value !== null && value !== '') {
+        throw new Error('Avatar can only be updated via file upload. Please use POST /api/users/profile/avatar endpoint.');
+      }
+      return true;
+    }),
+
+  body('coverPhotoUrl')
+    .optional()
+    .custom((value) => {
+      // Reject nếu có coverPhotoUrl trong JSON body (chỉ cho phép upload file)
+      if (value !== undefined && value !== null && value !== '') {
+        throw new Error('Cover photo can only be updated via file upload. Please use POST /api/users/profile/cover-photo endpoint.');
+      }
+      return true;
+    }),
 
   body('gender')
     .optional()
@@ -49,7 +71,9 @@ const validateProfileUpdate = [
     .optional()
     .trim()
     .isLength({ max: 100 })
-    .withMessage('Location must be less than 100 characters'),
+    .withMessage('Location must be less than 100 characters')
+    .matches(/^[a-zA-Z0-9\s\u00C0-\u1EF9\-_,.()]+$/)
+    .withMessage('Location contains invalid characters'),
     
   body('privacyProfile')
     .optional()
@@ -64,7 +88,36 @@ const validateProfileUpdate = [
   body('language')
     .optional()
     .isLength({ min: 2, max: 5 })
-    .withMessage('Language must be between 2 and 5 characters')
+    .withMessage('Language must be between 2 and 5 characters'),
+    
+  body('links')
+    .optional()
+    .isArray()
+    .withMessage('Links must be an array'),
+    
+  body('links.*')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Each link must be less than 500 characters')
+    .custom((value) => {
+      // Cho phép empty string
+      if (value === '' || value === null || value === undefined) {
+        return true;
+      }
+      // Nếu có giá trị thì phải là URL hợp lệ
+      try {
+        const url = new URL(value);
+        // Chỉ cho phép http, https
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          throw new Error('Invalid protocol');
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .withMessage('Each link must be a valid HTTP/HTTPS URL or empty')
 ];
 
 // User profile routes
@@ -173,6 +226,12 @@ const conditionalValidation = (req, res, next) => {
 // PUT /api/users/profile - Update current user's profile (requires authentication)
 // Hỗ trợ cả JSON và multipart/form-data
 router.put('/profile', verifyToken, handleFileUpload, conditionalValidation, updateUserProfile);
+
+// POST /api/users/profile/avatar - Upload avatar image (requires authentication)
+router.post('/profile/avatar', verifyToken, uploadImage.single('avatar'), uploadAvatar);
+
+// POST /api/users/profile/cover-photo - Upload cover photo image (requires authentication)
+router.post('/profile/cover-photo', verifyToken, uploadImage.single('coverPhoto'), uploadCoverPhoto);
 
 // POST /api/users/:userId/follow - Follow a user (requires authentication)
 router.post('/:userId/follow', verifyToken, followUser);
