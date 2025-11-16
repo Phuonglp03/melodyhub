@@ -67,6 +67,11 @@ const postSchema = new mongoose.Schema(
     archivedAt: {
       type: Date,
     },
+    // Đánh dấu post bị archive do báo cáo (không thể restore bởi user)
+    archivedByReports: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );

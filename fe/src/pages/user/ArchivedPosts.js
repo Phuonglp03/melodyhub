@@ -21,6 +21,7 @@ import { listArchivedPosts, restorePost, permanentlyDeletePost } from "../../ser
 import { likePost, unlikePost, getPostStats, getAllPostComments } from "../../services/user/post";
 import { useNavigate } from "react-router-dom";
 import PostLickEmbed from "../../components/PostLickEmbed";
+import { onPostDeleted, offPostDeleted } from "../../services/user/socketService";
 
 const { Text } = Typography;
 
@@ -141,6 +142,55 @@ const ArchivedPosts = () => {
       if (el) observer.unobserve(el);
     };
   }, [loading, hasMore, page]);
+
+  // Listen for post deleted event (admin deleted permanently)
+  useEffect(() => {
+    const handler = (payload) => {
+      console.log('[ArchivedPosts] Received post:deleted event:', payload);
+      if (!payload?.postId) {
+        console.warn('[ArchivedPosts] post:deleted event missing postId');
+        return;
+      }
+      const postId = payload.postId.toString();
+      console.log('[ArchivedPosts] Removing post from archived list:', postId);
+      
+      // Remove post from archived list immediately
+      setItems((prev) => {
+        const filtered = prev.filter((p) => {
+          const pId = p._id?.toString() || p._id;
+          return pId !== postId;
+        });
+        console.log('[ArchivedPosts] After filter, items count:', filtered.length, 'removed:', prev.length - filtered.length);
+        return filtered;
+      });
+      
+      // Clean up related state
+      setPostIdToStats((prev) => {
+        const newState = { ...prev };
+        delete newState[postId];
+        return newState;
+      });
+      setPostIdToLiked((prev) => {
+        const newState = { ...prev };
+        delete newState[postId];
+        return newState;
+      });
+      setPostIdToComments((prev) => {
+        const newState = { ...prev };
+        delete newState[postId];
+        return newState;
+      });
+      
+      message.warning('Một bài viết đã bị xóa vĩnh viễn bởi admin do vi phạm quy định cộng đồng');
+    };
+    
+    console.log('[ArchivedPosts] Setting up post:deleted listener');
+    onPostDeleted(handler);
+    return () => {
+      console.log('[ArchivedPosts] Cleaning up post:deleted listener');
+      offPostDeleted(handler);
+    };
+  }, []);
 
   const handleLike = async (postId) => {
     try {
@@ -322,13 +372,14 @@ const ArchivedPosts = () => {
                 </Space>
                 <Space>
                   <Button
-              
                     icon={<UndoOutlined />}
                     loading={restoringPostId === post._id}
                     onClick={() => handleRestore(post._id)}
+                    disabled={post.archivedByReports}
+                    title={post.archivedByReports ? "Bài viết này bị ẩn do báo cáo. Chỉ admin mới có thể khôi phục." : ""}
                     style={{ background: "#f0edefff", borderColor: "#f9faf9ff" }}
                   >
-                    Khôi phục
+                    {post.archivedByReports ? "Đã bị ẩn do báo cáo" : "Khôi phục"}
                   </Button>
                   <Button
                     danger

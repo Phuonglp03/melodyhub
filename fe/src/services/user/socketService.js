@@ -27,6 +27,13 @@ export const initSocket = (explicitUserId) => {
 
     socket.on('connect', () => {
       console.log('[Socket.IO] Đã kết nối:', socket.id, 'as user', userId);
+      // Re-setup any pending listeners when socket connects
+      if (socket._pendingPostArchivedCallbacks) {
+        socket._pendingPostArchivedCallbacks.forEach(cb => {
+          socket.on('post:archived', cb);
+        });
+        socket._pendingPostArchivedCallbacks = [];
+      }
     });
 
     socket.on('connect_error', (err) => {
@@ -119,6 +126,87 @@ export const onPostCommentNew = (callback) => {
 };
 export const offPostCommentNew = (callback) => {
   getSocket()?.off('post:comment:new', callback);
+};
+
+// Post archived event
+export const onPostArchived = (callback) => {
+  const socket = getSocket();
+  if (socket) {
+    console.log('[Socket] Setting up post:archived listener, socket connected:', socket.connected);
+    const wrappedCallback = (payload) => {
+      console.log('[Socket] Received post:archived event:', payload);
+      callback(payload);
+    };
+    
+    // Always setup listener (socket.io will queue events if not connected)
+    socket.on('post:archived', wrappedCallback);
+    
+    // Store callback reference for cleanup
+    if (!socket._postArchivedCallbacks) {
+      socket._postArchivedCallbacks = [];
+    }
+    socket._postArchivedCallbacks.push({ original: callback, wrapped: wrappedCallback });
+  } else {
+    console.warn('[Socket] Cannot setup post:archived listener - socket not available');
+  }
+};
+export const offPostArchived = (callback) => {
+  const socket = getSocket();
+  if (socket) {
+    console.log('[Socket] Removing post:archived listener');
+    if (socket._postArchivedCallbacks) {
+      const found = socket._postArchivedCallbacks.find(cb => cb.original === callback);
+      if (found) {
+        socket.off('post:archived', found.wrapped);
+        socket._postArchivedCallbacks = socket._postArchivedCallbacks.filter(cb => cb !== found);
+      } else {
+        socket.off('post:archived', callback);
+      }
+    } else {
+      socket.off('post:archived', callback);
+    }
+  }
+};
+
+// Post deleted event (admin deleted permanently)
+export const onPostDeleted = (callback) => {
+  const socket = getSocket();
+  if (socket) {
+    console.log('[Socket] Setting up post:deleted listener, socket connected:', socket.connected);
+    const wrappedCallback = (payload) => {
+      console.log('[Socket] Received post:deleted event:', payload);
+      callback(payload);
+    };
+    
+    // Always setup listener (socket.io will queue events if not connected)
+    socket.on('post:deleted', wrappedCallback);
+    
+    // Store callback reference for cleanup
+    if (!socket._postDeletedCallbacks) {
+      socket._postDeletedCallbacks = [];
+    }
+    socket._postDeletedCallbacks.push({ original: callback, wrapped: wrappedCallback });
+  } else {
+    console.warn('[Socket] Cannot setup post:deleted listener - socket not available');
+  }
+};
+
+export const offPostDeleted = (callback) => {
+  const socket = getSocket();
+  if (socket) {
+    console.log('[Socket] Removing post:deleted listener');
+    if (socket._postDeletedCallbacks) {
+      const found = socket._postDeletedCallbacks.find(cb => cb.original === callback);
+      if (found) {
+        socket.off('post:deleted', found.wrapped);
+        socket._postDeletedCallbacks = socket._postDeletedCallbacks.filter(cb => cb !== found);
+      } else {
+        socket.off('post:deleted', callback);
+      }
+    } else {
+      socket.off('post:deleted', callback);
+    }
+  }
 };
 
 // ---- Notifications realtime ----

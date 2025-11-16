@@ -13,8 +13,8 @@ import { getSocketIo } from '../config/socket.js';
  */
 export const createNotification = async ({ userId, actorId, type, linkUrl, message }) => {
   try {
-    // Không tạo thông báo nếu người dùng tự thực hiện hành động với chính mình
-    if (String(userId) === String(actorId)) {
+    // Không tạo thông báo nếu người dùng tự thực hiện hành động với chính mình (trừ system notification)
+    if (actorId && String(userId) === String(actorId)) {
       return null;
     }
 
