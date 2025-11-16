@@ -85,6 +85,21 @@ export const deletePost = async (postId) => {
   return data;
 };
 
+export const restorePost = async (postId) => {
+  const { data } = await http.post(`/posts/${postId}/restore`);
+  return data;
+};
+
+export const listArchivedPosts = async ({ page = 1, limit = 10 } = {}) => {
+  const { data } = await http.get("/posts/archived", { params: { page, limit } });
+  return data;
+};
+
+export const permanentlyDeletePost = async (postId) => {
+  const { data } = await http.delete(`/posts/${postId}/permanent`);
+  return data;
+};
+
 // ---- Likes ----
 export const likePost = async (postId) => {
   const { data } = await http.post(`/posts/${postId}/like`);
@@ -155,6 +170,7 @@ export default {
   createPost,
   updatePost,
   deletePost,
+  restorePost,
   likePost,
   unlikePost,
   createPostComment,

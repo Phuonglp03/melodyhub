@@ -4,12 +4,16 @@
   height: 520px;
   background: #1a1a1a;
   border-radius: 16px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: 
+    0 20px 60px rgba(0, 0, 0, 0.8),
+    0 0 0 1px rgba(139, 92, 246, 0.3),
+    0 0 30px rgba(139, 92, 246, 0.2);
   display: flex;
   flex-direction: column;
   z-index: 1000;
   overflow: hidden;
   backdrop-filter: blur(10px);
+  border: 1px solid rgba(139, 92, 246, 0.2);
 }
 
 .floating-chat-header {
@@ -355,6 +359,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.6));
 }
 
 .floating-chat-avatar-wrapper {
@@ -369,40 +374,51 @@
 }
 
 .floating-chat-minimized-avatar {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  border: 2px solid #1a1a1a;
+  box-shadow: 
+    0 8px 24px rgba(0, 0, 0, 0.8),
+    0 0 0 3px #fff,
+    0 0 0 5px rgba(139, 92, 246, 0.6),
+    0 0 30px rgba(139, 92, 246, 0.4);
+  border: 4px solid #fff;
   transition: all 0.2s;
   display: block;
 }
 
 .floating-chat-avatar-wrapper:hover .floating-chat-minimized-avatar {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
-  border-color: #3b82f6;
+  box-shadow: 
+    0 12px 36px rgba(0, 0, 0, 0.9),
+    0 0 0 3px #fff,
+    0 0 0 6px rgba(139, 92, 246, 0.8),
+    0 0 40px rgba(139, 92, 246, 0.6);
+  border-color: #fff;
+  transform: scale(1.08);
 }
 
 .floating-chat-online-indicator {
   position: absolute;
-  bottom: 2px;
-  right: 2px;
-  width: 14px;
-  height: 14px;
+  bottom: 0px;
+  right: 0px;
+  width: 16px;
+  height: 16px;
   background: #10b981;
-  border: 2px solid #1a1a1a;
+  border: 3px solid #fff;
   border-radius: 50%;
   z-index: 1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .floating-chat-close-button {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  width: 20px;
-  height: 20px;
+  top: -6px;
+  right: -6px;
+  width: 24px;
+  height: 24px;
   background: #1a1a1a;
-  border: 1px solid #2a2a2a;
+  border: 2px solid #2a2a2a;
   border-radius: 50%;
   color: #fff;
-  font-size: 16px;
+  font-size: 14px;
+  font-weight: bold;
   line-height: 1;
   cursor: pointer;
   display: flex;
@@ -411,7 +427,9 @@
   padding: 0;
   z-index: 2;
   transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 
+    0 4px 8px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
 .floating-chat-close-button:hover {

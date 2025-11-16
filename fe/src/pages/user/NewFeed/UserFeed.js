@@ -13,9 +13,18 @@ import {
   Upload,
   Select,
   List,
+  Dropdown,
+  Radio,
 } from "antd";
-import { LikeOutlined, MessageOutlined } from "@ant-design/icons";
-import { listPostsByUser, createPost, getPostById } from "../../../services/user/post";
+import { 
+  LikeOutlined, 
+  MessageOutlined, 
+  MoreOutlined, 
+  EditOutlined, 
+  DeleteOutlined, 
+  FlagOutlined
+} from "@ant-design/icons";
+import { listPostsByUser, createPost, getPostById, updatePost, deletePost } from "../../../services/user/post";
 import {
   likePost,
   unlikePost,
@@ -24,9 +33,10 @@ import {
   getAllPostComments,
   getPostLikes,
 } from "../../../services/user/post";
-import { getProfileById, followUser, unfollowUser } from "../../../services/user/profile";
+import { getProfileById, followUser, unfollowUser, uploadMyCoverPhoto } from "../../../services/user/profile";
 import { onPostCommentNew, offPostCommentNew, joinRoom } from "../../../services/user/socketService";
 import { getMyLicks } from "../../../services/user/lickService";
+import { reportPost, checkPostReport } from "../../../services/user/reportService";
 import PostLickEmbed from "../../../components/PostLickEmbed";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -150,6 +160,36 @@ const parseSharedLickId = (urlString) => {
   }
 };
 
+const getLinkInfo = (url) => {
+  if (!url) return { iconClass: "bi bi-globe", label: "Website", color: "#3b82f6" };
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+    
+    if (hostname.includes("facebook.com")) {
+      return { iconClass: "bi bi-facebook", label: "Facebook", color: "#1877f2" };
+    } else if (hostname.includes("twitter.com") || hostname.includes("x.com")) {
+      return { iconClass: "bi bi-twitter-x", label: "Twitter", color: "#1da1f2" };
+    } else if (hostname.includes("instagram.com")) {
+      return { iconClass: "bi bi-instagram", label: "Instagram", color: "#e4405f" };
+    } else if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) {
+      return { iconClass: "bi bi-youtube", label: "YouTube", color: "#ff0000" };
+    } else if (hostname.includes("linkedin.com")) {
+      return { iconClass: "bi bi-linkedin", label: "LinkedIn", color: "#0077b5" };
+    } else if (hostname.includes("github.com")) {
+      return { iconClass: "bi bi-github", label: "GitHub", color: "#333" };
+    } else if (hostname.includes("tiktok.com")) {
+      return { iconClass: "bi bi-tiktok", label: "TikTok", color: "#000000" };
+    } else if (hostname.includes("spotify.com")) {
+      return { iconClass: "bi bi-spotify", label: "Spotify", color: "#1db954" };
+    } else {
+      return { iconClass: "bi bi-globe", label: "Website", color: "#3b82f6" };
+    }
+  } catch {
+    return { iconClass: "bi bi-globe", label: "Website", color: "#3b82f6" };
+  }
+};
+
 const UserFeed = () => {
   const navigate = useNavigate();
   const { userId } = useParams();
@@ -189,6 +229,20 @@ const UserFeed = () => {
   const [availableLicks, setAvailableLicks] = useState([]);
   const [loadingLicks, setLoadingLicks] = useState(false);
   const [selectedLickIds, setSelectedLickIds] = useState([]);
+  const [uploadingCoverPhoto, setUploadingCoverPhoto] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingPost, setEditingPost] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [deletingPostId, setDeletingPostId] = useState(null);
+  const [hideConfirmModalOpen, setHideConfirmModalOpen] = useState(false);
+  const [postToHide, setPostToHide] = useState(null);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [reportPostId, setReportPostId] = useState(null);
+  const [reportReason, setReportReason] = useState("");
+  const [reportDescription, setReportDescription] = useState("");
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [postIdToReported, setPostIdToReported] = useState({});
   const [currentUserId] = useState(() => {
     try {
       const raw = localStorage.getItem("user");
@@ -204,7 +258,13 @@ const UserFeed = () => {
 
   const fetchProfile = async (id) => {
     try {
-      const res = await getProfileById(id);
+      // Ensure id is a string
+      const userIdStr = id?.toString ? id.toString() : String(id || '');
+      if (!userIdStr) {
+        console.warn("Invalid userId for fetchProfile:", id);
+        return;
+      }
+      const res = await getProfileById(userIdStr);
       setProfile(res?.data?.user || null);
       if (typeof res?.data?.isFollowing === "boolean") {
         setIsFollowing(res.data.isFollowing);
@@ -599,11 +659,132 @@ const UserFeed = () => {
     }
   };
 
+  const handleHidePost = (postId) => {
+    console.log("handleHidePost called with postId:", postId);
+    setPostToHide(postId);
+    setHideConfirmModalOpen(true);
+  };
+
+  const confirmHidePost = async () => {
+    if (!postToHide) return;
+    const postId = postToHide;
+    console.log("Modal confirmed, deleting post:", postId);
+    try {
+      setDeletingPostId(postId);
+      setHideConfirmModalOpen(false);
+      console.log("Calling deletePost API for:", postId);
+      const response = await deletePost(postId);
+      console.log("deletePost response:", response);
+      if (response?.success !== false) {
+        message.success("Đã lưu trữ bài viết. Bài viết sẽ bị xóa vĩnh viễn sau 30 ngày nếu không khôi phục.");
+        setItems((prev) => prev.filter((p) => p._id !== postId));
+      } else {
+        message.error(response?.message || "Không thể lưu trữ bài viết");
+      }
+    } catch (e) {
+      const errorMessage = e?.response?.data?.message || e?.message || "Không thể lưu trữ bài viết";
+      message.error(errorMessage);
+      console.error("Error hiding post:", e);
+      console.error("Error details:", {
+        message: e.message,
+        response: e.response,
+        data: e.response?.data
+      });
+    } finally {
+      setDeletingPostId(null);
+      setPostToHide(null);
+    }
+  };
+
+  const openEditModal = (post) => {
+    setEditingPost(post);
+    setEditText(post?.textContent || "");
+    setEditModalOpen(true);
+  };
+
+  const handleUpdatePost = async () => {
+    if (!editText.trim()) {
+      message.warning("Vui lòng nhập nội dung");
+      return;
+    }
+    if (!editingPost?._id) {
+      message.error("Không tìm thấy bài viết");
+      return;
+    }
+    try {
+      setEditing(true);
+      const payload = {
+        postType: "status_update",
+        textContent: editText.trim(),
+      };
+      await updatePost(editingPost._id, payload);
+      message.success("Cập nhật bài viết thành công");
+      setEditModalOpen(false);
+      setEditingPost(null);
+      setEditText("");
+      // Refresh the feed
+      if (userId) {
+        const userIdStr = userId?.toString ? userId.toString() : String(userId || '');
+        fetchData(userIdStr, 1);
+        setPage(1);
+      }
+    } catch (e) {
+      message.error(e.message || "Cập nhật bài viết thất bại");
+    } finally {
+      setEditing(false);
+    }
+  };
+
+  const openReportModal = async (postId) => {
+    setReportPostId(postId);
+    setReportReason("");
+    setReportDescription("");
+    setReportModalOpen(true);
+    // Check if user has already reported this post
+    try {
+      const res = await checkPostReport(postId);
+      if (res?.success && res?.data?.hasReported) {
+        setPostIdToReported((prev) => ({ ...prev, [postId]: true }));
+      }
+    } catch (e) {
+      // Ignore error, just proceed
+    }
+  };
+
+  const submitReport = async () => {
+    if (!reportReason) {
+      message.warning("Vui lòng chọn lý do báo cáo");
+      return;
+    }
+    try {
+      setReportSubmitting(true);
+      await reportPost(reportPostId, {
+        reason: reportReason,
+        description: reportDescription.trim() || "",
+      });
+      message.success("Đã gửi báo cáo thành công");
+      setPostIdToReported((prev) => ({ ...prev, [reportPostId]: true }));
+      setReportModalOpen(false);
+      setReportReason("");
+      setReportDescription("");
+    } catch (e) {
+      message.error(e.message || "Không thể gửi báo cáo");
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
+
   const fetchData = async (id, p = page) => {
     setLoading(true);
     setError("");
     try {
-      const res = await listPostsByUser(id, { page: p, limit });
+      // Ensure id is a string
+      const userIdStr = id?.toString ? id.toString() : String(id || '');
+      if (!userIdStr) {
+        setError("Invalid user ID");
+        return;
+      }
+      const res = await listPostsByUser(userIdStr, { page: p, limit });
       const posts = res?.data?.posts || [];
       const total = res?.data?.pagination?.totalPosts || 0;
       if (p === 1) setItems(posts);
@@ -627,10 +808,13 @@ const UserFeed = () => {
 
   useEffect(() => {
     if (!userId) return;
+    // Ensure userId is a string
+    const userIdStr = userId?.toString ? userId.toString() : String(userId || '');
+    if (!userIdStr) return;
     setItems([]);
     setPage(1);
-    fetchProfile(userId);
-    fetchData(userId, 1);
+    fetchProfile(userIdStr);
+    fetchData(userIdStr, 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
@@ -662,7 +846,10 @@ const UserFeed = () => {
         if (entries[0].isIntersecting && !loading && hasMore) {
           const next = page + 1;
           setPage(next);
-          if (userId) fetchData(userId, next);
+          if (userId) {
+            const userIdStr = userId?.toString ? userId.toString() : String(userId || '');
+            if (userIdStr) fetchData(userIdStr, next);
+          }
         }
       },
       { rootMargin: "200px" }
@@ -687,12 +874,71 @@ const UserFeed = () => {
       >
         <div
           style={{
-            height: 180,
-            background: "#131313",
+            position: "relative",
+            height: 300,
+            background: profile?.coverPhotoUrl ? `url(${profile.coverPhotoUrl})` : "#131313",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
             borderRadius: 8,
             marginBottom: 16,
+            overflow: "hidden",
           }}
-        />
+        >
+          {isOwnProfile && (
+            <Upload
+              showUploadList={false}
+              accept="image/*"
+              beforeUpload={() => {
+                return false;
+              }}
+              onChange={async (info) => {
+                const { file } = info;
+                const fileToUpload = file?.originFileObj || file;
+                
+                if (!fileToUpload) {
+                  return;
+                }
+                
+                if (file?.status === 'done' || file?.status === 'uploading') {
+                  return;
+                }
+                
+                try {
+                  setUploadingCoverPhoto(true);
+                  const res = await uploadMyCoverPhoto(fileToUpload);
+                  const url = res?.data?.coverPhotoUrl || res?.data?.user?.coverPhotoUrl;
+                  if (url) {
+                    setProfile((prev) => prev ? { ...prev, coverPhotoUrl: url } : prev);
+                    message.success('Cập nhật ảnh bìa thành công');
+                    if (file) file.status = 'done';
+                  } else {
+                    if (file) file.status = 'error';
+                  }
+                } catch (e) {
+                  message.error(e.message || 'Tải ảnh bìa thất bại');
+                  if (file) file.status = 'error';
+                } finally {
+                  setUploadingCoverPhoto(false);
+                }
+              }}
+            >
+              <Button
+                loading={uploadingCoverPhoto}
+                type="primary"
+                style={{
+                  position: "absolute",
+                  bottom: 16,
+                  right: 16,
+                  background: "rgba(0, 0, 0, 0.6)",
+                  borderColor: "#fff",
+                  color: "#fff",
+                }}
+              >
+                {profile?.coverPhotoUrl ? "Thay đổi ảnh bìa" : "Thêm ảnh bìa"}
+              </Button>
+            </Upload>
+          )}
+        </div>
         <div
           style={{
             display: "grid",
@@ -711,10 +957,10 @@ const UserFeed = () => {
             >
               <div
                 style={{
-                  height: 180,
+                  height: 250,
                   borderRadius: "8px 8px 0 0",
-                  backgroundImage: profile?.avatarUrl
-                    ? `url(${profile.avatarUrl})`
+                  backgroundImage: profile?.coverPhotoUrl
+                    ? `url(${profile.coverPhotoUrl})`
                     : undefined,
                   backgroundColor: "#131313",
                   backgroundSize: "cover",
@@ -1015,6 +1261,91 @@ const UserFeed = () => {
                           </Space>
                         </div>
                       </Space>
+                      {currentUserId && (() => {
+                        const postAuthorId = post?.userId?._id || post?.userId?.id || post?.userId;
+                        const isOwnPost = postAuthorId && currentUserId && postAuthorId.toString() === currentUserId.toString();
+                        
+                        // Debug log (remove in production)
+                        if (process.env.NODE_ENV === 'development') {
+                          console.log('Post debug:', {
+                            postId: post._id,
+                            postAuthorId,
+                            currentUserId,
+                            isOwnPost,
+                            postUserId: post?.userId
+                          });
+                        }
+                        
+                        if (isOwnPost) {
+                          // Menu for own posts: Edit and Hide
+                          return (
+                            <Dropdown
+                              menu={{
+                                items: [
+                                  {
+                                    key: "edit",
+                                    label: "Chỉnh sửa bài post",
+                                    icon: <EditOutlined />,
+                                  },
+                                  {
+                                    key: "hide",
+                                    label: "Lưu trữ bài post",
+                                    icon: <DeleteOutlined />,
+                                    danger: true,
+                                    disabled: deletingPostId === post._id,
+                                  },
+                                ],
+                                onClick: ({ key }) => {
+                                  console.log("Dropdown clicked, key:", key, "postId:", post._id);
+                                  if (key === "edit") {
+                                    console.log("Opening edit modal for post:", post._id);
+                                    openEditModal(post);
+                                  } else if (key === "hide") {
+                                    console.log("Hiding post:", post._id);
+                                    handleHidePost(post._id);
+                                  }
+                                },
+                              }}
+                              trigger={["click"]}
+                            >
+                              <Button
+                                type="text"
+                                icon={<MoreOutlined />}
+                                style={{ color: "#9ca3af" }}
+                                loading={deletingPostId === post._id}
+                              />
+                            </Dropdown>
+                          );
+                        }
+                        
+                        // Menu for other users' posts: Report
+                        return (
+                          <Dropdown
+                            menu={{
+                              items: [
+                                {
+                                  key: "report",
+                                  label: postIdToReported[post._id] ? "Đã báo cáo" : "Báo cáo bài viết",
+                                  icon: <FlagOutlined />,
+                                  disabled: postIdToReported[post._id],
+                                },
+                              ],
+                              onClick: ({ key }) => {
+                                if (key === "report") {
+                                  openReportModal(post._id);
+                                }
+                              },
+                            }}
+                            trigger={["click"]}
+                          >
+                            <Button
+                              type="text"
+                              icon={<MoreOutlined />}
+                              style={{ color: "#9ca3af" }}
+                            />
+                          </Dropdown>
+                        );
+                      })()}
                     </div>
                     {post?.textContent && (
                       <div
@@ -1198,25 +1529,44 @@ const UserFeed = () => {
               <div style={{ color: "#fff", fontWeight: 700, marginBottom: 12 }}>
                 Find Me On
               </div>
-              <Space>
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 999,
-                    background: "#111",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#3b82f6",
-                  }}
-                >
-                  🌐
+              {profile?.links && Array.isArray(profile.links) && profile.links.length > 0 ? (
+                <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                  {profile.links.map((link, index) => {
+                    const linkInfo = getLinkInfo(link);
+                    return (
+                      <Space key={index} style={{ width: "100%" }}>
+                        <div
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 999,
+                            background: "#111",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: linkInfo.color,
+                            fontSize: 18,
+                          }}
+                        >
+                          <i className={linkInfo.iconClass}></i>
+                        </div>
+                        <a 
+                          href={link} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          style={{ color: "#fff", textDecoration: "none" }}
+                        >
+                          {linkInfo.label}
+                        </a>
+                      </Space>
+                    );
+                  })}
+                </Space>
+              ) : (
+                <div style={{ color: "#9ca3af", fontSize: 14 }}>
+                  No links available
                 </div>
-                <a href="#" style={{ color: "#fff" }}>
-                  Website
-                </a>
-              </Space>
+              )}
             </Card>
           </div>
         </div>
@@ -1383,6 +1733,206 @@ const UserFeed = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Report Modal */}
+      <Modal
+        title={<span style={{ color: "#fff", fontWeight: 700 }}>Báo cáo bài viết</span>}
+        open={reportModalOpen}
+        onCancel={() => {
+          setReportModalOpen(false);
+          setReportPostId(null);
+          setReportReason("");
+          setReportDescription("");
+        }}
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
+            <Button
+              onClick={() => {
+                setReportModalOpen(false);
+                setReportPostId(null);
+                setReportReason("");
+                setReportDescription("");
+              }}
+              style={{ background: "#1f1f1f", color: "#e5e7eb", borderColor: "#303030" }}
+            >
+              Hủy
+            </Button>
+            <Button
+              type="primary"
+              loading={reportSubmitting}
+              onClick={submitReport}
+              disabled={!reportReason}
+              style={{ background: "#7c3aed", borderColor: "#7c3aed" }}
+            >
+              Gửi báo cáo
+            </Button>
+          </div>
+        }
+        width={500}
+        styles={{
+          header: { background: "#0f0f10", borderBottom: "1px solid #1f1f1f" },
+          content: { background: "#0f0f10", borderRadius: 12 },
+          body: { background: "#0f0f10" }
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div>
+            <Text style={{ color: "#e5e7eb", marginBottom: 8, display: "block", fontWeight: 600 }}>
+              Lý do báo cáo <span style={{ color: "#ef4444" }}>*</span>
+            </Text>
+            <Radio.Group
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              style={{ width: "100%" }}
+            >
+              <Space direction="vertical" style={{ width: "100%" }}>
+                <Radio value="spam" style={{ color: "#e5e7eb" }}>Spam</Radio>
+                <Radio value="inappropriate" style={{ color: "#e5e7eb" }}>Nội dung không phù hợp</Radio>
+                <Radio value="copyright" style={{ color: "#e5e7eb" }}>Vi phạm bản quyền</Radio>
+                <Radio value="harassment" style={{ color: "#e5e7eb" }}>Quấy rối</Radio>
+                <Radio value="other" style={{ color: "#e5e7eb" }}>Khác</Radio>
+              </Space>
+            </Radio.Group>
+          </div>
+          <div>
+            <Text style={{ color: "#e5e7eb", marginBottom: 8, display: "block", fontWeight: 600 }}>
+              Mô tả chi tiết (tùy chọn)
+            </Text>
+            <Input.TextArea
+              placeholder="Vui lòng mô tả chi tiết về vấn đề..."
+              value={reportDescription}
+              onChange={(e) => setReportDescription(e.target.value)}
+              rows={4}
+              maxLength={500}
+              showCount
+              style={{ background: "#0f0f10", color: "#e5e7eb", borderColor: "#303030" }}
+            />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Hide Post Confirmation Modal */}
+      <Modal
+        open={hideConfirmModalOpen}
+        title="Xác nhận lưu trữ bài viết"
+        onCancel={() => {
+          setHideConfirmModalOpen(false);
+          setPostToHide(null);
+        }}
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
+            <Button
+              onClick={() => {
+                setHideConfirmModalOpen(false);
+                setPostToHide(null);
+              }}
+            >
+              Hủy
+            </Button>
+            <Button            
+              danger
+              loading={deletingPostId === postToHide}
+              onClick={confirmHidePost}
+            >
+              Lưu trữ
+            </Button>
+          </div>
+        }
+        styles={{
+          content: { background: "#0f0f10" },
+          header: {
+            background: "#0f0f10",
+            borderBottom: "1px solid #1f1f1f",
+          },
+        }}
+      >
+        <div style={{ color: "#e5e7eb" }}>
+          Bạn có chắc chắn muốn lưu trữ bài viết này? Bài viết sẽ được chuyển vào kho lưu trữ và sẽ bị xóa vĩnh viễn sau 30 ngày nếu không khôi phục.
+        </div>
+      </Modal>
+
+      {/* Edit Post Modal */}
+      <Modal
+        open={editModalOpen}
+        title={
+          <span style={{ color: "#fff", fontWeight: 600 }}>
+            Chỉnh sửa bài đăng
+          </span>
+        }
+        onCancel={() => {
+          if (!editing) {
+            setEditModalOpen(false);
+            setEditingPost(null);
+            setEditText("");
+          }
+        }}
+        footer={
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <Button
+              shape="round"
+              onClick={() => {
+                if (!editing) {
+                  setEditModalOpen(false);
+                  setEditingPost(null);
+                  setEditText("");
+                }
+              }}
+              style={{
+                height: 44,
+                borderRadius: 22,
+                padding: 0,
+                width: 108,
+                background: "#1f1f1f",
+                color: "#e5e7eb",
+                borderColor: "#303030",
+              }}
+            >
+              Hủy
+            </Button>
+            <Button
+              shape="round"
+              type="primary"
+              loading={editing}
+              onClick={handleUpdatePost}
+              style={{
+                height: 44,
+                borderRadius: 22,
+                padding: 0,
+                width: 108,
+                background: "#7c3aed",
+                borderColor: "#7c3aed",
+              }}
+            >
+              Cập nhật
+            </Button>
+          </div>
+        }
+        styles={{
+          content: { background: "#0f0f10" },
+          header: {
+            background: "#0f0f10",
+            borderBottom: "1px solid #1f1f1f",
+          },
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Input.TextArea
+            placeholder="Chia sẻ điều gì đó..."
+            autoSize={{ minRows: 3, maxRows: 8 }}
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            maxLength={maxChars}
+            showCount
+          />
+        </div>
       </Modal>
     </>
   );

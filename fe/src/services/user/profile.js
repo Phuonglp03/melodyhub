@@ -64,12 +64,54 @@ export const uploadMyAvatar = async (file) => {
     type: fileToUpload.type
   });
   
-  const { data } = await http.put('/users/profile', form, { 
+  const { data } = await http.post('/users/profile/avatar', form, { 
     headers,
     // Không set Content-Type để browser tự động set multipart boundary
   });
   
   console.log('[Upload Avatar] Response:', data);
+  return data;
+};
+
+export const uploadMyCoverPhoto = async (file) => {
+  const token = getToken();
+  // Với FormData, KHÔNG set Content-Type - browser sẽ tự set với boundary
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  
+  // Antd Upload có thể trả về file wrapper, lấy originFileObj nếu có
+  const fileToUpload = file?.originFileObj || file;
+  
+  if (!fileToUpload) {
+    throw new Error('No file provided');
+  }
+  
+  // Gửi file cover photo với field name là 'coverPhoto'
+  const form = new FormData();
+  form.append('coverPhoto', fileToUpload); // QUAN TRỌNG: field name phải là 'coverPhoto'
+  
+  // Debug: Log tất cả fields trong FormData để verify
+  console.log('[Upload Cover Photo] FormData entries:');
+  for (const [key, value] of form.entries()) {
+    console.log(`  - ${key}:`, value instanceof File ? `File(${value.name}, ${value.size} bytes)` : value);
+  }
+  
+  // Verify field name
+  if (!form.has('coverPhoto')) {
+    throw new Error('FormData must have field "coverPhoto"');
+  }
+  
+  console.log('[Upload Cover Photo] Sending file only:', {
+    name: fileToUpload.name,
+    size: fileToUpload.size,
+    type: fileToUpload.type
+  });
+  
+  const { data } = await http.post('/users/profile/cover-photo', form, { 
+    headers,
+    // Không set Content-Type để browser tự động set multipart boundary
+  });
+  
+  console.log('[Upload Cover Photo] Response:', data);
   return data;
 };
 
@@ -95,6 +137,6 @@ export const getFollowingList = async (search = '', limit = 50) => {
   return data;
 };
 
-export default { getMyProfile, updateMyProfile, uploadMyAvatar, followUser, unfollowUser, getFollowSuggestions, getFollowingList };
+export default { getMyProfile, updateMyProfile, uploadMyAvatar, uploadMyCoverPhoto, followUser, unfollowUser, getFollowSuggestions, getFollowingList };
 
 

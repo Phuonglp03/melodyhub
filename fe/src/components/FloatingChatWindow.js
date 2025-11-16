@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import useDMConversationMessages from '../hooks/useDMConversationMessages';
 import { acceptConversation, declineConversation } from '../services/dmService';
+import { getProfileById } from '../services/user/profile';
 import './FloatingChatWindow.css';
 
 const { TextArea } = Input;
@@ -21,6 +22,7 @@ const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, 
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const windowRef = useRef(null);
+  const [peerInfo, setPeerInfo] = useState(null);
 
   // Get peer info
   const getPeer = (conv) => {
@@ -34,8 +36,46 @@ const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, 
   };
 
   const peer = getPeer(conversation);
-  const peerName = peer?.displayName || peer?.username || 'Người dùng';
-  const peerAvatar = peer?.avatarUrl;
+  
+  // Fetch peer info if missing avatar
+  useEffect(() => {
+    const fetchPeerInfo = async () => {
+      if (!peer || !conversation) return;
+      
+      const peerId = typeof peer === 'object' ? (peer._id || peer.id) : peer;
+      if (!peerId) return;
+      
+      // If already has avatarUrl, use it
+      if (typeof peer === 'object' && peer.avatarUrl) {
+        setPeerInfo({
+          displayName: peer.displayName,
+          username: peer.username,
+          avatarUrl: peer.avatarUrl,
+        });
+        return;
+      }
+      
+      // Fetch from API
+      try {
+        const profile = await getProfileById(peerId);
+        const user = profile?.data?.user || profile?.user || profile?.data;
+        if (user) {
+          setPeerInfo({
+            displayName: user.displayName,
+            username: user.username,
+            avatarUrl: user.avatarUrl,
+          });
+        }
+      } catch (e) {
+        console.error('Error fetching peer info:', e);
+      }
+    };
+    
+    fetchPeerInfo();
+  }, [peer, conversation]);
+
+  const peerName = peerInfo?.displayName || peer?.displayName || peerInfo?.username || peer?.username || 'Người dùng';
+  const peerAvatar = peerInfo?.avatarUrl || peer?.avatarUrl;
 
   // Check if current user is requester
   const isRequester = conversation?.requestedBy && String(conversation.requestedBy) === String(currentUserId);

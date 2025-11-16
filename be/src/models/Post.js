@@ -58,12 +58,22 @@ const postSchema = new mongoose.Schema(
       default: "approved",
       required: true,
     },
+
+    // Trạng thái lưu trữ
+    archived: {
+      type: Boolean,
+      default: false,
+    },
+    archivedAt: {
+      type: Date,
+    },
   },
   { timestamps: true }
 );
 
 postSchema.index({ userId: 1 });
 postSchema.index({ createdAt: -1 });
+postSchema.index({ archived: 1, archivedAt: 1 });
 
 const Post = mongoose.model("Post", postSchema);
 export default Post;

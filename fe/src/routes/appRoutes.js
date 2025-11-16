@@ -5,10 +5,12 @@ import { refreshUser } from "../redux/authSlice";
 import MainLayout from "../layouts/userLayout";
 import AdminLayout from "../layouts/adminLayout";
 import "bootstrap/dist/css/bootstrap.min.css";
+import "bootstrap-icons/font/bootstrap-icons.css";
 import NewsFeed from "../pages/user/NewFeed";
 import PersonalFeed from "../pages/user/NewFeed/Personal";
 import UserFeed from "../pages/user/NewFeed/UserFeed";
 import ProfilePage from "../pages/user/Profile";
+import ArchivedPosts from "../pages/user/ArchivedPosts";
 import Login from "../pages/auth/Login";
 import Register from "../pages/auth/Register";
 import VerifyOTP from "../pages/auth/VerifyOTP";
@@ -139,6 +141,7 @@ const AppRoutes = () => {
           <Route path="newfeedspersonal" element={<PersonalFeed />} />
           <Route path="users/:userId/newfeeds" element={<UserFeed />} />
           <Route path="profile" element={<ProfilePage />} />
+          <Route path="archived-posts" element={<ArchivedPosts />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           {/* Lick detail & upload */}

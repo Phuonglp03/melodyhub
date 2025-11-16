@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload, Select } from 'antd';
-import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined } from '@ant-design/icons';
-import { listPosts, createPost } from '../../../services/user/post';
+import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload, Select, Dropdown, Radio } from 'antd';
+import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined, MoreOutlined, FlagOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { listPosts, createPost, getPostById, updatePost, deletePost } from '../../../services/user/post';
 import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments, getPostLikes } from '../../../services/user/post';
-import { followUser, unfollowUser, getFollowSuggestions, getProfileById } from '../../../services/user/profile';
+import { followUser, unfollowUser, getFollowSuggestions, getProfileById, getFollowingList, getMyProfile } from '../../../services/user/profile';
+import { ensureConversationWith } from '../../../services/dmService';
 import { onPostCommentNew, offPostCommentNew, joinRoom } from '../../../services/user/socketService';
 import { getMyLicks } from '../../../services/user/lickService';
+import { reportPost, checkPostReport } from '../../../services/user/reportService';
 import PostLickEmbed from '../../../components/PostLickEmbed';
 
 const { Title, Text } = Typography;
@@ -137,6 +139,25 @@ const formatTime = (isoString) => {
   }
 };
 
+const formatTimeAgo = (isoString) => {
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    const now = new Date();
+    const diff = now - date;
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return 'vừa xong';
+    if (minutes < 60) return `${minutes} phút trước`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} giờ trước`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days} ngày trước`;
+    return date.toLocaleDateString('vi-VN');
+  } catch {
+    return '';
+  }
+};
+
 const sortCommentsDesc = (comments) => {
   if (!Array.isArray(comments)) return [];
   return [...comments].sort((a, b) => {
@@ -192,6 +213,19 @@ const NewsFeed = () => {
   const [likesPostId, setLikesPostId] = useState(null);
   const [likesList, setLikesList] = useState([]);
   const [likesLoading, setLikesLoading] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [reportPostId, setReportPostId] = useState(null);
+  const [reportReason, setReportReason] = useState('');
+  const [reportDescription, setReportDescription] = useState('');
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [postIdToReported, setPostIdToReported] = useState({}); // postId -> boolean
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingPost, setEditingPost] = useState(null);
+  const [editText, setEditText] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [deletingPostId, setDeletingPostId] = useState(null);
+  const [followingUsers, setFollowingUsers] = useState([]);
+  const [loadingFollowing, setLoadingFollowing] = useState(false);
   const [currentUserId] = useState(() => {
     try {
       const raw = localStorage.getItem('user');
@@ -203,6 +237,19 @@ const NewsFeed = () => {
       return undefined;
     }
   });
+
+  const [currentUser, setCurrentUser] = useState(() => {
+    // Initialize from localStorage immediately
+    try {
+      const raw = localStorage.getItem('user');
+      if (raw) {
+        const obj = JSON.parse(raw);
+        return obj?.user || obj;
+      }
+    } catch {}
+    return null;
+  });
+  const [loadingProfile, setLoadingProfile] = useState(false);
 
   const extractFirstUrl = (text) => {
     if (!text) return null;
@@ -413,6 +460,103 @@ const NewsFeed = () => {
       message.error(e.message || 'Không thể gửi bình luận');
     } finally {
       setCommentSubmitting(false);
+    }
+  };
+
+  const openReportModal = async (postId) => {
+    setReportPostId(postId);
+    setReportReason('');
+    setReportDescription('');
+    setReportModalOpen(true);
+    // Check if user has already reported this post
+    try {
+      const res = await checkPostReport(postId);
+      if (res?.success && res?.data?.hasReported) {
+        setPostIdToReported((prev) => ({ ...prev, [postId]: true }));
+      }
+    } catch (e) {
+      // Ignore error, just proceed
+    }
+  };
+
+  const submitReport = async () => {
+    if (!reportReason) {
+      message.warning('Vui lòng chọn lý do báo cáo');
+      return;
+    }
+    try {
+      setReportSubmitting(true);
+      await reportPost(reportPostId, {
+        reason: reportReason,
+        description: reportDescription.trim() || '',
+      });
+      message.success('Đã gửi báo cáo thành công');
+      setPostIdToReported((prev) => ({ ...prev, [reportPostId]: true }));
+      setReportModalOpen(false);
+      setReportReason('');
+      setReportDescription('');
+    } catch (e) {
+      message.error(e.message || 'Không thể gửi báo cáo');
+    } finally {
+      setReportSubmitting(false);
+    }
+  };
+
+  const handleHidePost = (postId) => {
+    Modal.confirm({
+      title: 'Xác nhận lưu trữ bài viết',
+      content: 'Bạn có chắc chắn muốn lưu trữ bài viết này? Bài viết sẽ được chuyển vào kho lưu trữ và sẽ bị xóa vĩnh viễn sau 30 ngày nếu không khôi phục.',
+      okText: 'Lưu trữ',
+      cancelText: 'Hủy',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          setDeletingPostId(postId);
+          await deletePost(postId);
+          message.success('Đã lưu trữ bài viết. Bài viết sẽ bị xóa vĩnh viễn sau 30 ngày nếu không khôi phục.');
+          setItems((prev) => prev.filter((p) => p._id !== postId));
+        } catch (e) {
+          message.error(e.message || 'Không thể lưu trữ bài viết');
+        } finally {
+          setDeletingPostId(null);
+        }
+      },
+    });
+  };
+
+  const openEditModal = (post) => {
+    setEditingPost(post);
+    setEditText(post?.textContent || '');
+    setEditModalOpen(true);
+  };
+
+  const handleUpdatePost = async () => {
+    if (!editText.trim()) {
+      message.warning('Vui lòng nhập nội dung');
+      return;
+    }
+    if (!editingPost?._id) {
+      message.error('Không tìm thấy bài viết');
+      return;
+    }
+    try {
+      setEditing(true);
+      const payload = {
+        postType: 'status_update',
+        textContent: editText.trim(),
+      };
+      await updatePost(editingPost._id, payload);
+      message.success('Cập nhật bài viết thành công');
+      setEditModalOpen(false);
+      setEditingPost(null);
+      setEditText('');
+      // Refresh the feed
+      fetchData(1);
+      setPage(1);
+    } catch (e) {
+      message.error(e.message || 'Cập nhật bài viết thất bại');
+    } finally {
+      setEditing(false);
     }
   };
 
@@ -710,6 +854,65 @@ const NewsFeed = () => {
     return () => { if (el) observer.unobserve(el); };
   }, [loading, hasMore, page, limit]);
 
+  // Fetch current user profile
+  useEffect(() => {
+    const fetchMyProfile = async () => {
+      try {
+        setLoadingProfile(true);
+        const res = await getMyProfile();
+        console.log('[NewsFeed] getMyProfile response:', res);
+        
+        // Handle different response formats - same as Personal.js
+        const userData = res?.data?.user || res?.user || null;
+        
+        if (userData) {
+          console.log('[NewsFeed] Setting currentUser from API:', userData);
+          setCurrentUser(userData);
+        } else {
+          console.log('[NewsFeed] No user data from API, keeping localStorage value');
+        }
+      } catch (error) {
+        console.error('[NewsFeed] Error fetching profile:', error);
+        // Fallback to localStorage
+        try {
+          const raw = localStorage.getItem('user');
+          if (raw) {
+            const obj = JSON.parse(raw);
+            setCurrentUser(obj?.user || obj);
+          }
+        } catch {}
+      } finally {
+        setLoadingProfile(false);
+      }
+    };
+    fetchMyProfile();
+  }, []);
+
+  // Fetch following users
+  useEffect(() => {
+    const fetchFollowing = async () => {
+      if (!currentUserId) return;
+      try {
+        setLoadingFollowing(true);
+        const res = await getFollowingList('', 50);
+        console.log('[NewsFeed] getFollowingList response:', res);
+        if (res?.success && Array.isArray(res.data)) {
+          console.log('[NewsFeed] Found following users:', res.data.length);
+          setFollowingUsers(res.data);
+        } else {
+          console.log('[NewsFeed] No following users or invalid response');
+          setFollowingUsers([]);
+        }
+      } catch (error) {
+        console.error('[NewsFeed] Error fetching following users:', error);
+        setFollowingUsers([]);
+      } finally {
+        setLoadingFollowing(false);
+      }
+    };
+    fetchFollowing();
+  }, [currentUserId]);
+
   const fetchActiveLicks = async () => {
     try {
       setLoadingLicks(true);
@@ -858,15 +1061,42 @@ const NewsFeed = () => {
 
   return (
     <>
+    <style>{`
+      .hide-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .hide-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+    `}</style>
     <div style={{ 
       maxWidth: 1680, 
       margin: '0 auto', 
       padding: '24px 24px',
       background: '#0a0a0a',
-      minHeight: '100vh'
+      minHeight: '100vh',
+      height: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden'
     }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) 460px', gap: 32 }}>
-        <div>
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'minmax(0, 1.2fr) 460px', 
+        gap: 32,
+        flex: 1,
+        overflow: 'hidden',
+        minHeight: 0
+      }}>
+        <div style={{
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          height: '100%',
+          paddingRight: 8,
+          scrollbarWidth: 'none', // Firefox
+          msOverflowStyle: 'none', // IE and Edge
+        }} className="hide-scrollbar">
           <div style={{ 
             marginBottom: 20, 
             background: '#0f0f10', 
@@ -877,7 +1107,46 @@ const NewsFeed = () => {
             alignItems: 'center',
             gap: 16
           }}             onClick={handleModalOpen}>
-            <Avatar size={40} style={{ backgroundColor: '#722ed1' }}>T</Avatar>
+            {(() => {
+              // Get user data with fallback to localStorage
+              const user = currentUser || (() => {
+                try {
+                  const raw = localStorage.getItem('user');
+                  if (raw) {
+                    const obj = JSON.parse(raw);
+                    return obj?.user || obj;
+                  }
+                } catch {}
+                return null;
+              })();
+              
+              const avatarUrl = user?.avatarUrl || user?.avatar_url;
+              const displayName = user?.displayName || user?.username || '';
+              const initial = displayName ? displayName[0].toUpperCase() : 'U';
+              
+              // Only use src if avatarUrl is a valid non-empty string
+              const validAvatarUrl = avatarUrl && typeof avatarUrl === 'string' && avatarUrl.trim() !== '' && avatarUrl !== '/default-avatar.svg' 
+                ? avatarUrl.trim() 
+                : null;
+              
+              console.log('[NewsFeed] Avatar render:', { 
+                hasUser: !!user, 
+                avatarUrl, 
+                validAvatarUrl, 
+                displayName, 
+                initial 
+              });
+              
+              return (
+                <Avatar 
+                  size={40} 
+                  src={validAvatarUrl || undefined}
+                  style={{ backgroundColor: '#722ed1' }}
+                >
+                  {initial}
+                </Avatar>
+              );
+            })()}
             <Input.TextArea 
               placeholder="Có gì mới ?" 
               autoSize={{ minRows: 2, maxRows: 8 }}
@@ -1036,26 +1305,90 @@ const NewsFeed = () => {
                     </Space>
                   </div>
                 </Space>
-                {(() => {
-                  const uid = getAuthorId(post);
-                  const isFollowing = !!userIdToFollowing[uid];
-                  const loading = !!userIdToFollowLoading[uid];
-                  if (uid && currentUserId && uid.toString() === currentUserId.toString()) return null;
-                  return (
-                    <Button
-                      size="middle"
-                      loading={loading}
-                      onClick={() => toggleFollow(uid)}
-                      style={{
-                        background: isFollowing ? '#111' : '#333',
-                        borderColor: isFollowing ? '#444' : '#333',
-                        color: '#fff',
-                      }}
-                    >
-                      {isFollowing ? 'Đang theo dõi' : 'Follow'}
-                    </Button>
-                  );
-                })()}
+                <Space>
+                  {(() => {
+                    const uid = getAuthorId(post);
+                    const isFollowing = !!userIdToFollowing[uid];
+                    const loading = !!userIdToFollowLoading[uid];
+                    if (uid && currentUserId && uid.toString() === currentUserId.toString()) return null;
+                    return (
+                      <Button
+                        size="middle"
+                        loading={loading}
+                        onClick={() => toggleFollow(uid)}
+                        style={{
+                          background: isFollowing ? '#111' : '#333',
+                          borderColor: isFollowing ? '#444' : '#333',
+                          color: '#fff',
+                        }}
+                      >
+                        {isFollowing ? 'Đang theo dõi' : 'Follow'}
+                      </Button>
+                    );
+                  })()}
+                  {currentUserId && (() => {
+                    const uid = getAuthorId(post);
+                    const isOwnPost = uid && currentUserId && uid.toString() === currentUserId.toString();
+                    
+                    if (isOwnPost) {
+                      // Menu for own posts: Edit and Hide
+                      return (
+                        <Dropdown
+                          menu={{
+                            items: [
+                              {
+                                key: 'edit',
+                                label: 'Chỉnh sửa bài post',
+                                icon: <EditOutlined />,
+                                onClick: () => openEditModal(post),
+                              },
+                              {
+                                key: 'hide',
+                                label: 'Lưu trữ bài post',
+                                icon: <DeleteOutlined />,
+                                danger: true,
+                                loading: deletingPostId === post._id,
+                                onClick: () => handleHidePost(post._id),
+                              },
+                            ],
+                          }}
+                          trigger={['click']}
+                        >
+                          <Button
+                            type="text"
+                            icon={<MoreOutlined />}
+                            style={{ color: '#9ca3af' }}
+                            loading={deletingPostId === post._id}
+                          />
+                        </Dropdown>
+                      );
+                    }
+                    
+                    // Menu for other users' posts: Report
+                    return (
+                      <Dropdown
+                        menu={{
+                          items: [
+                            {
+                              key: 'report',
+                              label: postIdToReported[post._id] ? 'Đã báo cáo' : 'Báo cáo bài viết',
+                              icon: <FlagOutlined />,
+                              disabled: postIdToReported[post._id],
+                              onClick: () => openReportModal(post._id),
+                            },
+                          ],
+                        }}
+                        trigger={['click']}
+                      >
+                        <Button
+                          type="text"
+                          icon={<MoreOutlined />}
+                          style={{ color: '#9ca3af' }}
+                        />
+                      </Dropdown>
+                    );
+                  })()}
+                </Space>
               </div>
               {post?.textContent && (
                 <div style={{ marginBottom: 10, color: '#fff', fontSize: 15, lineHeight: 1.6 }}>
@@ -1168,7 +1501,95 @@ const NewsFeed = () => {
           )}
         </div>
 
-        <div>
+        <div style={{
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          height: '100%',
+          paddingLeft: 8,
+          scrollbarWidth: 'none', // Firefox
+          msOverflowStyle: 'none', // IE and Edge
+        }} className="hide-scrollbar">
+          {/* Người liên hệ */}
+          <Card 
+            style={{ marginBottom: 16, background: '#0f0f10', borderColor: '#1f1f1f' }} 
+            title={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontWeight: 700 }}>Người liên hệ</Text>
+                <Button type="text" icon={<MoreOutlined />} style={{ color: '#9ca3af', padding: 0 }} />
+              </div>
+            }
+          >
+            {loadingFollowing ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}>
+                <Spin />
+              </div>
+            ) : followingUsers.length === 0 ? (
+              <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+                Chưa có người liên hệ
+              </div>
+            ) : (
+              <List
+                dataSource={followingUsers}
+                renderItem={(user) => {
+                  const userId = user.id || user._id || user.userId;
+                  return (
+                    <List.Item
+                      style={{ 
+                        padding: '8px 0', 
+                        cursor: 'pointer',
+                        borderBottom: '1px solid #1f1f1f'
+                      }}
+                      onClick={async () => {
+                        try {
+                          // Create or get conversation with this user
+                          const conversation = await ensureConversationWith(userId);
+                          if (conversation && conversation._id) {
+                            // Dispatch custom event to open chat window (header will listen)
+                            window.dispatchEvent(new CustomEvent('openChatWindow', { 
+                              detail: { conversation } 
+                            }));
+                          } else {
+                            message.error('Không thể tạo cuộc trò chuyện');
+                          }
+                        } catch (error) {
+                          console.error('Error opening chat:', error);
+                          message.error(error.message || 'Không thể mở chat');
+                        }
+                      }}
+                    >
+                      <List.Item.Meta
+                        avatar={
+                          <Avatar 
+                            src={user.avatarUrl} 
+                            icon={<UserOutlined />}
+                            size={40}
+                            style={{ background: '#2db7f5' }}
+                          />
+                        }
+                        title={
+                          <Text style={{ color: '#fff', fontWeight: 500 }}>
+                            {user.displayName || user.username || 'Người dùng'}
+                          </Text>
+                        }
+                        description={
+                          <Text style={{ color: '#9ca3af', fontSize: 12 }}>
+                            {user.isOnline ? (
+                              <span style={{ color: '#52c41a' }}>● Đang hoạt động</span>
+                            ) : user.lastSeen ? (
+                              `Hoạt động ${formatTimeAgo(user.lastSeen)}`
+                            ) : (
+                              'Offline'
+                            )}
+                          </Text>
+                        }
+                      />
+                    </List.Item>
+                  );
+                }}
+              />
+            )}
+          </Card>
+
           <Card style={{ marginBottom: 16, background: '#0f0f10', borderColor: '#1f1f1f' }} title={<Text style={{ color: '#fff', fontWeight: 700 }}>Gợi ý theo dõi</Text>}>
             {suggestionsLoading && (
               <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}><Spin /></div>
@@ -1368,6 +1789,166 @@ const NewsFeed = () => {
             </div>
           </div>
         )}
+    </Modal>
+
+    {/* Report Modal */}
+    <Modal
+      title={<span style={{ color: '#fff', fontWeight: 700 }}>Báo cáo bài viết</span>}
+      open={reportModalOpen}
+      onCancel={() => {
+        setReportModalOpen(false);
+        setReportPostId(null);
+        setReportReason('');
+        setReportDescription('');
+      }}
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+          <Button
+            onClick={() => {
+              setReportModalOpen(false);
+              setReportPostId(null);
+              setReportReason('');
+              setReportDescription('');
+            }}
+            style={{ background: '#1f1f1f', color: '#e5e7eb', borderColor: '#303030' }}
+          >
+            Hủy
+          </Button>
+          <Button
+            type="primary"
+            loading={reportSubmitting}
+            onClick={submitReport}
+            disabled={!reportReason}
+            style={{ background: '#7c3aed', borderColor: '#7c3aed' }}
+          >
+            Gửi báo cáo
+          </Button>
+        </div>
+      }
+      width={500}
+      styles={{
+        header: { background: '#0f0f10', borderBottom: '1px solid #1f1f1f' },
+        content: { background: '#0f0f10', borderRadius: 12 },
+        body: { background: '#0f0f10' }
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+          <Text style={{ color: '#e5e7eb', marginBottom: 8, display: 'block', fontWeight: 600 }}>
+            Lý do báo cáo <span style={{ color: '#ef4444' }}>*</span>
+          </Text>
+          <Radio.Group
+            value={reportReason}
+            onChange={(e) => setReportReason(e.target.value)}
+            style={{ width: '100%' }}
+          >
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Radio value="spam" style={{ color: '#e5e7eb' }}>Spam</Radio>
+              <Radio value="inappropriate" style={{ color: '#e5e7eb' }}>Nội dung không phù hợp</Radio>
+              <Radio value="copyright" style={{ color: '#e5e7eb' }}>Vi phạm bản quyền</Radio>
+              <Radio value="harassment" style={{ color: '#e5e7eb' }}>Quấy rối</Radio>
+              <Radio value="other" style={{ color: '#e5e7eb' }}>Khác</Radio>
+            </Space>
+          </Radio.Group>
+        </div>
+        <div>
+          <Text style={{ color: '#e5e7eb', marginBottom: 8, display: 'block', fontWeight: 600 }}>
+            Mô tả chi tiết (tùy chọn)
+          </Text>
+          <Input.TextArea
+            placeholder="Vui lòng mô tả chi tiết về vấn đề..."
+            value={reportDescription}
+            onChange={(e) => setReportDescription(e.target.value)}
+            rows={4}
+            maxLength={500}
+            showCount
+            style={{ background: '#0f0f10', color: '#e5e7eb', borderColor: '#303030' }}
+          />
+        </div>
+      </div>
+    </Modal>
+
+    {/* Edit Post Modal */}
+    <Modal
+      open={editModalOpen}
+      title={
+        <span style={{ color: '#fff', fontWeight: 600 }}>
+          Chỉnh sửa bài đăng
+        </span>
+      }
+      onCancel={() => {
+        if (!editing) {
+          setEditModalOpen(false);
+          setEditingPost(null);
+          setEditText('');
+        }
+      }}
+      footer={
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <Button
+            shape="round"
+            onClick={() => {
+              if (!editing) {
+                setEditModalOpen(false);
+                setEditingPost(null);
+                setEditText('');
+              }
+            }}
+            style={{
+              height: 44,
+              borderRadius: 22,
+              padding: 0,
+              width: 108,
+              background: '#1f1f1f',
+              color: '#e5e7eb',
+              borderColor: '#303030',
+            }}
+          >
+            Hủy
+          </Button>
+          <Button
+            shape="round"
+            type="primary"
+            loading={editing}
+            onClick={handleUpdatePost}
+            style={{
+              height: 44,
+              borderRadius: 22,
+              padding: 0,
+              width: 108,
+              background: '#7c3aed',
+              borderColor: '#7c3aed',
+            }}
+          >
+            Cập nhật
+          </Button>
+        </div>
+      }
+      styles={{
+        content: { background: '#0f0f10' },
+        header: {
+          background: '#0f0f10',
+          borderBottom: '1px solid #1f1f1f',
+        },
+      }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Input.TextArea
+          placeholder="Chia sẻ điều gì đó..."
+          autoSize={{ minRows: 3, maxRows: 8 }}
+          value={editText}
+          onChange={(e) => setEditText(e.target.value)}
+          maxLength={maxChars}
+          showCount
+        />
+      </div>
     </Modal>
   </>
   );
