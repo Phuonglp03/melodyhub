@@ -83,10 +83,6 @@ socketServer(httpServer);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// // Handle /avatar.png requests (return 204 to avoid 404 logs)
-// app.get("/avatar.png", (req, res) => {
-//   res.status(204).end();
-// });
 
 // Static file serving
 const uploadDir = process.env.UPLOAD_DIR || "uploads";

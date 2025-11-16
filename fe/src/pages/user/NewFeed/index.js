@@ -6,24 +6,12 @@ import { listPosts, createPost, getPostById, updatePost, deletePost } from '../.
 import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments, getPostLikes } from '../../../services/user/post';
 import { followUser, unfollowUser, getFollowSuggestions, getProfileById, getFollowingList, getMyProfile } from '../../../services/user/profile';
 import { ensureConversationWith } from '../../../services/dmService';
-import { onPostCommentNew, offPostCommentNew, joinRoom } from '../../../services/user/socketService';
+import { onPostCommentNew, offPostCommentNew, onPostArchived, offPostArchived, joinRoom } from '../../../services/user/socketService';
 import { getMyLicks } from '../../../services/user/lickService';
 import { reportPost, checkPostReport } from '../../../services/user/reportService';
 import PostLickEmbed from '../../../components/PostLickEmbed';
 
 const { Title, Text } = Typography;
-
-// suggestions fetched from API
-
-const MOCK_FEEDS = Array.from({ length: 5 }).map((_, i) => ({
-  id: i + 1,
-  user: { name: 'TK KAVOD', color: '#2db7f5' },
-  time: '19 tháng 10',
-  content:
-    'NHẠC DRILL HAY NHẤT TRÊN CHỈ CÓ THỂ THÍCH VÀ BÌNH LUẬN ĐỂ ĐƯỢC KHUYẾN MÃI MIỄN PHÍ LÊN ĐẾN 20.000 NGƯỜI! THE GREATEST IS BACK RUNNNN it up 🔥',
-  tags: ['MCV', 'GalaxyPlay', 'Bietthudenlong', 'GLXBTDL'],
-}));
-
 const WavePlaceholder = () => (
   <div
     style={{
@@ -75,7 +63,11 @@ const WavePlaceholder = () => (
 const Suggestion = ({ user, following, loading, onFollow }) => (
   <div style={{ display: 'flex', alignItems: 'center', padding: '6px 0', width: '100%' }}>
     <Space size={12}>
-      <Avatar size={36} src={user.avatarUrl} style={{ background: '#555' }}>
+      <Avatar 
+        size={36} 
+        src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined} 
+        style={{ background: '#555' }}
+      >
         {(user.displayName || user.username || 'U')[0]}
       </Avatar>
       <div>
@@ -337,7 +329,21 @@ const NewsFeed = () => {
     }
   };
 
-  const getAuthorId = (post) => (post?.userId?._id || post?.userId?.id || post?.userId || '').toString();
+  const getAuthorId = (post) => {
+    // Ensure we always return a string ID, never an object
+    const userId = post?.userId;
+    if (!userId) return '';
+    // If userId is already a string/number, return it as string
+    if (typeof userId === 'string' || typeof userId === 'number') {
+      return userId.toString();
+    }
+    // If userId is an object, extract _id or id
+    if (typeof userId === 'object') {
+      const id = userId._id || userId.id;
+      if (id) return id.toString();
+    }
+    return '';
+  };
 
   const toggleFollow = async (uid) => {
     if (!uid) return;
@@ -597,6 +603,59 @@ const NewsFeed = () => {
     };
   }, []);
 
+  // Listen for post archived event (realtime removal from feed)
+  useEffect(() => {
+    const handler = (payload) => {
+      console.log('[NewsFeed] Received post:archived event:', payload);
+      if (!payload?.postId) {
+        console.warn('[NewsFeed] post:archived event missing postId');
+        return;
+      }
+      const postId = payload.postId.toString();
+      console.log('[NewsFeed] Removing post from feed:', postId);
+      
+      // Remove post from feed immediately
+      setItems((prev) => {
+        console.log('[NewsFeed] Current items before filter:', prev.length);
+        const filtered = prev.filter((p) => {
+          const pId = p._id?.toString() || p._id;
+          const matches = pId !== postId;
+          if (!matches) {
+            console.log('[NewsFeed] Found matching post to remove:', pId, '===', postId);
+          }
+          return matches;
+        });
+        console.log('[NewsFeed] After filter, items count:', filtered.length, 'removed:', prev.length - filtered.length);
+        return filtered;
+      });
+      
+      // Clean up related state
+      setPostIdToStats((prev) => {
+        const newState = { ...prev };
+        delete newState[postId];
+        return newState;
+      });
+      setPostIdToLiked((prev) => {
+        const newState = { ...prev };
+        delete newState[postId];
+        return newState;
+      });
+      setPostIdToComments((prev) => {
+        const newState = { ...prev };
+        delete newState[postId];
+        return newState;
+      });
+      message.info('Một bài viết đã bị ẩn do vi phạm quy định cộng đồng');
+    };
+    
+    console.log('[NewsFeed] Setting up post:archived listener');
+    onPostArchived(handler);
+    return () => {
+      console.log('[NewsFeed] Cleaning up post:archived listener');
+      offPostArchived(handler);
+    };
+  }, []);
+
   // Listen realtime comments for the currently opened post (modal)
   useEffect(() => {
     if (!commentOpen || !commentPostId) return;
@@ -790,7 +849,19 @@ const NewsFeed = () => {
 
       // hydrate following status for authors in loaded posts
       try {
-        const uniqueUserIds = Array.from(new Set((posts || []).map((it) => (it?.userId?._id || it?.userId?.id || it?.userId || '').toString()))).filter(Boolean);
+        const extractUserId = (post) => {
+          const userId = post?.userId;
+          if (!userId) return null;
+          if (typeof userId === 'string' || typeof userId === 'number') {
+            return userId.toString();
+          }
+          if (typeof userId === 'object') {
+            const id = userId._id || userId.id;
+            if (id) return id.toString();
+          }
+          return null;
+        };
+        const uniqueUserIds = Array.from(new Set((posts || []).map(extractUserId).filter(Boolean)));
         const results = await Promise.all(uniqueUserIds.map(async (uid) => {
           try {
             const r = await getProfileById(uid);
@@ -1017,7 +1088,19 @@ const NewsFeed = () => {
         });
         
         // Hydrate following status cho author của post mới
-        const authorId = (newPost?.userId?._id || newPost?.userId?.id || newPost?.userId || '').toString();
+        const extractAuthorId = (post) => {
+          const userId = post?.userId;
+          if (!userId) return null;
+          if (typeof userId === 'string' || typeof userId === 'number') {
+            return userId.toString();
+          }
+          if (typeof userId === 'object') {
+            const id = userId._id || userId.id;
+            if (id) return id.toString();
+          }
+          return null;
+        };
+        const authorId = extractAuthorId(newPost);
         if (authorId && currentUserId && authorId === currentUserId.toString()) {
           // Post của chính mình, không cần check following
         } else if (authorId) {
@@ -1125,7 +1208,7 @@ const NewsFeed = () => {
               const initial = displayName ? displayName[0].toUpperCase() : 'U';
               
               // Only use src if avatarUrl is a valid non-empty string
-              const validAvatarUrl = avatarUrl && typeof avatarUrl === 'string' && avatarUrl.trim() !== '' && avatarUrl !== '/default-avatar.svg' 
+              const validAvatarUrl = avatarUrl && typeof avatarUrl === 'string' && avatarUrl.trim() !== '' && avatarUrl !== '' 
                 ? avatarUrl.trim() 
                 : null;
               
@@ -1279,12 +1362,16 @@ const NewsFeed = () => {
                     <div
                     role="button"
                     onClick={() => {
-                      const uid = post?.userId?._id || post?.userId?.id || post?.userId;
+                      const uid = getAuthorId(post);
                       if (uid) navigate(`/users/${uid}/newfeeds`);
                     }}
                     style={{ cursor: 'pointer' }}
                   >
-                    <Avatar size={40} src={post?.userId?.avatarUrl} style={{ background: '#2db7f5' }}>
+                    <Avatar 
+                      size={40} 
+                      src={post?.userId?.avatarUrl && typeof post?.userId?.avatarUrl === 'string' && post?.userId?.avatarUrl.trim() !== '' ? post.userId.avatarUrl : undefined} 
+                      style={{ background: '#2db7f5' }}
+                    >
                       {post?.userId?.displayName?.[0] || post?.userId?.username?.[0] || 'U'}
                     </Avatar>
                   </div>
@@ -1292,7 +1379,7 @@ const NewsFeed = () => {
                     <Space style={{ marginBottom: 4 }}>
                       <span
                         onClick={() => {
-                          const uid = post?.userId?._id || post?.userId?.id || post?.userId;
+                          const uid = getAuthorId(post);
                           if (uid) navigate(`/users/${uid}/newfeeds`);
                         }}
                         style={{ color: '#fff', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}
@@ -1560,7 +1647,7 @@ const NewsFeed = () => {
                       <List.Item.Meta
                         avatar={
                           <Avatar 
-                            src={user.avatarUrl} 
+                            src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined} 
                             icon={<UserOutlined />}
                             size={40}
                             style={{ background: '#2db7f5' }}
@@ -1678,7 +1765,7 @@ const NewsFeed = () => {
                   avatar={
                     <Avatar
                       size={40}
-                      src={user.avatarUrl}
+                      src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined}
                       style={{ background: '#2db7f5', cursor: 'pointer' }}
                       onClick={() => navigate(`/users/${user.id}/newfeeds`)}
                     >

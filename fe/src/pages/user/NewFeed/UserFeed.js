@@ -34,7 +34,7 @@ import {
   getPostLikes,
 } from "../../../services/user/post";
 import { getProfileById, followUser, unfollowUser, uploadMyCoverPhoto } from "../../../services/user/profile";
-import { onPostCommentNew, offPostCommentNew, joinRoom } from "../../../services/user/socketService";
+import { onPostCommentNew, offPostCommentNew, onPostArchived, offPostArchived, joinRoom } from "../../../services/user/socketService";
 import { getMyLicks } from "../../../services/user/lickService";
 import { reportPost, checkPostReport } from "../../../services/user/reportService";
 import PostLickEmbed from "../../../components/PostLickEmbed";
@@ -486,6 +486,53 @@ const UserFeed = () => {
       offPostCommentNew(handler);
     };
   }, [commentOpen, commentPostId]);
+
+  // Listen for post archived event (realtime removal from feed)
+  useEffect(() => {
+    const handler = (payload) => {
+      console.log('[UserFeed] Received post:archived event:', payload);
+      if (!payload?.postId) {
+        console.warn('[UserFeed] post:archived event missing postId');
+        return;
+      }
+      const postId = payload.postId.toString();
+      console.log('[UserFeed] Removing post from feed:', postId);
+      
+      // Remove post from feed immediately
+      setItems((prev) => {
+        const filtered = prev.filter((p) => {
+          const pId = p._id?.toString() || p._id;
+          return pId !== postId;
+        });
+        console.log('[UserFeed] After filter, items count:', filtered.length);
+        return filtered;
+      });
+      
+      // Clean up related state
+      setPostIdToStats((prev) => {
+        const newState = { ...prev };
+        delete newState[postId];
+        return newState;
+      });
+      setPostIdToLiked((prev) => {
+        const newState = { ...prev };
+        delete newState[postId];
+        return newState;
+      });
+      setPostIdToComments((prev) => {
+        const newState = { ...prev };
+        delete newState[postId];
+        return newState;
+      });
+      message.info('Một bài viết đã bị ẩn do vi phạm quy định cộng đồng');
+    };
+    console.log('[UserFeed] Setting up post:archived listener');
+    onPostArchived(handler);
+    return () => {
+      console.log('[UserFeed] Cleaning up post:archived listener');
+      offPostArchived(handler);
+    };
+  }, []);
 
   const fetchProviderOEmbed = async (url) => {
     const tryFetch = async (endpoint) => {

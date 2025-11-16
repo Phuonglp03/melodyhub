@@ -33,3 +33,32 @@ export const checkPostReport = async (postId) => {
   return data;
 };
 
+/**
+ * Get all reports (admin only)
+ * @returns {Promise<object>} Response data with reports array
+ */
+export const getAllReports = async () => {
+  const { data } = await http.get(`/reports/all`);
+  return data;
+};
+
+/**
+ * Admin restore post (admin only)
+ * @param {string} postId - ID of the post to restore
+ * @returns {Promise<object>} Response data
+ */
+export const adminRestorePost = async (postId) => {
+  const { data } = await http.post(`/reports/posts/${postId}/restore`);
+  return data;
+};
+
+/**
+ * Admin delete post (admin only)
+ * @param {string} postId - ID of the post to delete
+ * @returns {Promise<object>} Response data
+ */
+export const adminDeletePost = async (postId) => {
+  const { data } = await http.delete(`/reports/posts/${postId}`);
+  return data;
+};
+

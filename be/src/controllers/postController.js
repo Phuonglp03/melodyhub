@@ -959,6 +959,14 @@ export const restorePost = async (req, res) => {
       });
     }
 
+    // Check if post is archived by reports (cannot restore by user)
+    if (post.archivedByReports) {
+      return res.status(403).json({
+        success: false,
+        message: 'Post này bị ẩn do báo cáo. Chỉ admin mới có thể khôi phục.'
+      });
+    }
+
     // Restore the post
     post.archived = false;
     post.archivedAt = null;
