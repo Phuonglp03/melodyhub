@@ -1,21 +1,11 @@
-import React, { useEffect } from "react";
+import React, { useEffect, Suspense, lazy } from "react";
 import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { refreshUser } from "../redux/authSlice";
 import MainLayout from "../layouts/userLayout";
 import AdminLayout from "../layouts/adminLayout";
-import "bootstrap/dist/css/bootstrap.min.css";
+// Removed duplicate Bootstrap CSS import - already imported in App.js
 import "bootstrap-icons/font/bootstrap-icons.css";
-import NewsFeed from "../pages/user/NewFeed";
-import PersonalFeed from "../pages/user/NewFeed/Personal";
-import UserFeed from "../pages/user/NewFeed/UserFeed";
-import ProfilePage from "../pages/user/Profile";
-import ArchivedPosts from "../pages/user/ArchivedPosts";
-import Login from "../pages/auth/Login";
-import Register from "../pages/auth/Register";
-import VerifyOTP from "../pages/auth/VerifyOTP";
-import ForgotPassword from "../pages/auth/ForgotPassword";
-import ResetPassword from "../pages/auth/ResetPassword";
 import ProtectedRoute from "../components/common/ProtectedRoute";
 import AdminProtectedRoute from "../components/common/AdminProtectedRoute";
 import LiveStreamCreate from "../pages/user/LiveRoomCreate";
@@ -24,28 +14,64 @@ import LiveListPage from "../pages/user/LiveListPage";
 import LiveViewPage from "../pages/user/LiveViewPage";
 import { initSocket } from "../services/user/socketService";
 import LickLibraryLayout from "../layouts/LickLibraryLayout";
-import MyLicksPage from "../pages/user/MyLicks";
-import LickCommunityPage from "../pages/user/LickCommunity";
-import LickUploadPage from "../pages/user/LickUpload";
-import LickDetailPage from "../pages/user/LickDetail";
-import ChatPage from "../pages/user/Chat";
-import MyPlaylistsPage from "../pages/user/MyPlaylists";
-import PlaylistDetailPage from "../pages/user/PlaylistDetail";
-import PlaylistCommunityPage from "../pages/user/PlaylistCommunity";
-import NotificationsPage from "../pages/user/Notifications";
-import {
-  CreateProjectPage,
-  ProjectListPage,
-  ProjectDetailPage,
-} from "../pages/user/Projects";
 
-// Admin Pages
-import AdminDashboard from "../pages/admin/AdminSite/AdminDashboard";
-import AdminCreateAdmin from "../pages/admin/AdminSite/CreateAdmin";
-import AdminUserManagement from "../pages/admin/AdminSite/UserManagement";
-import AdminReportsManagement from "../pages/admin/AdminSite/ReportsManagement";
-import AdminLiveroomManagement from "../pages/admin/AdminSite/LiveRoomManagement";
-import AdminLickApprovement from "../pages/admin/AdminSite/LickApprovement";
+// Lazy load all page components for code splitting
+const NewsFeed = lazy(() => import("../pages/user/NewFeed"));
+const PersonalFeed = lazy(() => import("../pages/user/NewFeed/Personal"));
+const UserFeed = lazy(() => import("../pages/user/NewFeed/UserFeed"));
+const ProfilePage = lazy(() => import("../pages/user/Profile"));
+const ArchivedPosts = lazy(() => import("../pages/user/ArchivedPosts"));
+const Login = lazy(() => import("../pages/auth/Login"));
+const Register = lazy(() => import("../pages/auth/Register"));
+const VerifyOTP = lazy(() => import("../pages/auth/VerifyOTP"));
+const ForgotPassword = lazy(() => import("../pages/auth/ForgotPassword"));
+const ResetPassword = lazy(() => import("../pages/auth/ResetPassword"));
+const LiveStreamCreate = lazy(() => import("../pages/user/LiveRoomCreate"));
+const LiveStreamLive = lazy(() => import("../pages/user/LiveRoomLive"));
+const MyLicksPage = lazy(() => import("../pages/user/MyLicks"));
+const LickCommunityPage = lazy(() => import("../pages/user/LickCommunity"));
+const LickUploadPage = lazy(() => import("../pages/user/LickUpload"));
+const LickDetailPage = lazy(() => import("../pages/user/LickDetail"));
+const ChatPage = lazy(() => import("../pages/user/Chat"));
+const MyPlaylistsPage = lazy(() => import("../pages/user/MyPlaylists"));
+const PlaylistDetailPage = lazy(() => import("../pages/user/PlaylistDetail"));
+const PlaylistCommunityPage = lazy(() => import("../pages/user/PlaylistCommunity"));
+const NotificationsPage = lazy(() => import("../pages/user/Notifications"));
+
+// Lazy load project pages (using index.js which exports named exports)
+const CreateProjectPage = lazy(() => 
+  import("../pages/user/Projects").then(module => ({ default: module.CreateProjectPage }))
+);
+const ProjectListPage = lazy(() => 
+  import("../pages/user/Projects").then(module => ({ default: module.ProjectListPage }))
+);
+const ProjectDetailPage = lazy(() => 
+  import("../pages/user/Projects").then(module => ({ default: module.ProjectDetailPage }))
+);
+
+// Lazy load admin pages
+const AdminDashboard = lazy(() => import("../pages/admin/AdminSite/AdminDashboard"));
+const AdminCreateAdmin = lazy(() => import("../pages/admin/AdminSite/CreateAdmin"));
+const AdminUserManagement = lazy(() => import("../pages/admin/AdminSite/UserManagement"));
+const AdminReportsManagement = lazy(() => import("../pages/admin/AdminSite/ReportsManagement"));
+const AdminLiveroomManagement = lazy(() => import("../pages/admin/AdminSite/LiveRoomManagement"));
+const AdminLickApprovement = lazy(() => import("../pages/admin/AdminSite/LickApprovement"));
+
+// Loading component for Suspense fallback
+const LoadingSpinner = () => (
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      height: "100vh",
+    }}
+  >
+    <div className="spinner-border" role="status">
+      <span className="visually-hidden">Loading...</span>
+    </div>
+  </div>
+);
 
 const AppRoutes = () => {
   const dispatch = useDispatch();
@@ -56,13 +82,9 @@ const AppRoutes = () => {
     dispatch(refreshUser());
   }, [dispatch]);
 
-  // Initialize socket globally when user is available
-  useEffect(() => {
-    const uid = user?.id || user?._id;
-    if (uid) {
-      initSocket(uid);
-    }
-  }, [user]);
+  // Defer socket initialization - only initialize when user navigates to pages that need it
+  // Socket will be initialized lazily in ChatPage, LiveStreamCreate, LiveStreamLive components
+  // This reduces initial startup overhead
 
   if (isLoading) {
     return (
@@ -83,46 +105,47 @@ const AppRoutes = () => {
 
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Public routes */}
-        <Route
-          path="/login"
-          element={!user ? <Login /> : <Navigate to="/" replace />}
-        />
-        <Route
-          path="/register"
-          element={!user ? <Register /> : <Navigate to="/" replace />}
-        />
-        <Route
-          path="/verify-otp"
-          element={!user ? <VerifyOTP /> : <Navigate to="/" replace />}
-        />
-        <Route
-          path="/forgot-password"
-          element={!user ? <ForgotPassword /> : <Navigate to="/" replace />}
-        />
-        <Route
-          path="/reset-password"
-          element={!user ? <ResetPassword /> : <Navigate to="/" replace />}
-        />
+      <Suspense fallback={<LoadingSpinner />}>
+        <Routes>
+          {/* Public routes */}
+          <Route
+            path="/login"
+            element={!user ? <Login /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/register"
+            element={!user ? <Register /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/verify-otp"
+            element={!user ? <VerifyOTP /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/forgot-password"
+            element={!user ? <ForgotPassword /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/reset-password"
+            element={!user ? <ResetPassword /> : <Navigate to="/" replace />}
+          />
 
-        {/* Admin routes */}
-        <Route
-          path="/admin"
-          element={
-            <AdminProtectedRoute>
-              <AdminLayout />
-            </AdminProtectedRoute>
-          }
-        >
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<AdminDashboard />} />
-          <Route path="create-admin" element={<AdminCreateAdmin />} />
-          <Route path="user-management" element={<AdminUserManagement />} />
-          <Route path="reports-management" element={<AdminReportsManagement />} />
-          <Route path="liveroom-management" element={<AdminLiveroomManagement />} />
-          <Route path="lick-approvement" element={<AdminLickApprovement />} />
-        </Route>
+          {/* Admin routes */}
+          <Route
+            path="/admin"
+            element={
+              <AdminProtectedRoute>
+                <AdminLayout />
+              </AdminProtectedRoute>
+            }
+          >
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<AdminDashboard />} />
+            <Route path="create-admin" element={<AdminCreateAdmin />} />
+            <Route path="user-management" element={<AdminUserManagement />} />
+            <Route path="reports-management" element={<AdminReportsManagement />} />
+            <Route path="liveroom-management" element={<AdminLiveroomManagement />} />
+            <Route path="lick-approvement" element={<AdminLickApprovement />} />
+          </Route>
 
         {/* Protected routes */}
         <Route
@@ -168,9 +191,10 @@ const AppRoutes = () => {
           </Route>
         </Route>
 
-        {/* 404 - Not Found */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* 404 - Not Found */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 };
