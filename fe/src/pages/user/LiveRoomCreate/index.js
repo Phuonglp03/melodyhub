@@ -10,7 +10,7 @@ import {
   disconnectSocket
 } from '../../../services/user/socketService';
 import videojs from 'video.js';
-import 'video.js/dist/video-js.css';
+import '../../../../node_modules/video.js/dist/video-js.css';
 import { Select, Button } from 'antd';
 import EmojiPicker from 'emoji-picker-react';
 import { useSelector } from 'react-redux';
@@ -49,7 +49,7 @@ const LiveStreamCreate = () => {
     const fetchRoom = async () => {
       try {
         const roomData = await livestreamService.getLiveStreamById(roomId);
-        const currentUserId = user?.user?.id;
+        const currentUserId = user?.user?.id  || user?.user?._id;
         const hostId = roomData.hostId?._id;
 
         if (hostId !== currentUserId) {
@@ -102,7 +102,7 @@ const LiveStreamCreate = () => {
         playerRef.current = null;
       }
     };
-  }, [roomId, navigate]);
+  }, [roomId, navigate, user?.user?.id]);
 
   // Initialize Video.js player when preview is ready
   useEffect(() => {

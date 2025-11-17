@@ -2,8 +2,14 @@ import { Server } from 'socket.io';
 import RoomChat from '../models/RoomChat.js';
 import Conversation from '../models/Conversation.js';
 import DirectMessage from '../models/DirectMessage.js';
+import LiveRoom from '../models/LiveRoom.js';
 import { uploadMessageText, downloadMessageText } from '../services/messageStorageService.js';
+import { createClient } from 'redis'; 
+import { createAdapter } from '@socket.io/redis-adapter';
 let io;
+
+// Track viewers per room: { roomId: Set of userIds }
+const roomViewers = new Map();
 
 export const socketServer = (httpServer) => {
   const originsEnv = process.env.CORS_ORIGINS || process.env.CLIENT_ORIGIN || '*';
@@ -17,6 +23,17 @@ export const socketServer = (httpServer) => {
     }
   });
 
+  const pubClient = createClient({ 
+    url: 'redis://10.170.0.4:6379'
+  });
+  const subClient = pubClient.duplicate();
+  Promise.all([pubClient.connect(), subClient.connect()]).then(() => {
+    io.adapter(createAdapter(pubClient, subClient));
+    console.log('[Socket.IO] Đã kết nối Redis Adapter thành công');
+  }).catch((err) => {
+    console.error('[Socket.IO] Lỗi kết nối Redis:', err);
+  });
+
   io.on('connection', (socket) => {
     console.log(`[Socket.IO] Client kết nối: ${socket.id}`);
     
@@ -25,9 +42,50 @@ export const socketServer = (httpServer) => {
        console.log(`[Socket.IO] User ID (tạm thời): ${tempUserId}`);
        socket.join(tempUserId);
     }
-    socket.on('join-room', (roomId) => {
+    socket.on('join-room', async (roomId) => {
       socket.join(roomId);
-      console.log(`[Socket.IO] Client ${socket.id} đã tham gia phòng ${roomId}`);
+      console.log(`[Socket.IO] Client ${socket.id} (user: ${tempUserId}) đã tham gia phòng ${roomId}`);
+      
+      // Track viewer (exclude host)
+      if (tempUserId && roomId) {
+        socket.currentRoomId = roomId; // Store for disconnect
+        
+        try {
+          // Check if user is host
+          const room = await LiveRoom.findById(roomId);
+          const isHost = room && String(room.hostId) === String(tempUserId);
+          
+          if (!isHost) {
+            // Only track non-host viewers
+            if (!roomViewers.has(roomId)) {
+              roomViewers.set(roomId, new Map());
+            }
+            const viewers = roomViewers.get(roomId);
+            
+            // Store user info with socket id
+            if (!viewers.has(tempUserId)) {
+              viewers.set(tempUserId, new Set());
+            }
+            viewers.get(tempUserId).add(socket.id);
+            
+            const currentCount = viewers.size;
+            const viewerList = Array.from(viewers.keys());
+            
+            // Emit viewer count update
+            io.to(roomId).emit('viewer-count-update', {
+              roomId,
+              currentViewers: currentCount,
+              viewerIds: viewerList
+            });
+            
+            console.log(`[Socket.IO] Room ${roomId} now has ${currentCount} viewers (excluding host)`);
+          } else {
+            console.log(`[Socket.IO] Host joined room ${roomId}, not counted as viewer`);
+          }
+        } catch (err) {
+          console.error('[Socket.IO] Error checking host:', err);
+        }
+      }
     });
 
     socket.on('send-message-liveroom', async ({ roomId, message }) => {
@@ -36,6 +94,20 @@ export const socketServer = (httpServer) => {
       }
       
       try {
+        // ✅ Check if user is banned
+        const room = await LiveRoom.findById(roomId);
+        if (!room) {
+          return socket.emit('chat-error', 'Phòng không tồn tại.');
+        }
+        
+        const isBanned = room.bannedUsers.some(
+          bannedId => String(bannedId) === String(tempUserId)
+        );
+        
+        if (isBanned) {
+          return socket.emit('chat-error', 'Bạn đã bị cấm bình luận trong phòng này.');
+        }
+        
         const chat = new RoomChat({
           roomId,
           userId: tempUserId, 
@@ -148,6 +220,38 @@ export const socketServer = (httpServer) => {
 
     socket.on('disconnect', () => {
       console.log(`[Socket.IO] Client ngắt kết nối: ${socket.id}`);
+      
+      // Remove viewer from tracking
+      if (tempUserId && socket.currentRoomId) {
+        const roomId = socket.currentRoomId;
+        const viewers = roomViewers.get(roomId);
+        
+        if (viewers && viewers.has(tempUserId)) {
+          const userSockets = viewers.get(tempUserId);
+          userSockets.delete(socket.id);
+          
+          // If user has no more sockets, remove them
+          if (userSockets.size === 0) {
+            viewers.delete(tempUserId);
+          }
+          
+          // Emit updated count
+          const currentCount = viewers.size;
+          const viewerList = Array.from(viewers.keys());
+          io.to(roomId).emit('viewer-count-update', {
+            roomId,
+            currentViewers: currentCount,
+            viewerIds: viewerList
+          });
+          
+          console.log(`[Socket.IO] Room ${roomId} now has ${currentCount} viewers (user left)`);
+          
+          // Clean up empty room
+          if (viewers.size === 0) {
+            roomViewers.delete(roomId);
+          }
+        }
+      }
     });
   });
 
