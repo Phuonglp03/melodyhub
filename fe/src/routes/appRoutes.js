@@ -30,27 +30,47 @@ const LickDetailPage = lazy(() => import("../pages/user/LickDetail"));
 const ChatPage = lazy(() => import("../pages/user/Chat"));
 const MyPlaylistsPage = lazy(() => import("../pages/user/MyPlaylists"));
 const PlaylistDetailPage = lazy(() => import("../pages/user/PlaylistDetail"));
-const PlaylistCommunityPage = lazy(() => import("../pages/user/PlaylistCommunity"));
+const PlaylistCommunityPage = lazy(() =>
+  import("../pages/user/PlaylistCommunity")
+);
 const NotificationsPage = lazy(() => import("../pages/user/Notifications"));
 
 // Lazy load project pages (using index.js which exports named exports)
-const CreateProjectPage = lazy(() => 
-  import("../pages/user/Projects").then(module => ({ default: module.CreateProjectPage }))
+const CreateProjectPage = lazy(() =>
+  import("../pages/user/Projects").then((module) => ({
+    default: module.CreateProjectPage,
+  }))
 );
-const ProjectListPage = lazy(() => 
-  import("../pages/user/Projects").then(module => ({ default: module.ProjectListPage }))
+const ProjectListPage = lazy(() =>
+  import("../pages/user/Projects").then((module) => ({
+    default: module.ProjectListPage,
+  }))
 );
-const ProjectDetailPage = lazy(() => 
-  import("../pages/user/Projects").then(module => ({ default: module.ProjectDetailPage }))
+const ProjectDetailPage = lazy(() =>
+  import("../pages/user/Projects").then((module) => ({
+    default: module.ProjectDetailPage,
+  }))
 );
 
 // Lazy load admin pages
-const AdminDashboard = lazy(() => import("../pages/admin/AdminSite/AdminDashboard"));
-const AdminCreateAdmin = lazy(() => import("../pages/admin/AdminSite/CreateAdmin"));
-const AdminUserManagement = lazy(() => import("../pages/admin/AdminSite/UserManagement"));
-const AdminReportsManagement = lazy(() => import("../pages/admin/AdminSite/ReportsManagement"));
-const AdminLiveroomManagement = lazy(() => import("../pages/admin/AdminSite/LiveRoomManagement"));
-const AdminLickApprovement = lazy(() => import("../pages/admin/AdminSite/LickApprovement"));
+const AdminDashboard = lazy(() =>
+  import("../pages/admin/AdminSite/AdminDashboard")
+);
+const AdminCreateAdmin = lazy(() =>
+  import("../pages/admin/AdminSite/CreateAdmin")
+);
+const AdminUserManagement = lazy(() =>
+  import("../pages/admin/AdminSite/UserManagement")
+);
+const AdminReportsManagement = lazy(() =>
+  import("../pages/admin/AdminSite/ReportsManagement")
+);
+const AdminLiveroomManagement = lazy(() =>
+  import("../pages/admin/AdminSite/LiveRoomManagement")
+);
+const AdminLickApprovement = lazy(() =>
+  import("../pages/admin/AdminSite/LickApprovement")
+);
 
 // Loading component for Suspense fallback
 const LoadingSpinner = () => (
@@ -137,8 +157,14 @@ const AppRoutes = () => {
             <Route path="dashboard" element={<AdminDashboard />} />
             <Route path="create-admin" element={<AdminCreateAdmin />} />
             <Route path="user-management" element={<AdminUserManagement />} />
-            <Route path="reports-management" element={<AdminReportsManagement />} />
-            <Route path="liveroom-management" element={<AdminLiveroomManagement />} />
+            <Route
+              path="reports-management"
+              element={<AdminReportsManagement />}
+            />
+            <Route
+              path="liveroom-management"
+              element={<AdminLiveroomManagement />}
+            />
             <Route path="lick-approvement" element={<AdminLickApprovement />} />
           </Route>
 
@@ -157,7 +183,10 @@ const AppRoutes = () => {
               path="livestream/setup/:roomId"
               element={<LiveStreamCreate />}
             />
-            <Route path="livestream/live/:roomId" element={<LiveStreamLive />} />
+            <Route
+              path="livestream/live/:roomId"
+              element={<LiveStreamLive />}
+            />
             <Route path="newfeedspersonal" element={<PersonalFeed />} />
             <Route path="users/:userId/newfeeds" element={<UserFeed />} />
             <Route path="profile" element={<ProfilePage />} />
@@ -204,8 +233,16 @@ const AppRoutes = () => {
             >
               <Route index element={<ProjectListPage />} />
               <Route path="create" element={<CreateProjectPage />} />
-              <Route path=":projectId" element={<ProjectDetailPage />} />
             </Route>
+            {/* Project Detail - Isolated (no layout) */}
+            <Route
+              path="projects/:projectId"
+              element={
+                <ProtectedRoute>
+                  <ProjectDetailPage />
+                </ProtectedRoute>
+              }
+            />
           </Route>
 
           {/* 404 - Not Found */}
