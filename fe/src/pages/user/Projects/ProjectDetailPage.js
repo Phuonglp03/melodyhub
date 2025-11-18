@@ -2109,9 +2109,7 @@ const ProjectDetailPage = () => {
                           : timelineItems;
 
                       return combinedItems
-                        .sort(
-                          (a, b) => (a.startTime || 0) - (b.startTime || 0)
-                        )
+                        .sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
                         .map((item) => {
                           const isSelected =
                             focusedClipId === item._id ||
@@ -2205,9 +2203,7 @@ const ProjectDetailPage = () => {
                                       const waveform =
                                         typeof item.lickId.waveformData ===
                                         "string"
-                                          ? JSON.parse(
-                                              item.lickId.waveformData
-                                            )
+                                          ? JSON.parse(item.lickId.waveformData)
                                           : item.lickId.waveformData;
                                       const waveformArray = Array.isArray(
                                         waveform
@@ -2310,175 +2306,6 @@ const ProjectDetailPage = () => {
                           );
                         });
                     })()}
-                      const isSelected =
-                        focusedClipId === item._id || selectedItem === item._id;
-                      const clipWidth = item.duration * pixelsPerSecond;
-                      const clipLeft = item.startTime * pixelsPerSecond;
-                      const isChord =
-                        item._isChord ||
-                        (item.chord && track.isBackingTrack && !item.lickId);
-                      const sourceDurationSeconds =
-                        item.sourceDuration ||
-                        item.lickId?.duration ||
-                        item.duration;
-                      const waveformWidth =
-                        sourceDurationSeconds * pixelsPerSecond;
-                      const waveformOffset =
-                        (item.offset || 0) * pixelsPerSecond;
-                      const clipStyle = {
-                        left: `${clipLeft}px`,
-                        width: `${clipWidth}px`,
-                        top: "10px",
-                        height: "100px",
-                        minWidth: "60px",
-                        backgroundColor: !isChord ? trackAccent : undefined,
-                        borderColor: !isChord
-                          ? isSelected
-                            ? "#facc15"
-                            : trackAccent
-                          : undefined,
-                        boxShadow: isSelected
-                          ? "0 0 0 2px rgba(250, 204, 21, 0.55)"
-                          : undefined,
-                      };
-
-                      return (
-                        <div
-                          key={item._id}
-                          ref={(el) => {
-                            if (el) {
-                              clipRefs.current.set(item._id, el);
-                            } else {
-                              clipRefs.current.delete(item._id);
-                            }
-                          }}
-                          className={`absolute rounded border-2 text-white cursor-move transition-all overflow-hidden ${
-                            isChord
-                              ? isSelected
-                                ? "bg-green-500 border-yellow-400 shadow-lg shadow-yellow-400/50"
-                                : "bg-green-600 border-green-700 hover:bg-green-700"
-                              : ""
-                          }`}
-                          style={clipStyle}
-                          title={
-                            isChord ? item.chord : item.lickId?.title || "Lick"
-                          }
-                          onMouseDown={(e) =>
-                            handleClipMouseDown(e, item, track._id)
-                          }
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setFocusedClipId(item._id);
-                          }}
-                        >
-                          <div className="absolute inset-0 overflow-hidden">
-                            {/* Waveform visualization if available */}
-                            {item.lickId?.waveformData ? (
-                              (() => {
-                                try {
-                                  const waveform =
-                                    typeof item.lickId.waveformData === "string"
-                                      ? JSON.parse(item.lickId.waveformData)
-                                      : item.lickId.waveformData;
-                                  const waveformArray = Array.isArray(waveform)
-                                    ? waveform
-                                    : [];
-                                  const sampleCount = Math.min(
-                                    50,
-                                    Math.floor(clipWidth / 4)
-                                  );
-                                  const step = Math.max(
-                                    1,
-                                    Math.floor(
-                                      waveformArray.length / sampleCount
-                                    )
-                                  );
-
-                                  return (
-                                    <div
-                                      className="absolute top-0 bottom-0"
-                                      style={{
-                                        left: `-${waveformOffset}px`,
-                                        width: `${waveformWidth}px`,
-                                      }}
-                                    >
-                                      <div className="h-full bg-blue-800/30 rounded flex items-end justify-around gap-0.5 px-2">
-                                        {waveformArray
-                                          .filter((_, idx) => idx % step === 0)
-                                          .slice(0, sampleCount)
-                                          .map((value, idx) => (
-                                            <div
-                                              key={idx}
-                                              className="bg-white rounded-t"
-                                              style={{
-                                                width: "2px",
-                                                height: `${Math.min(
-                                                  100,
-                                                  Math.abs(value || 0) * 100
-                                                )}%`,
-                                              }}
-                                            />
-                                          ))}
-                                      </div>
-                                    </div>
-                                  );
-                                } catch (e) {
-                                  return null;
-                                }
-                              })()
-                            ) : (
-                              <div className="absolute inset-0 flex flex-col justify-between p-2 bg-black/10">
-                                <div className="font-medium text-sm truncate">
-                                  {isChord
-                                    ? item.chord
-                                    : item.lickId?.title ||
-                                      `Lick ${trackIndex + 1}`}
-                                </div>
-                                <div className="text-xs opacity-75">
-                                  {item.startTime.toFixed(2)}s
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Resize handle (right edge) */}
-                          {!isChord && (
-                            <div
-                              className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
-                              onMouseDown={(e) =>
-                                startClipResize(e, item, track._id, "left")
-                              }
-                            />
-                          )}
-                          {!isChord && (
-                            <div
-                              className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
-                              onMouseDown={(e) =>
-                                startClipResize(e, item, track._id, "right")
-                              }
-                            />
-                          )}
-
-                          {/* Delete button */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setFocusedClipId((prev) =>
-                                prev === item._id ? null : prev
-                              );
-                              if (isChord) {
-                                handleRemoveChord(item._id);
-                              } else {
-                                handleDeleteTimelineItem(item._id);
-                              }
-                            }}
-                            className="absolute top-1 right-1 w-5 h-5 bg-red-600 hover:bg-red-700 rounded text-white text-xs flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
-                          >
-                            <FaTimes size={8} />
-                          </button>
-                        </div>
-                      );
-                    })}
 
                     {/* Drop Zone Indicator */}
                     {dragOverTrack === track._id &&
