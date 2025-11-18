@@ -7,6 +7,66 @@ import User from "../models/User.js";
 import Lick from "../models/Lick.js";
 import Instrument from "../models/Instrument.js";
 
+const TRACK_TYPES = ["audio", "midi", "backing"];
+const TIMELINE_ITEM_TYPES = ["lick", "chord", "midi"];
+
+const normalizeTrackType = (value, fallback = "audio") => {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.toLowerCase();
+  return TRACK_TYPES.includes(normalized) ? normalized : fallback;
+};
+
+const normalizeTimelineItemType = (value, fallback = "lick") => {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.toLowerCase();
+  return TIMELINE_ITEM_TYPES.includes(normalized) ? normalized : fallback;
+};
+
+const sanitizeInstrumentPayload = (payload) => {
+  if (!payload || typeof payload !== "object") return undefined;
+  const { instrumentId, settings } = payload;
+  const result = {};
+  if (instrumentId) {
+    result.instrumentId = instrumentId;
+  }
+  if (settings && typeof settings === "object") {
+    result.settings = settings;
+  }
+  return Object.keys(result).length ? result : undefined;
+};
+
+const sanitizeMidiEvents = (events) => {
+  if (!Array.isArray(events)) return [];
+  return events
+    .map((event) => {
+      if (!event) return null;
+      const pitch = Number(event.pitch);
+      const startTime = Number(event.startTime);
+      const duration = Number(event.duration);
+      const velocity =
+        event.velocity === undefined ? 0.8 : Number(event.velocity);
+      if (
+        !Number.isFinite(pitch) ||
+        pitch < 0 ||
+        pitch > 127 ||
+        !Number.isFinite(startTime) ||
+        startTime < 0 ||
+        !Number.isFinite(duration) ||
+        duration < 0
+      ) {
+        return null;
+      }
+      const clampedVelocity = velocity >= 0 && velocity <= 1 ? velocity : 0.8;
+      return {
+        pitch,
+        startTime,
+        duration,
+        velocity: clampedVelocity,
+      };
+    })
+    .filter(Boolean);
+};
+
 // Create a new project
 export const createProject = async (req, res) => {
   try {
@@ -369,22 +429,42 @@ export const deleteProject = async (req, res) => {
   }
 };
 
-// Add lick to timeline
+// Add clip to timeline
 export const addLickToTimeline = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { trackId, lickId, startTime, duration } = req.body;
+    const {
+      trackId,
+      lickId,
+      startTime,
+      duration,
+      offset = 0,
+      sourceDuration,
+      loopEnabled = false,
+      playbackRate = 1,
+      type = "lick",
+      chordName,
+      rhythmPatternId,
+      isCustomized = false,
+      customMidiEvents,
+    } = req.body;
     const userId = req.userId;
 
-    // Validate required fields
-    if (!trackId || !lickId || startTime === undefined || !duration) {
+    if (!trackId || startTime === undefined || duration === undefined) {
       return res.status(400).json({
         success: false,
-        message: "trackId, lickId, startTime, and duration are required",
+        message: "trackId, startTime, and duration are required",
       });
     }
 
-    // Check if user has access to project
+    const normalizedType = normalizeTimelineItemType(type, "lick");
+    if (normalizedType === "lick" && !lickId) {
+      return res.status(400).json({
+        success: false,
+        message: "lickId is required when creating an audio clip",
+      });
+    }
+
     const project = await Project.findById(projectId);
     if (!project) {
       return res.status(404).json({
@@ -406,7 +486,6 @@ export const addLickToTimeline = async (req, res) => {
       });
     }
 
-    // Check if track exists
     const track = await ProjectTrack.findById(trackId);
     if (!track || track.projectId.toString() !== projectId) {
       return res.status(404).json({
@@ -415,36 +494,77 @@ export const addLickToTimeline = async (req, res) => {
       });
     }
 
-    // Check if lick exists
-    const lick = await Lick.findById(lickId);
-    if (!lick) {
-      return res.status(404).json({
+    let lick = null;
+    if (lickId) {
+      lick = await Lick.findById(lickId);
+      if (!lick && normalizedType === "lick") {
+        return res.status(404).json({
+          success: false,
+          message: "Lick not found",
+        });
+      }
+    }
+
+    const numericOffset = Math.max(0, Number(offset) || 0);
+    const numericDuration = Math.max(0, Number(duration) || 0);
+    if (numericDuration <= 0) {
+      return res.status(400).json({
         success: false,
-        message: "Lick not found",
+        message: "duration must be greater than zero",
       });
     }
 
-    // Create timeline item
+    const requestedSourceDuration =
+      typeof sourceDuration === "number" ? sourceDuration : undefined;
+    const lickDuration =
+      lick && typeof lick.duration === "number" ? lick.duration : undefined;
+    const resolvedSourceDuration = Math.max(
+      numericOffset + numericDuration,
+      requestedSourceDuration || 0,
+      lickDuration || 0
+    );
+
+    const sanitizedMidi = sanitizeMidiEvents(customMidiEvents);
+
     const timelineItem = new ProjectTimelineItem({
       trackId,
-      lickId,
       userId,
       startTime,
-      duration,
+      duration: numericDuration,
+      offset: numericOffset,
+      loopEnabled: Boolean(loopEnabled),
+      playbackRate: Number(playbackRate) || 1,
+      type: normalizedType === "lick" ? "lick" : normalizedType,
+      lickId: lickId && normalizedType !== "chord" ? lickId : undefined,
+      sourceDuration: resolvedSourceDuration,
+      chordName:
+        normalizedType === "chord"
+          ? (chordName && chordName.trim()) || "Chord"
+          : undefined,
+      rhythmPatternId:
+        normalizedType === "chord"
+          ? rhythmPatternId || track.defaultRhythmPatternId || undefined
+          : undefined,
+      isCustomized: Boolean(isCustomized),
+      customMidiEvents:
+        sanitizedMidi.length && (normalizedType === "midi" || isCustomized)
+          ? sanitizedMidi
+          : [],
     });
 
     await timelineItem.save();
 
-    // Populate for response
-    await timelineItem.populate(
-      "lickId",
-      "title audioUrl duration waveformData"
-    );
+    if (timelineItem.lickId) {
+      await timelineItem.populate(
+        "lickId",
+        "title audioUrl duration waveformData"
+      );
+    }
     await timelineItem.populate("userId", "username displayName avatarUrl");
 
     res.status(201).json({
       success: true,
-      message: "Lick added to timeline successfully",
+      message: "Timeline item created successfully",
       data: timelineItem,
     });
   } catch (error) {
@@ -461,7 +581,21 @@ export const addLickToTimeline = async (req, res) => {
 export const updateTimelineItem = async (req, res) => {
   try {
     const { projectId, itemId } = req.params;
-    const { startTime, duration, trackId } = req.body;
+    const {
+      startTime,
+      duration,
+      trackId,
+      offset,
+      sourceDuration,
+      loopEnabled,
+      playbackRate,
+      type,
+      chordName,
+      rhythmPatternId,
+      isCustomized,
+      customMidiEvents,
+      lickId,
+    } = req.body;
     const userId = req.userId;
 
     // Check if user has access to project
@@ -507,6 +641,71 @@ export const updateTimelineItem = async (req, res) => {
     // Update fields
     if (startTime !== undefined) timelineItem.startTime = startTime;
     if (duration !== undefined) timelineItem.duration = duration;
+    if (offset !== undefined) {
+      timelineItem.offset = Math.max(0, Number(offset) || 0);
+    }
+    if (loopEnabled !== undefined) {
+      timelineItem.loopEnabled = Boolean(loopEnabled);
+    }
+    if (playbackRate !== undefined) {
+      const rate = Number(playbackRate);
+      timelineItem.playbackRate = Number.isFinite(rate) ? rate : 1;
+    }
+    if (type !== undefined) {
+      timelineItem.type = normalizeTimelineItemType(type, timelineItem.type);
+      if (timelineItem.type === "chord") {
+        timelineItem.lickId = undefined;
+      }
+    }
+    if (lickId !== undefined) {
+      if (!lickId) {
+        timelineItem.lickId = undefined;
+      } else {
+        const lick = await Lick.findById(lickId);
+        if (!lick) {
+          return res.status(404).json({
+            success: false,
+            message: "Lick not found",
+          });
+        }
+        timelineItem.lickId = lickId;
+        if (
+          typeof lick.duration === "number" &&
+          (!sourceDuration || sourceDuration < lick.duration)
+        ) {
+          timelineItem.sourceDuration = Math.max(
+            timelineItem.offset + timelineItem.duration,
+            lick.duration
+          );
+        }
+      }
+    }
+    if (chordName !== undefined) {
+      timelineItem.chordName =
+        chordName && chordName.trim() ? chordName.trim() : undefined;
+    }
+    if (rhythmPatternId !== undefined) {
+      timelineItem.rhythmPatternId = rhythmPatternId || undefined;
+    }
+    if (isCustomized !== undefined) {
+      timelineItem.isCustomized = Boolean(isCustomized);
+    }
+    if (customMidiEvents !== undefined) {
+      const sanitized = sanitizeMidiEvents(customMidiEvents);
+      timelineItem.customMidiEvents = sanitized;
+    }
+    if (sourceDuration !== undefined) {
+      const coerced = Math.max(
+        Number(sourceDuration) || 0,
+        timelineItem.offset + timelineItem.duration
+      );
+      timelineItem.sourceDuration = coerced;
+    } else if (
+      typeof timelineItem.sourceDuration !== "number" ||
+      timelineItem.sourceDuration < timelineItem.offset + timelineItem.duration
+    ) {
+      timelineItem.sourceDuration = timelineItem.offset + timelineItem.duration;
+    }
     if (trackId !== undefined) {
       // Verify new track belongs to project
       const newTrack = await ProjectTrack.findById(trackId);
@@ -522,10 +721,12 @@ export const updateTimelineItem = async (req, res) => {
     await timelineItem.save();
 
     // Populate for response
-    await timelineItem.populate(
-      "lickId",
-      "title audioUrl duration waveformData"
-    );
+    if (timelineItem.lickId) {
+      await timelineItem.populate(
+        "lickId",
+        "title audioUrl duration waveformData"
+      );
+    }
     await timelineItem.populate("userId", "username displayName avatarUrl");
 
     res.json({
@@ -671,7 +872,19 @@ export const updateChordProgression = async (req, res) => {
 export const addTrack = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { trackName, trackType, isBackingTrack, color } = req.body;
+    const {
+      trackName,
+      trackType,
+      isBackingTrack,
+      color,
+      trackOrder,
+      volume,
+      pan,
+      muted,
+      solo,
+      instrument,
+      defaultRhythmPatternId,
+    } = req.body;
     const userId = req.userId;
 
     // Check if user has access to project
@@ -696,9 +909,9 @@ export const addTrack = async (req, res) => {
       });
     }
 
-    // If this is a backing track, enforce only one backing track per project
+    const normalizedTrackType = normalizeTrackType(trackType, "audio");
     const wantsBackingTrack =
-      isBackingTrack === true || trackType === "backing";
+      isBackingTrack === true || normalizedTrackType === "backing";
 
     if (wantsBackingTrack) {
       const existingBacking = await ProjectTrack.findOne({
@@ -715,22 +928,29 @@ export const addTrack = async (req, res) => {
       }
     }
 
-    // Get max track order
-    const maxOrder = await ProjectTrack.findOne({ projectId: project._id })
-      .sort({ trackOrder: -1 })
-      .select("trackOrder");
+    // Determine track order
+    let orderValue = Number(trackOrder);
+    if (!Number.isFinite(orderValue)) {
+      const maxOrder = await ProjectTrack.findOne({ projectId: project._id })
+        .sort({ trackOrder: -1 })
+        .select("trackOrder");
+      orderValue = (maxOrder?.trackOrder || 0) + 1;
+    }
 
     const newTrack = new ProjectTrack({
       projectId: project._id,
-      trackName: trackName || `Track ${(maxOrder?.trackOrder || 0) + 1}`,
-      trackOrder: (maxOrder?.trackOrder || 0) + 1,
-      trackType: wantsBackingTrack ? "backing" : trackType || "lick",
+      trackName:
+        trackName?.trim() || `Track ${String(orderValue).padStart(2, "0")}`,
+      trackOrder: orderValue,
+      trackType: wantsBackingTrack ? "backing" : normalizedTrackType,
       isBackingTrack: !!wantsBackingTrack,
-      color,
-      volume: 1.0,
-      pan: 0.0,
-      muted: false,
-      solo: false,
+      color: color || "#2563eb",
+      volume: Number.isFinite(volume) ? volume : 1.0,
+      pan: Number.isFinite(pan) ? pan : 0.0,
+      muted: typeof muted === "boolean" ? muted : false,
+      solo: typeof solo === "boolean" ? solo : false,
+      instrument: sanitizeInstrumentPayload(instrument),
+      defaultRhythmPatternId,
     });
 
     await newTrack.save();
@@ -764,6 +984,8 @@ export const updateTrack = async (req, res) => {
       trackType,
       isBackingTrack,
       color,
+      instrument,
+      defaultRhythmPatternId,
     } = req.body;
     const userId = req.userId;
 
@@ -806,8 +1028,12 @@ export const updateTrack = async (req, res) => {
     if (trackOrder !== undefined) track.trackOrder = trackOrder;
 
     // Prevent multiple backing tracks when updating
+    const normalizedIncomingType = normalizeTrackType(
+      trackType,
+      track.trackType || "audio"
+    );
     const wantsBackingTrackUpdate =
-      isBackingTrack === true || trackType === "backing";
+      isBackingTrack === true || normalizedIncomingType === "backing";
 
     if (wantsBackingTrackUpdate && !track.isBackingTrack) {
       const existingBacking = await ProjectTrack.findOne({
@@ -826,8 +1052,8 @@ export const updateTrack = async (req, res) => {
     }
 
     if (trackType !== undefined) {
-      track.trackType = trackType;
-      track.isBackingTrack = trackType === "backing";
+      track.trackType = normalizedIncomingType;
+      track.isBackingTrack = normalizedIncomingType === "backing";
     }
     if (isBackingTrack !== undefined) {
       track.isBackingTrack = isBackingTrack;
@@ -837,6 +1063,12 @@ export const updateTrack = async (req, res) => {
     }
     if (color !== undefined) {
       track.color = color;
+    }
+    if (instrument !== undefined) {
+      track.instrument = sanitizeInstrumentPayload(instrument) || undefined;
+    }
+    if (defaultRhythmPatternId !== undefined) {
+      track.defaultRhythmPatternId = defaultRhythmPatternId || undefined;
     }
 
     await track.save();

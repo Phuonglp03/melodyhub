@@ -44,6 +44,7 @@ import { getChords } from "../../../services/chordService";
 import { useSelector } from "react-redux";
 
 const HISTORY_LIMIT = 50;
+const MIN_CLIP_DURATION = 0.1;
 
 const DEFAULT_FALLBACK_CHORDS = [
   { chordName: "C", midiNotes: [60, 64, 67] },
@@ -176,6 +177,74 @@ const cloneChordEntry = (entry) => {
   return normalized ? { ...normalized } : null;
 };
 
+const normalizeMidiEvent = (event) => {
+  if (!event) return null;
+  const pitch = Number(event.pitch);
+  const startTime = Number(event.startTime);
+  const duration = Number(event.duration);
+  const velocity = event.velocity === undefined ? 0.8 : Number(event.velocity);
+  if (
+    !Number.isFinite(pitch) ||
+    pitch < 0 ||
+    pitch > 127 ||
+    !Number.isFinite(startTime) ||
+    startTime < 0 ||
+    !Number.isFinite(duration) ||
+    duration < 0
+  ) {
+    return null;
+  }
+  const clampedVelocity = velocity >= 0 && velocity <= 1 ? velocity : 0.8;
+  return {
+    pitch,
+    startTime,
+    duration,
+    velocity: clampedVelocity,
+  };
+};
+
+const normalizeTimelineItem = (item) => {
+  if (!item) return item;
+  const startTime = Math.max(0, Number(item.startTime) || 0);
+  const duration = Math.max(
+    MIN_CLIP_DURATION,
+    Number(item.duration) || MIN_CLIP_DURATION
+  );
+  const offset = Math.max(0, Number(item.offset) || 0);
+  const sourceDurationRaw =
+    Number(item.sourceDuration) ||
+    Number(item.lickId?.duration) ||
+    offset + duration;
+  const sourceDuration = Math.max(sourceDurationRaw, offset + duration);
+
+  return {
+    ...item,
+    startTime,
+    duration,
+    offset,
+    sourceDuration,
+    loopEnabled: Boolean(item.loopEnabled),
+    playbackRate: Number(item.playbackRate) || 1,
+    type: item.type || (item.lickId ? "lick" : "midi"),
+    chordName: item.chordName || item.chord || null,
+    rhythmPatternId: item.rhythmPatternId || null,
+    isCustomized: Boolean(item.isCustomized),
+    customMidiEvents: Array.isArray(item.customMidiEvents)
+      ? item.customMidiEvents
+          .map((event) => normalizeMidiEvent(event))
+          .filter(Boolean)
+      : [],
+  };
+};
+
+const getChordIndexFromId = (itemId) => {
+  if (typeof itemId !== "string") return null;
+  if (!itemId.startsWith("chord-")) return null;
+  const parts = itemId.split("-");
+  const index = parseInt(parts[1], 10);
+  return Number.isNaN(index) ? null : index;
+};
+
 const ProjectDetailPage = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
@@ -192,6 +261,7 @@ const ProjectDetailPage = () => {
   const [focusedClipId, setFocusedClipId] = useState(null);
   const [isDraggingItem, setIsDraggingItem] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, trackId: null });
+  const [resizeState, setResizeState] = useState(null);
 
   // UI State
   const [activeTab, setActiveTab] = useState("lick-library"); // "lick-library", "midi-editor", "instrument"
@@ -316,6 +386,8 @@ const ProjectDetailPage = () => {
 
   const timelineRef = useRef(null);
   const playheadRef = useRef(null);
+  const clipRefs = useRef(new Map());
+  const dragStateRef = useRef(null);
   const basePixelsPerSecond = 50; // Base scale for timeline
   const beatsPerMeasure = 4; // For 4/4 time
   const TRACK_COLUMN_WIDTH = 256; // Tailwind w-64 keeps labels aligned with lanes
@@ -335,12 +407,24 @@ const ProjectDetailPage = () => {
           track.isBackingTrack ||
           track.trackType === "backing" ||
           track.trackName?.toLowerCase() === "backing track";
+        const rawType = (track.trackType || "").toLowerCase();
+        const normalizedType = ["audio", "midi", "backing"].includes(rawType)
+          ? rawType
+          : inferredBacking
+          ? "backing"
+          : "audio";
+        const isBackingTrack = Boolean(
+          inferredBacking || normalizedType === "backing"
+        );
 
         return {
           ...track,
-          isBackingTrack: inferredBacking,
-          trackType: track.trackType || (inferredBacking ? "backing" : "lick"),
+          isBackingTrack,
+          trackType: normalizedType,
           color: track.color || fallbackColor,
+          instrument: track.instrument || null,
+          defaultRhythmPatternId: track.defaultRhythmPatternId || null,
+          items: (track.items || []).map((item) => normalizeTimelineItem(item)),
         };
       })
       .sort((a, b) => (a.trackOrder ?? 0) - (b.trackOrder ?? 0));
@@ -445,14 +529,6 @@ const ProjectDetailPage = () => {
     [chordLibrary]
   );
 
-  const getChordIndexFromId = (itemId) => {
-    if (typeof itemId !== "string") return null;
-    if (!itemId.startsWith("chord-")) return null;
-    const parts = itemId.split("-");
-    const index = parseInt(parts[1], 10);
-    return Number.isNaN(index) ? null : index;
-  };
-
   const reorderChordProgression = (fromIndex, toIndex) => {
     if (
       fromIndex === null ||
@@ -536,7 +612,7 @@ const ProjectDetailPage = () => {
   };
 
   // Silent refresh - updates data without showing loading
-  const refreshProject = async () => {
+  const refreshProject = useCallback(async () => {
     try {
       const response = await getProjectById(projectId);
       if (response.success) {
@@ -565,7 +641,7 @@ const ProjectDetailPage = () => {
       console.error("Error refreshing project:", err);
       // Don't show error for silent refreshes, just log it
     }
-  };
+  }, [projectId]);
 
   const fetchLicks = async () => {
     try {
@@ -675,10 +751,16 @@ const ProjectDetailPage = () => {
     let closestTime = time;
     let minDelta = thresholdSeconds;
 
-    const allItems =
-      track.isBackingTrack && chordItems?.length
-        ? [...(track.items || []), ...chordItems]
-        : track.items || [];
+    const hasTimelineChords = (track.items || []).some(
+      (clip) => clip?.type === "chord"
+    );
+    const includeVirtualChords =
+      (track.trackType === "backing" || track.isBackingTrack) &&
+      chordItems?.length &&
+      !hasTimelineChords;
+    const allItems = includeVirtualChords
+      ? [...(track.items || []), ...chordItems]
+      : track.items || [];
 
     allItems.forEach((item) => {
       if (!item || item._id === itemId) return;
@@ -929,16 +1011,23 @@ const ProjectDetailPage = () => {
     }
 
     try {
+      const sourceDuration =
+        typeof draggedLick.duration === "number"
+          ? draggedLick.duration
+          : parseFloat(draggedLick.duration) || numericDuration;
       const response = await addLickToTimeline(projectId, {
         trackId: trackId.toString(),
         lickId: lickId.toString(),
         startTime: numericStartTime,
         duration: numericDuration,
+        offset: 0,
+        sourceDuration,
+        loopEnabled: false,
       });
 
       if (response.success) {
         // Optimistic update - add item to local state immediately
-        const newItem = response.data;
+        const newItem = normalizeTimelineItem(response.data);
         pushHistory();
         setTracks((prevTracks) =>
           prevTracks.map((track) =>
@@ -951,7 +1040,6 @@ const ProjectDetailPage = () => {
           )
         );
         setError(null);
-        // Silent refresh in background to ensure sync
         refreshProject();
       } else {
         setError(response.message || "Failed to add lick to timeline");
@@ -1044,12 +1132,18 @@ const ProjectDetailPage = () => {
 
   const handleAddTrack = async () => {
     const typeInput = prompt(
-      "Create which type of track? Enter 'backing' or 'lick':",
-      "lick"
+      "Create which type of track? Enter 'backing', 'audio', or 'midi':",
+      "audio"
     );
     if (!typeInput) return;
     const normalizedType = typeInput.trim().toLowerCase();
-    const isBackingTrack = normalizedType === "backing";
+    const trackTypeValue =
+      normalizedType === "backing"
+        ? "backing"
+        : normalizedType === "midi"
+        ? "midi"
+        : "audio";
+    const isBackingTrack = trackTypeValue === "backing";
 
     if (isBackingTrack && backingTrack) {
       alert(
@@ -1058,7 +1152,12 @@ const ProjectDetailPage = () => {
       return;
     }
 
-    const defaultName = isBackingTrack ? "Backing Track" : "New Lick Track";
+    const defaultName =
+      trackTypeValue === "backing"
+        ? "Backing Track"
+        : trackTypeValue === "midi"
+        ? "New MIDI Track"
+        : "New Audio Track";
     const trackName = prompt("Enter track name:", defaultName);
     if (!trackName) return;
 
@@ -1068,7 +1167,7 @@ const ProjectDetailPage = () => {
       const response = await addTrack(projectId, {
         trackName,
         isBackingTrack,
-        trackType: isBackingTrack ? "backing" : "lick",
+        trackType: trackTypeValue,
         color: defaultColor,
       });
       if (response.success) {
@@ -1076,7 +1175,7 @@ const ProjectDetailPage = () => {
           {
             ...response.data,
             isBackingTrack,
-            trackType: isBackingTrack ? "backing" : "lick",
+            trackType: trackTypeValue,
             color: response.data.color || defaultColor,
           },
         ]);
@@ -1223,7 +1322,7 @@ const ProjectDetailPage = () => {
     }
   };
 
-  // Handle clip dragging with smooth real-time updates
+  // Handle clip dragging with smooth real-time updates (non-destructive)
   useEffect(() => {
     if (!isDraggingItem || !selectedItem) return;
 
@@ -1244,6 +1343,13 @@ const ProjectDetailPage = () => {
 
     if (!currentItem || !currentTrack) return;
 
+    dragStateRef.current = {
+      originStart: currentItem.startTime,
+    };
+
+    const clipElement = clipRefs.current.get(selectedItem);
+    if (!clipElement) return;
+
     const computeSnappedTime = (event) => {
       if (!timelineRef.current) return currentItem.startTime;
       const timelineElement = timelineRef.current;
@@ -1256,27 +1362,23 @@ const ProjectDetailPage = () => {
       return applyMagnet(rawTime, currentTrack, selectedItem);
     };
 
-    const handleMouseMove = (e) => {
-      const snappedTime = computeSnappedTime(e);
-      // Real-time visual update during drag
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => ({
-          ...track,
-          items: (track.items || []).map((item) =>
-            item._id === selectedItem
-              ? { ...item, startTime: snappedTime }
-              : item
-          ),
-        }))
-      );
+    const handleMouseMove = (event) => {
+      if (!dragStateRef.current) return;
+      const snappedTime = computeSnappedTime(event);
+      const deltaSeconds = snappedTime - dragStateRef.current.originStart;
+      const deltaPixels = deltaSeconds * pixelsPerSecond;
+      clipElement.style.transform = `translateX(${deltaPixels}px)`;
     };
 
-    const handleMouseUp = async (e) => {
-      const snappedTime = computeSnappedTime(e);
+    const handleMouseUp = async (event) => {
+      if (!dragStateRef.current) return;
+      const snappedTime = computeSnappedTime(event);
+      clipElement.style.transform = "";
       await handleClipMove(selectedItem, snappedTime);
       setIsDraggingItem(false);
       setSelectedItem(null);
       setDragOffset({ x: 0, trackId: null });
+      dragStateRef.current = null;
     };
 
     document.addEventListener("mousemove", handleMouseMove);
@@ -1285,17 +1387,149 @@ const ProjectDetailPage = () => {
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
+      if (clipElement) {
+        clipElement.style.transform = "";
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isDraggingItem,
     selectedItem,
     pixelsPerSecond,
-
     secondsPerBeat,
     tracks,
     dragOffset,
+    applyMagnet,
   ]);
+
+  const handleClipResize = useCallback(
+    async (itemId, updates) => {
+      const chordIndex = getChordIndexFromId(itemId);
+      if (chordIndex !== null) {
+        // Chord blocks have fixed duration for now
+        return;
+      }
+
+      const sanitized = {};
+      if (updates.startTime !== undefined) {
+        sanitized.startTime = Math.max(0, updates.startTime);
+      }
+      if (updates.duration !== undefined) {
+        sanitized.duration = Math.max(MIN_CLIP_DURATION, updates.duration);
+      }
+      if (updates.offset !== undefined) {
+        sanitized.offset = Math.max(0, updates.offset);
+      }
+
+      if (!Object.keys(sanitized).length) {
+        return;
+      }
+
+      setTracks((prevTracks) =>
+        prevTracks.map((track) => {
+          const hasClip = (track.items || []).some(
+            (item) => item._id === itemId
+          );
+          if (!hasClip) return track;
+          return {
+            ...track,
+            items: (track.items || []).map((item) =>
+              item._id === itemId
+                ? normalizeTimelineItem({ ...item, ...sanitized })
+                : item
+            ),
+          };
+        })
+      );
+
+      try {
+        await updateTimelineItem(projectId, itemId, sanitized);
+        refreshProject();
+      } catch (err) {
+        console.error("Error resizing clip:", err);
+        refreshProject();
+      }
+    },
+    [projectId, refreshProject]
+  );
+
+  useEffect(() => {
+    if (!resizeState) return;
+
+    const computeResizeValues = (event) => {
+      const deltaX = event.clientX - resizeState.startX;
+      const deltaSeconds = deltaX / pixelsPerSecond;
+
+      if (resizeState.edge === "left") {
+        const lowerBound = Math.max(
+          -resizeState.originStart,
+          -resizeState.originOffset
+        );
+        const upperBound = resizeState.originDuration - MIN_CLIP_DURATION;
+        const clampedDelta = Math.min(
+          Math.max(deltaSeconds, lowerBound),
+          upperBound
+        );
+        const newStartTime = resizeState.originStart + clampedDelta;
+        const newOffset = Math.max(0, resizeState.originOffset + clampedDelta);
+        const newDuration = Math.max(
+          MIN_CLIP_DURATION,
+          resizeState.originDuration - clampedDelta
+        );
+        return {
+          startTime: newStartTime,
+          duration: newDuration,
+          offset: newOffset,
+        };
+      }
+
+      const lowerBound = MIN_CLIP_DURATION - resizeState.originDuration;
+      const availableTail =
+        (resizeState.sourceDuration || 0) -
+        (resizeState.originOffset + resizeState.originDuration);
+      const upperBound = Math.max(0, availableTail);
+      const clampedDelta = Math.min(
+        Math.max(deltaSeconds, lowerBound),
+        upperBound
+      );
+      const newDuration = Math.max(
+        MIN_CLIP_DURATION,
+        resizeState.originDuration + clampedDelta
+      );
+      return { duration: newDuration };
+    };
+
+    const handleMouseMove = (event) => {
+      const values = computeResizeValues(event);
+      setTracks((prevTracks) =>
+        prevTracks.map((track) => {
+          if (track._id !== resizeState.trackId) return track;
+          return {
+            ...track,
+            items: (track.items || []).map((item) =>
+              item._id === resizeState.clipId
+                ? normalizeTimelineItem({ ...item, ...values })
+                : item
+            ),
+          };
+        })
+      );
+    };
+
+    const handleMouseUp = async (event) => {
+      const finalValues = computeResizeValues(event);
+      setResizeState(null);
+      await handleClipResize(resizeState.clipId, finalValues);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [resizeState, pixelsPerSecond, handleClipResize]);
 
   const handleClipMouseDown = (e, item, trackId) => {
     e.preventDefault();
@@ -1318,6 +1552,29 @@ const ProjectDetailPage = () => {
     setIsDraggingItem(true);
   };
 
+  const startClipResize = (e, item, trackId, edge = "right") => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!item || !trackId) return;
+    setFocusedClipId(item._id);
+    setSelectedItem(item._id);
+    setIsDraggingItem(false);
+    pushHistory();
+    setResizeState({
+      clipId: item._id,
+      trackId,
+      edge,
+      originDuration: item.duration || MIN_CLIP_DURATION,
+      originStart: item.startTime || 0,
+      originOffset: item.offset || 0,
+      sourceDuration:
+        item.sourceDuration ||
+        item.lickId?.duration ||
+        (item.offset || 0) + (item.duration || 0),
+      startX: e.clientX,
+    });
+  };
+
   // Handle clip move
   const handleClipMove = async (itemId, newStartTime) => {
     if (newStartTime < 0) return;
@@ -1330,56 +1587,28 @@ const ProjectDetailPage = () => {
       reorderChordProgression(chordIndex, targetIndex);
       return;
     }
-    try {
-      // Optimistic update - update item position in local state immediately
-      pushHistory();
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => ({
+
+    pushHistory();
+    setTracks((prevTracks) =>
+      prevTracks.map((track) => {
+        const hasClip = (track.items || []).some((item) => item._id === itemId);
+        if (!hasClip) return track;
+        return {
           ...track,
           items: (track.items || []).map((item) =>
-            item._id === itemId ? { ...item, startTime: newStartTime } : item
+            item._id === itemId
+              ? normalizeTimelineItem({ ...item, startTime: newStartTime })
+              : item
           ),
-        }))
-      );
+        };
+      })
+    );
 
+    try {
       await updateTimelineItem(projectId, itemId, { startTime: newStartTime });
-      // Silent refresh in background to ensure sync
       refreshProject();
     } catch (err) {
       console.error("Error moving clip:", err);
-      // Revert on error by refreshing
-      refreshProject();
-    }
-  };
-
-  // Handle clip resize
-  const handleClipResize = async (itemId, newDuration) => {
-    const chordIndex = getChordIndexFromId(itemId);
-    if (chordIndex !== null) {
-      // Chord blocks have fixed duration for now
-      return;
-    }
-    const snappedDuration = Math.max(0.1, newDuration);
-    try {
-      // Optimistic update - update item duration in local state immediately
-      pushHistory();
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => ({
-          ...track,
-          items: (track.items || []).map((item) =>
-            item._id === itemId ? { ...item, duration: snappedDuration } : item
-          ),
-        }))
-      );
-
-      await updateTimelineItem(projectId, itemId, {
-        duration: snappedDuration,
-      });
-      // Silent refresh in background to ensure sync
-      refreshProject();
-    } catch (err) {
-      console.error("Error resizing clip:", err);
-      // Revert on error by refreshing
       refreshProject();
     }
   };
@@ -1848,8 +2077,8 @@ const ProjectDetailPage = () => {
                       const scrollLeft = timelineRef.current.scrollLeft || 0;
                       const x = e.clientX - trackRect.left + scrollLeft;
                       const rawTime = Math.max(0, x / pixelsPerSecond);
-                      const snappedTime = snapTime(rawTime);
-                      handleDrop(e, track._id, snappedTime);
+                      const magnetTime = applyMagnet(rawTime, track, null);
+                      handleDrop(e, track._id, magnetTime);
                     }}
                   >
                     {/* Wavy Background Pattern */}
@@ -1867,12 +2096,220 @@ const ProjectDetailPage = () => {
                     />
 
                     {/* Timeline Items (Clips and Chord Blocks) */}
-                    {(track.isBackingTrack
-                      ? [...(track.items || []), ...chordItems].sort(
+                    {(() => {
+                      const timelineItems = track.items || [];
+                      const hasTimelineChords = timelineItems.some(
+                        (clip) => clip?.type === "chord"
+                      );
+                      const combinedItems =
+                        track.isBackingTrack &&
+                        chordItems?.length &&
+                        !hasTimelineChords
+                          ? [...timelineItems, ...chordItems]
+                          : timelineItems;
+
+                      return combinedItems
+                        .sort(
                           (a, b) => (a.startTime || 0) - (b.startTime || 0)
                         )
-                      : track.items || []
-                    ).map((item) => {
+                        .map((item) => {
+                          const isSelected =
+                            focusedClipId === item._id ||
+                            selectedItem === item._id;
+                          const clipWidth = item.duration * pixelsPerSecond;
+                          const clipLeft = item.startTime * pixelsPerSecond;
+                          const isVirtualChord =
+                            typeof item._id === "string" &&
+                            item._id.startsWith("chord-");
+                          const isTimelineChord =
+                            item.type === "chord" && !isVirtualChord;
+                          const isChord =
+                            isTimelineChord ||
+                            isVirtualChord ||
+                            item._isChord ||
+                            (item.chord &&
+                              (track.trackType === "backing" ||
+                                track.isBackingTrack) &&
+                              !item.lickId);
+                          const sourceDurationSeconds =
+                            item.sourceDuration ||
+                            item.lickId?.duration ||
+                            item.duration;
+                          const waveformWidth =
+                            sourceDurationSeconds * pixelsPerSecond;
+                          const waveformOffset =
+                            (item.offset || 0) * pixelsPerSecond;
+                          const clipLabel = isChord
+                            ? item.chordName ||
+                              item.chord ||
+                              `Chord ${trackIndex + 1}`
+                            : item.lickId?.title ||
+                              (item.type === "midi"
+                                ? item.isCustomized
+                                  ? "Custom MIDI"
+                                  : "MIDI Clip"
+                                : `Lick ${trackIndex + 1}`);
+                          const clipStyle = {
+                            left: `${clipLeft}px`,
+                            width: `${clipWidth}px`,
+                            top: "10px",
+                            height: "100px",
+                            minWidth: "60px",
+                            backgroundColor: !isChord ? trackAccent : undefined,
+                            borderColor: isChord
+                              ? isSelected
+                                ? "#facc15"
+                                : trackAccent
+                              : isSelected
+                              ? "#facc15"
+                              : trackAccent,
+                            boxShadow: isSelected
+                              ? "0 0 0 2px rgba(250, 204, 21, 0.55)"
+                              : undefined,
+                          };
+                          const showWaveform =
+                            item.type === "lick" && item.lickId?.waveformData;
+                          const showResizeHandles = !isVirtualChord;
+
+                          return (
+                            <div
+                              key={item._id}
+                              ref={(el) => {
+                                if (el) {
+                                  clipRefs.current.set(item._id, el);
+                                } else {
+                                  clipRefs.current.delete(item._id);
+                                }
+                              }}
+                              className={`absolute rounded border-2 text-white cursor-move transition-all overflow-hidden relative ${
+                                isChord
+                                  ? isSelected
+                                    ? "bg-green-500 border-yellow-400 shadow-lg shadow-yellow-400/50"
+                                    : "bg-green-600 border-green-700 hover:bg-green-700"
+                                  : ""
+                              }`}
+                              style={clipStyle}
+                              title={clipLabel}
+                              onMouseDown={(e) =>
+                                handleClipMouseDown(e, item, track._id)
+                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFocusedClipId(item._id);
+                              }}
+                            >
+                              <div className="absolute inset-0 overflow-hidden">
+                                {showWaveform ? (
+                                  (() => {
+                                    try {
+                                      const waveform =
+                                        typeof item.lickId.waveformData ===
+                                        "string"
+                                          ? JSON.parse(
+                                              item.lickId.waveformData
+                                            )
+                                          : item.lickId.waveformData;
+                                      const waveformArray = Array.isArray(
+                                        waveform
+                                      )
+                                        ? waveform
+                                        : [];
+                                      const sampleCount = Math.min(
+                                        50,
+                                        Math.floor(clipWidth / 4)
+                                      );
+                                      const step = Math.max(
+                                        1,
+                                        Math.floor(
+                                          waveformArray.length / sampleCount
+                                        )
+                                      );
+
+                                      return (
+                                        <div
+                                          className="absolute top-0 bottom-0"
+                                          style={{
+                                            left: `-${waveformOffset}px`,
+                                            width: `${waveformWidth}px`,
+                                          }}
+                                        >
+                                          <div className="h-full bg-blue-800/30 rounded flex items-end justify-around gap-0.5 px-2">
+                                            {waveformArray
+                                              .filter(
+                                                (_, idx) => idx % step === 0
+                                              )
+                                              .slice(0, sampleCount)
+                                              .map((value, idx) => (
+                                                <div
+                                                  key={idx}
+                                                  className="bg-white rounded-t"
+                                                  style={{
+                                                    width: "2px",
+                                                    height: `${Math.min(
+                                                      100,
+                                                      Math.abs(value || 0) * 100
+                                                    )}%`,
+                                                  }}
+                                                />
+                                              ))}
+                                          </div>
+                                        </div>
+                                      );
+                                    } catch (e) {
+                                      return null;
+                                    }
+                                  })()
+                                ) : (
+                                  <div className="absolute inset-0 flex flex-col justify-between p-2 bg-black/10">
+                                    <div className="font-medium text-sm truncate">
+                                      {clipLabel}
+                                    </div>
+                                    <div className="text-xs opacity-75">
+                                      {item.startTime.toFixed(2)}s
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Resize handles */}
+                              {showResizeHandles && (
+                                <div
+                                  className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
+                                  onMouseDown={(e) =>
+                                    startClipResize(e, item, track._id, "left")
+                                  }
+                                />
+                              )}
+                              {showResizeHandles && (
+                                <div
+                                  className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
+                                  onMouseDown={(e) =>
+                                    startClipResize(e, item, track._id, "right")
+                                  }
+                                />
+                              )}
+
+                              {/* Delete button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setFocusedClipId((prev) =>
+                                    prev === item._id ? null : prev
+                                  );
+                                  if (isVirtualChord) {
+                                    handleRemoveChord(item._id);
+                                  } else {
+                                    handleDeleteTimelineItem(item._id);
+                                  }
+                                }}
+                                className="absolute top-1 right-1 w-5 h-5 bg-red-600 hover:bg-red-700 rounded text-white text-xs flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                              >
+                                <FaTimes size={8} />
+                              </button>
+                            </div>
+                          );
+                        });
+                    })()}
                       const isSelected =
                         focusedClipId === item._id || selectedItem === item._id;
                       const clipWidth = item.duration * pixelsPerSecond;
@@ -1880,6 +2317,14 @@ const ProjectDetailPage = () => {
                       const isChord =
                         item._isChord ||
                         (item.chord && track.isBackingTrack && !item.lickId);
+                      const sourceDurationSeconds =
+                        item.sourceDuration ||
+                        item.lickId?.duration ||
+                        item.duration;
+                      const waveformWidth =
+                        sourceDurationSeconds * pixelsPerSecond;
+                      const waveformOffset =
+                        (item.offset || 0) * pixelsPerSecond;
                       const clipStyle = {
                         left: `${clipLeft}px`,
                         width: `${clipWidth}px`,
@@ -1894,15 +2339,20 @@ const ProjectDetailPage = () => {
                           : undefined,
                         boxShadow: isSelected
                           ? "0 0 0 2px rgba(250, 204, 21, 0.55)"
-                          : !isChord
-                          ? "0 6px 12px rgba(0,0,0,0.35)"
                           : undefined,
                       };
 
                       return (
                         <div
                           key={item._id}
-                          className={`absolute rounded border-2 text-white cursor-move transition-all ${
+                          ref={(el) => {
+                            if (el) {
+                              clipRefs.current.set(item._id, el);
+                            } else {
+                              clipRefs.current.delete(item._id);
+                            }
+                          }}
+                          className={`absolute rounded border-2 text-white cursor-move transition-all overflow-hidden ${
                             isChord
                               ? isSelected
                                 ? "bg-green-500 border-yellow-400 shadow-lg shadow-yellow-400/50"
@@ -1921,74 +2371,93 @@ const ProjectDetailPage = () => {
                             setFocusedClipId(item._id);
                           }}
                         >
-                          {/* Waveform visualization if available */}
-                          {item.lickId?.waveformData ? (
-                            (() => {
-                              try {
-                                const waveform =
-                                  typeof item.lickId.waveformData === "string"
-                                    ? JSON.parse(item.lickId.waveformData)
-                                    : item.lickId.waveformData;
-                                const waveformArray = Array.isArray(waveform)
-                                  ? waveform
-                                  : [];
-                                const sampleCount = Math.min(
-                                  50,
-                                  Math.floor(clipWidth / 4)
-                                );
-                                const step = Math.max(
-                                  1,
-                                  Math.floor(waveformArray.length / sampleCount)
-                                );
+                          <div className="absolute inset-0 overflow-hidden">
+                            {/* Waveform visualization if available */}
+                            {item.lickId?.waveformData ? (
+                              (() => {
+                                try {
+                                  const waveform =
+                                    typeof item.lickId.waveformData === "string"
+                                      ? JSON.parse(item.lickId.waveformData)
+                                      : item.lickId.waveformData;
+                                  const waveformArray = Array.isArray(waveform)
+                                    ? waveform
+                                    : [];
+                                  const sampleCount = Math.min(
+                                    50,
+                                    Math.floor(clipWidth / 4)
+                                  );
+                                  const step = Math.max(
+                                    1,
+                                    Math.floor(
+                                      waveformArray.length / sampleCount
+                                    )
+                                  );
 
-                                return (
-                                  <div className="absolute inset-0 p-2 flex items-center justify-center">
-                                    <div className="w-full h-full bg-blue-800/30 rounded flex items-end justify-around gap-0.5">
-                                      {waveformArray
-                                        .filter((_, idx) => idx % step === 0)
-                                        .slice(0, sampleCount)
-                                        .map((value, idx) => (
-                                          <div
-                                            key={idx}
-                                            className="bg-white rounded-t"
-                                            style={{
-                                              width: "2px",
-                                              height: `${Math.min(
-                                                100,
-                                                Math.abs(value || 0) * 100
-                                              )}%`,
-                                            }}
-                                          />
-                                        ))}
+                                  return (
+                                    <div
+                                      className="absolute top-0 bottom-0"
+                                      style={{
+                                        left: `-${waveformOffset}px`,
+                                        width: `${waveformWidth}px`,
+                                      }}
+                                    >
+                                      <div className="h-full bg-blue-800/30 rounded flex items-end justify-around gap-0.5 px-2">
+                                        {waveformArray
+                                          .filter((_, idx) => idx % step === 0)
+                                          .slice(0, sampleCount)
+                                          .map((value, idx) => (
+                                            <div
+                                              key={idx}
+                                              className="bg-white rounded-t"
+                                              style={{
+                                                width: "2px",
+                                                height: `${Math.min(
+                                                  100,
+                                                  Math.abs(value || 0) * 100
+                                                )}%`,
+                                              }}
+                                            />
+                                          ))}
+                                      </div>
                                     </div>
-                                  </div>
-                                );
-                              } catch (e) {
-                                return null;
-                              }
-                            })()
-                          ) : (
-                            <div className="flex flex-col justify-between h-full p-2">
-                              <div className="font-medium text-sm truncate">
-                                {isChord
-                                  ? item.chord
-                                  : item.lickId?.title ||
-                                    `Lick ${trackIndex + 1}`}
+                                  );
+                                } catch (e) {
+                                  return null;
+                                }
+                              })()
+                            ) : (
+                              <div className="absolute inset-0 flex flex-col justify-between p-2 bg-black/10">
+                                <div className="font-medium text-sm truncate">
+                                  {isChord
+                                    ? item.chord
+                                    : item.lickId?.title ||
+                                      `Lick ${trackIndex + 1}`}
+                                </div>
+                                <div className="text-xs opacity-75">
+                                  {item.startTime.toFixed(2)}s
+                                </div>
                               </div>
-                              <div className="text-xs opacity-75">
-                                {item.startTime.toFixed(2)}s
-                              </div>
-                            </div>
-                          )}
+                            )}
+                          </div>
 
                           {/* Resize handle (right edge) */}
-                          <div
-                            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
-                            onMouseDown={(e) => {
-                              e.stopPropagation();
-                              // TODO: Implement resize drag
-                            }}
-                          />
+                          {!isChord && (
+                            <div
+                              className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
+                              onMouseDown={(e) =>
+                                startClipResize(e, item, track._id, "left")
+                              }
+                            />
+                          )}
+                          {!isChord && (
+                            <div
+                              className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
+                              onMouseDown={(e) =>
+                                startClipResize(e, item, track._id, "right")
+                              }
+                            />
+                          )}
 
                           {/* Delete button */}
                           <button
