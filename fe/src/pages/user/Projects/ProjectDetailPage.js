@@ -2344,7 +2344,12 @@ const ProjectDetailPage = () => {
                                   clipRefs.current.delete(item._id);
                                 }
                               }}
-                              className={`absolute rounded border-2 text-white cursor-move transition-all overflow-hidden ${
+                              className={`absolute rounded border-2 text-white cursor-move overflow-hidden ${
+                                // Disable smooth transitions while dragging so the clip sticks to the cursor
+                                isDraggingItem && selectedItem === item._id
+                                  ? ""
+                                  : "transition-all"
+                              } ${
                                 isChord
                                   ? isSelected
                                     ? "bg-green-500 border-yellow-400 shadow-lg shadow-yellow-400/50"
