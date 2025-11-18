@@ -234,8 +234,16 @@ export const updateProject = async (req, res) => {
   try {
     const { projectId } = req.params;
     const userId = req.userId;
-    const { title, description, tempo, key, timeSignature, isPublic, status, backingInstrumentId } =
-      req.body;
+    const {
+      title,
+      description,
+      tempo,
+      key,
+      timeSignature,
+      isPublic,
+      status,
+      backingInstrumentId,
+    } = req.body;
 
     const project = await Project.findById(projectId);
 
@@ -601,7 +609,7 @@ export const deleteTimelineItem = async (req, res) => {
 export const updateChordProgression = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { chordProgression } = req.body; // Array of chord strings like ["Am7", "G", "Cmaj7"]
+    const { chordProgression } = req.body; // Array of chord strings OR chord objects
     const userId = req.userId;
 
     // Check if user has access to project
@@ -626,8 +634,22 @@ export const updateChordProgression = async (req, res) => {
       });
     }
 
-    // Update chord progression (store as JSON string)
-    project.chordProgression = JSON.stringify(chordProgression || []);
+    // Normalize and update chord progression.
+    // We store only full chord names as strings, e.g. ["C", "Am", "G7"]
+    const normalizedChords = Array.isArray(chordProgression)
+      ? chordProgression
+          .map((entry) => {
+            if (!entry) return null;
+            if (typeof entry === "string") return entry.trim();
+            // Support objects coming from older clients: { chordName, name, label, ... }
+            const name =
+              entry.chordName || entry.name || entry.label || entry.fullName;
+            return typeof name === "string" ? name.trim() : null;
+          })
+          .filter((name) => !!name)
+      : [];
+
+    project.chordProgression = normalizedChords;
     await project.save();
 
     res.json({
@@ -649,7 +671,7 @@ export const updateChordProgression = async (req, res) => {
 export const addTrack = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { trackName } = req.body;
+    const { trackName, trackType, isBackingTrack, color } = req.body;
     const userId = req.userId;
 
     // Check if user has access to project
@@ -674,6 +696,25 @@ export const addTrack = async (req, res) => {
       });
     }
 
+    // If this is a backing track, enforce only one backing track per project
+    const wantsBackingTrack =
+      isBackingTrack === true || trackType === "backing";
+
+    if (wantsBackingTrack) {
+      const existingBacking = await ProjectTrack.findOne({
+        projectId: project._id,
+        $or: [{ isBackingTrack: true }, { trackType: "backing" }],
+      });
+
+      if (existingBacking) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This project already has a backing track. Remove it before creating another.",
+        });
+      }
+    }
+
     // Get max track order
     const maxOrder = await ProjectTrack.findOne({ projectId: project._id })
       .sort({ trackOrder: -1 })
@@ -683,6 +724,9 @@ export const addTrack = async (req, res) => {
       projectId: project._id,
       trackName: trackName || `Track ${(maxOrder?.trackOrder || 0) + 1}`,
       trackOrder: (maxOrder?.trackOrder || 0) + 1,
+      trackType: wantsBackingTrack ? "backing" : trackType || "lick",
+      isBackingTrack: !!wantsBackingTrack,
+      color,
       volume: 1.0,
       pan: 0.0,
       muted: false,
@@ -710,7 +754,17 @@ export const addTrack = async (req, res) => {
 export const updateTrack = async (req, res) => {
   try {
     const { projectId, trackId } = req.params;
-    const { trackName, volume, pan, muted, solo, trackOrder } = req.body;
+    const {
+      trackName,
+      volume,
+      pan,
+      muted,
+      solo,
+      trackOrder,
+      trackType,
+      isBackingTrack,
+      color,
+    } = req.body;
     const userId = req.userId;
 
     // Check if user has access to project
@@ -750,6 +804,40 @@ export const updateTrack = async (req, res) => {
     if (muted !== undefined) track.muted = muted;
     if (solo !== undefined) track.solo = solo;
     if (trackOrder !== undefined) track.trackOrder = trackOrder;
+
+    // Prevent multiple backing tracks when updating
+    const wantsBackingTrackUpdate =
+      isBackingTrack === true || trackType === "backing";
+
+    if (wantsBackingTrackUpdate && !track.isBackingTrack) {
+      const existingBacking = await ProjectTrack.findOne({
+        projectId: project._id,
+        _id: { $ne: track._id },
+        $or: [{ isBackingTrack: true }, { trackType: "backing" }],
+      });
+
+      if (existingBacking) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "This project already has a backing track. Remove it before converting another track.",
+        });
+      }
+    }
+
+    if (trackType !== undefined) {
+      track.trackType = trackType;
+      track.isBackingTrack = trackType === "backing";
+    }
+    if (isBackingTrack !== undefined) {
+      track.isBackingTrack = isBackingTrack;
+      if (isBackingTrack && !track.trackType) {
+        track.trackType = "backing";
+      }
+    }
+    if (color !== undefined) {
+      track.color = color;
+    }
 
     await track.save();
 

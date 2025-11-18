@@ -6,7 +6,8 @@ const projectSchema = new mongoose.Schema(
     title: { type: String, required: true, trim: true },
     description: { type: String },
     coverImageUrl: { type: String },
-    chordProgression: { type: String }, // JSON array of chords
+    // Store chord progression as an ordered list of full chord names, e.g. ["C", "Am", "G7"]
+    chordProgression: [{ type: String }],
     backingInstrumentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Instrument' },
     backingPlayingPatternId: { type: mongoose.Schema.Types.ObjectId, ref: 'PlayingPattern' },
     tempo: { type: Number, default: 120 },

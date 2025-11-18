@@ -1,18 +1,32 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   FaPlay,
   FaPause,
   FaStop,
   FaCircle,
-  FaLock,
-  FaUser,
   FaMusic,
   FaTrash,
   FaPlus,
   FaSearch,
   FaTimes,
+  FaEllipsisV,
+  FaPalette,
+  FaPen,
+  FaArrowUp,
+  FaArrowDown,
+  FaUndo,
+  FaRedo,
+  FaStepBackward,
+  FaSync,
 } from "react-icons/fa";
+import { RiPulseFill } from "react-icons/ri";
 import {
   getProjectById,
   updateProject,
@@ -22,11 +36,14 @@ import {
   updateChordProgression as updateChordProgressionAPI,
   addTrack,
   updateTrack,
+  deleteTrack,
   getInstruments,
 } from "../../../services/user/projectService";
 import { getCommunityLicks } from "../../../services/user/lickService";
 import { getChords } from "../../../services/chordService";
 import { useSelector } from "react-redux";
+
+const HISTORY_LIMIT = 50;
 
 const DEFAULT_FALLBACK_CHORDS = [
   { chordName: "C", midiNotes: [60, 64, 67] },
@@ -38,6 +55,55 @@ const DEFAULT_FALLBACK_CHORDS = [
   { chordName: "Gmaj7", midiNotes: [67, 71, 74, 78] },
   { chordName: "Cmaj7", midiNotes: [60, 64, 67, 71] },
 ];
+
+const TRACK_COLOR_PALETTE = [
+  "#6366f1",
+  "#8b5cf6",
+  "#0ea5e9",
+  "#10b981",
+  "#f97316",
+  "#f43f5e",
+  "#facc15",
+  "#ec4899",
+];
+const TIME_SIGNATURES = ["4/4", "3/4", "6/8", "2/4"];
+const KEY_OPTIONS = [
+  "C Major",
+  "G Major",
+  "D Major",
+  "A Major",
+  "E Major",
+  "B Major",
+  "F Major",
+  "Bb Major",
+  "Eb Major",
+  "C Minor",
+  "G Minor",
+  "D Minor",
+  "A Minor",
+  "E Minor",
+];
+
+const cloneTracksForHistory = (sourceTracks = []) =>
+  sourceTracks.map((track) => ({
+    ...track,
+    items: (track.items || []).map((item) => ({ ...item })),
+  }));
+
+const cloneChordsForHistory = (sourceChords = []) =>
+  sourceChords.map((entry) =>
+    typeof entry === "string" ? entry : { ...entry }
+  );
+
+const formatTransportTime = (seconds = 0) => {
+  const totalSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(totalSeconds / 60);
+  const secs = Math.floor(totalSeconds % 60)
+    .toString()
+    .padStart(2, "0");
+  const tenths = Math.floor((totalSeconds % 1) * 10);
+  return `${minutes.toString().padStart(2, "0")}:${secs}.${tenths}`;
+};
 
 const parseMidiNotes = (value) => {
   if (Array.isArray(value)) return value;
@@ -122,11 +188,10 @@ const ProjectDetailPage = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [zoomLevel, setZoomLevel] = useState(1); // Zoom multiplier
-  const [snapToGrid, setSnapToGrid] = useState(true);
-  const [snapValue, setSnapValue] = useState(1); // Snap to 1 beat by default
   const [selectedItem, setSelectedItem] = useState(null);
+  const [focusedClipId, setFocusedClipId] = useState(null);
   const [isDraggingItem, setIsDraggingItem] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [dragOffset, setDragOffset] = useState({ x: 0, trackId: null });
 
   // UI State
   const [activeTab, setActiveTab] = useState("lick-library"); // "lick-library", "midi-editor", "instrument"
@@ -158,6 +223,96 @@ const ProjectDetailPage = () => {
   const [draggedChord, setDraggedChord] = useState(null);
   const [dragOverTrack, setDragOverTrack] = useState(null);
   const [dragOverPosition, setDragOverPosition] = useState(null);
+  const [trackContextMenu, setTrackContextMenu] = useState({
+    isOpen: false,
+    x: 0,
+    y: 0,
+    trackId: null,
+  });
+  const closeTrackMenu = useCallback(
+    () => setTrackContextMenu({ isOpen: false, x: 0, y: 0, trackId: null }),
+    []
+  );
+  const orderedTracks = useMemo(
+    () => [...tracks].sort((a, b) => (a.trackOrder ?? 0) - (b.trackOrder ?? 0)),
+    [tracks]
+  );
+  const menuTrack = useMemo(
+    () =>
+      trackContextMenu.trackId
+        ? tracks.find((track) => track._id === trackContextMenu.trackId) || null
+        : null,
+    [trackContextMenu.trackId, tracks]
+  );
+  const [tempoDraft, setTempoDraft] = useState("120");
+  const [metronomeEnabled, setMetronomeEnabled] = useState(true);
+  const [loopEnabled, setLoopEnabled] = useState(false);
+  const [recordArmed, setRecordArmed] = useState(false);
+  const [historyStatus, setHistoryStatus] = useState({
+    canUndo: false,
+    canRedo: false,
+  });
+  const historyRef = useRef([]);
+  const futureRef = useRef([]);
+  const playbackPositionRef = useRef(0);
+  const menuPosition = useMemo(() => {
+    const padding = 12;
+    const width = 260;
+    const height = 320;
+    let x = trackContextMenu.x;
+    let y = trackContextMenu.y;
+
+    if (typeof window !== "undefined") {
+      x = Math.min(Math.max(padding, x), window.innerWidth - width - padding);
+      y = Math.min(Math.max(padding, y), window.innerHeight - height - padding);
+    }
+
+    return { x, y };
+  }, [trackContextMenu.x, trackContextMenu.y, trackContextMenu.isOpen]);
+  const updateHistoryStatus = useCallback(() => {
+    setHistoryStatus({
+      canUndo: historyRef.current.length > 0,
+      canRedo: futureRef.current.length > 0,
+    });
+  }, []);
+  const pushHistory = useCallback(() => {
+    const snapshot = {
+      tracks: cloneTracksForHistory(tracks),
+      chordProgression: cloneChordsForHistory(chordProgression),
+    };
+    historyRef.current = [...historyRef.current, snapshot].slice(
+      -HISTORY_LIMIT
+    );
+    futureRef.current = [];
+    updateHistoryStatus();
+  }, [tracks, chordProgression, updateHistoryStatus]);
+
+  const handleUndo = useCallback(() => {
+    if (!historyRef.current.length) return;
+    const previous = historyRef.current.pop();
+    futureRef.current.push({
+      tracks: cloneTracksForHistory(tracks),
+      chordProgression: cloneChordsForHistory(chordProgression),
+    });
+    setTracks(previous?.tracks || []);
+    setChordProgression(previous?.chordProgression || []);
+    setSelectedItem(null);
+    setFocusedClipId(null);
+    updateHistoryStatus();
+  }, [tracks, chordProgression, updateHistoryStatus]);
+  const handleRedo = useCallback(() => {
+    if (!futureRef.current.length) return;
+    const nextState = futureRef.current.pop();
+    historyRef.current.push({
+      tracks: cloneTracksForHistory(tracks),
+      chordProgression: cloneChordsForHistory(chordProgression),
+    });
+    setTracks(nextState?.tracks || []);
+    setChordProgression(nextState?.chordProgression || []);
+    setSelectedItem(null);
+    setFocusedClipId(null);
+    updateHistoryStatus();
+  }, [tracks, chordProgression, updateHistoryStatus]);
 
   const timelineRef = useRef(null);
   const playheadRef = useRef(null);
@@ -172,13 +327,23 @@ const ProjectDetailPage = () => {
   const pixelsPerBeat = pixelsPerSecond * secondsPerBeat;
 
   const normalizeTracks = (incomingTracks = []) =>
-    incomingTracks.map((track) => ({
-      ...track,
-      isBackingTrack:
-        track.isBackingTrack ||
-        track.trackType === "backing" ||
-        track.trackName?.toLowerCase() === "backing track",
-    }));
+    incomingTracks
+      .map((track, index) => {
+        const fallbackColor =
+          TRACK_COLOR_PALETTE[index % TRACK_COLOR_PALETTE.length];
+        const inferredBacking =
+          track.isBackingTrack ||
+          track.trackType === "backing" ||
+          track.trackName?.toLowerCase() === "backing track";
+
+        return {
+          ...track,
+          isBackingTrack: inferredBacking,
+          trackType: track.trackType || (inferredBacking ? "backing" : "lick"),
+          color: track.color || fallbackColor,
+        };
+      })
+      .sort((a, b) => (a.trackOrder ?? 0) - (b.trackOrder ?? 0));
 
   useEffect(() => {
     fetchProject(true); // Show loading only on initial load
@@ -221,6 +386,31 @@ const ProjectDetailPage = () => {
       window.removeEventListener("blur", handlePointerUp);
     };
   }, [isDraggingItem]);
+
+  useEffect(() => {
+    playbackPositionRef.current = playbackPosition;
+  }, [playbackPosition]);
+
+  useEffect(() => {
+    setTempoDraft(String(project?.tempo || 120));
+  }, [project?.tempo]);
+
+  const formattedPlayTime = useMemo(
+    () => formatTransportTime(playbackPosition),
+    [playbackPosition]
+  );
+
+  useEffect(() => {
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        closeTrackMenu();
+        setFocusedClipId(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [closeTrackMenu]);
 
   const chordDurationSeconds = useMemo(
     () => getChordDuration() * secondsPerBeat,
@@ -329,6 +519,9 @@ const ProjectDetailPage = () => {
           (t) => t.isBackingTrack || t.trackName === "Backing Track"
         );
         setBackingTrack(backing || null);
+        historyRef.current = [];
+        futureRef.current = [];
+        updateHistoryStatus();
       } else {
         setError(response.message || "Failed to load project");
       }
@@ -409,14 +602,20 @@ const ProjectDetailPage = () => {
 
   // Playback control with playhead movement
   useEffect(() => {
-    let animationFrame;
-    let startTime;
+    let animationFrame = null;
+    let startTimestamp = null;
 
     if (isPlaying) {
+      const width = calculateTimelineWidth();
+      const loopLenSeconds = Math.max(1, width / pixelsPerSecond);
+
       const animate = (timestamp) => {
-        if (!startTime) startTime = timestamp;
-        const elapsed = (timestamp - startTime) / 1000; // Convert to seconds
-        setPlaybackPosition(elapsed);
+        if (startTimestamp === null) {
+          startTimestamp = timestamp - playbackPositionRef.current * 1000;
+        }
+        const elapsed = (timestamp - startTimestamp) / 1000;
+        const position = loopEnabled ? elapsed % loopLenSeconds : elapsed;
+        setPlaybackPosition(position);
         animationFrame = requestAnimationFrame(animate);
       };
       animationFrame = requestAnimationFrame(animate);
@@ -427,7 +626,7 @@ const ProjectDetailPage = () => {
         cancelAnimationFrame(animationFrame);
       }
     };
-  }, [isPlaying]);
+  }, [isPlaying, loopEnabled, pixelsPerSecond, tracks]);
 
   const handlePlay = () => {
     setIsPlaying(true);
@@ -446,14 +645,57 @@ const ProjectDetailPage = () => {
   const handleStop = () => {
     setIsPlaying(false);
     setPlaybackPosition(0);
+    playbackPositionRef.current = 0;
+  };
+
+  const handleReturnToStart = () => {
+    setIsPlaying(false);
+    setPlaybackPosition(0);
+    playbackPositionRef.current = 0;
+  };
+
+  const handlePlayToggle = () => {
+    if (isPlaying) {
+      handlePause();
+    } else {
+      handlePlay();
+    }
+  };
+
+  const handleRecordToggle = () => {
+    setRecordArmed((prev) => !prev);
   };
 
   // Snap time to grid
-  const snapTime = (time) => {
-    if (!snapToGrid) return time;
-    const beats = time / secondsPerBeat;
-    const snappedBeats = Math.round(beats / snapValue) * snapValue;
-    return snappedBeats * secondsPerBeat;
+  // Soft magnetic snapping to neighboring clips on the same track
+  const applyMagnet = (time, track, itemId) => {
+    if (!track) return time;
+
+    const thresholdSeconds = secondsPerBeat * 0.25; // quarter-beat magnetic range
+    let closestTime = time;
+    let minDelta = thresholdSeconds;
+
+    const allItems =
+      track.isBackingTrack && chordItems?.length
+        ? [...(track.items || []), ...chordItems]
+        : track.items || [];
+
+    allItems.forEach((item) => {
+      if (!item || item._id === itemId) return;
+      const start = item.startTime || 0;
+      const end = start + (item.duration || 0);
+      const edges = [start, end];
+
+      edges.forEach((edge) => {
+        const delta = Math.abs(edge - time);
+        if (delta < minDelta) {
+          minDelta = delta;
+          closestTime = edge;
+        }
+      });
+    });
+
+    return closestTime;
   };
 
   // Calculate timeline width based on content
@@ -471,6 +713,7 @@ const ProjectDetailPage = () => {
 
   const saveChordProgression = async (chords) => {
     try {
+      pushHistory();
       const normalized = (chords || [])
         .map((entry) => normalizeChordEntry(entry))
         .filter((entry) => entry && entry.chordName);
@@ -513,25 +756,77 @@ const ProjectDetailPage = () => {
 
     // Create backing track if it doesn't exist
     try {
+      const defaultColor =
+        TRACK_COLOR_PALETTE[tracks.length % TRACK_COLOR_PALETTE.length];
       const response = await addTrack(projectId, {
         trackName: "Backing Track",
         isBackingTrack: true,
         trackType: "backing",
+        color: defaultColor,
       });
       if (response.success) {
-        const createdTrack = {
-          ...response.data,
-          isBackingTrack: true,
-          trackType: "backing",
-        };
-        setBackingTrack(createdTrack);
-        setTracks((prev) => [...prev, createdTrack]);
-        return createdTrack._id;
+        const [createdTrack] = normalizeTracks([
+          {
+            ...response.data,
+            isBackingTrack: true,
+            trackType: "backing",
+            color: response.data.color || defaultColor,
+          },
+        ]);
+        if (createdTrack) {
+          pushHistory();
+          setBackingTrack(createdTrack);
+          setTracks((prev) => [...prev, createdTrack]);
+          return createdTrack._id;
+        }
       }
     } catch (err) {
       console.error("Error creating backing track:", err);
     }
     return null;
+  };
+
+  const commitTempoChange = useCallback(async () => {
+    if (!project) return;
+    const parsed = parseInt(tempoDraft, 10);
+    if (Number.isNaN(parsed)) {
+      setTempoDraft(String(project.tempo || 120));
+      return;
+    }
+    const tempo = Math.min(300, Math.max(40, parsed));
+    if (tempo === project.tempo) {
+      setTempoDraft(String(project.tempo || tempo));
+      return;
+    }
+    setProject((prev) => (prev ? { ...prev, tempo } : prev));
+    try {
+      await updateProject(projectId, { tempo });
+    } catch (err) {
+      console.error("Error updating tempo:", err);
+      refreshProject();
+    }
+  }, [project, tempoDraft, projectId, refreshProject]);
+
+  const handleTimeSignatureChange = async (value) => {
+    if (!project || !value || project.timeSignature === value) return;
+    setProject((prev) => (prev ? { ...prev, timeSignature: value } : prev));
+    try {
+      await updateProject(projectId, { timeSignature: value });
+    } catch (err) {
+      console.error("Error updating time signature:", err);
+      refreshProject();
+    }
+  };
+
+  const handleKeyChange = async (value) => {
+    if (!project || !value || project.key === value) return;
+    setProject((prev) => (prev ? { ...prev, key: value } : prev));
+    try {
+      await updateProject(projectId, { key: value });
+    } catch (err) {
+      console.error("Error updating key:", err);
+      refreshProject();
+    }
   };
 
   const handleAddChord = async (chord) => {
@@ -566,6 +861,7 @@ const ProjectDetailPage = () => {
   const finishDragging = () => {
     setIsDraggingItem(false);
     setSelectedItem(null);
+    setDragOffset({ x: 0, trackId: null });
   };
 
   const handleDragOver = (e, trackId, position) => {
@@ -643,6 +939,7 @@ const ProjectDetailPage = () => {
       if (response.success) {
         // Optimistic update - add item to local state immediately
         const newItem = response.data;
+        pushHistory();
         setTracks((prevTracks) =>
           prevTracks.map((track) =>
             track._id === trackId
@@ -694,8 +991,12 @@ const ProjectDetailPage = () => {
     }
   };
 
-  const handleDeleteTimelineItem = async (itemId) => {
+  const handleDeleteTimelineItem = async (
+    itemId,
+    { skipConfirm = false } = {}
+  ) => {
     if (
+      !skipConfirm &&
       !window.confirm(
         "Are you sure you want to remove this lick from the timeline?"
       )
@@ -705,6 +1006,7 @@ const ProjectDetailPage = () => {
 
     try {
       // Optimistic update - remove item from local state immediately
+      pushHistory();
       setTracks((prevTracks) =>
         prevTracks.map((track) => ({
           ...track,
@@ -722,6 +1024,23 @@ const ProjectDetailPage = () => {
       refreshProject();
     }
   };
+
+  useEffect(() => {
+    const handleKeyDelete = (event) => {
+      if (event.key !== "Delete" || !focusedClipId) return;
+      event.preventDefault();
+      const chordIndex = getChordIndexFromId(focusedClipId);
+      if (chordIndex !== null) {
+        handleRemoveChord(focusedClipId);
+      } else {
+        handleDeleteTimelineItem(focusedClipId, { skipConfirm: true });
+      }
+      setFocusedClipId(null);
+    };
+
+    window.addEventListener("keydown", handleKeyDelete);
+    return () => window.removeEventListener("keydown", handleKeyDelete);
+  }, [focusedClipId, handleDeleteTimelineItem, handleRemoveChord]);
 
   const handleAddTrack = async () => {
     const typeInput = prompt(
@@ -744,20 +1063,29 @@ const ProjectDetailPage = () => {
     if (!trackName) return;
 
     try {
+      const defaultColor =
+        TRACK_COLOR_PALETTE[tracks.length % TRACK_COLOR_PALETTE.length];
       const response = await addTrack(projectId, {
         trackName,
         isBackingTrack,
         trackType: isBackingTrack ? "backing" : "lick",
+        color: defaultColor,
       });
       if (response.success) {
-        const normalizedTrack = {
-          ...response.data,
-          isBackingTrack,
-          trackType: isBackingTrack ? "backing" : "lick",
-        };
-        setTracks((prevTracks) => [...prevTracks, normalizedTrack]);
-        if (isBackingTrack) {
-          setBackingTrack(normalizedTrack);
+        const [normalizedTrack] = normalizeTracks([
+          {
+            ...response.data,
+            isBackingTrack,
+            trackType: isBackingTrack ? "backing" : "lick",
+            color: response.data.color || defaultColor,
+          },
+        ]);
+        if (normalizedTrack) {
+          pushHistory();
+          setTracks((prevTracks) => [...prevTracks, normalizedTrack]);
+          if (isBackingTrack) {
+            setBackingTrack(normalizedTrack);
+          }
         }
         refreshProject();
       }
@@ -770,6 +1098,7 @@ const ProjectDetailPage = () => {
   const handleUpdateTrack = async (trackId, updates) => {
     try {
       // Optimistic update - update track in local state immediately
+      pushHistory();
       setTracks((prevTracks) =>
         prevTracks.map((track) =>
           track._id === trackId ? { ...track, ...updates } : track
@@ -786,6 +1115,114 @@ const ProjectDetailPage = () => {
     }
   };
 
+  const openTrackMenu = useCallback((event, track) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const { clientX = 0, clientY = 0, currentTarget } = event;
+    let x = clientX;
+    let y = clientY;
+
+    if (!x && !y && currentTarget) {
+      const rect = currentTarget.getBoundingClientRect();
+      x = rect.right;
+      y = rect.bottom;
+    }
+
+    setTrackContextMenu({
+      isOpen: true,
+      x,
+      y,
+      trackId: track._id,
+    });
+  }, []);
+
+  const handleTrackRename = (track) => {
+    if (!track) return;
+    closeTrackMenu();
+    const newName = prompt("Rename track:", track.trackName || "Track");
+    if (!newName) return;
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === track.trackName) return;
+    handleUpdateTrack(track._id, { trackName: trimmed });
+  };
+
+  const handleTrackColorChange = (track, color) => {
+    if (!track || !color) return;
+    handleUpdateTrack(track._id, { color });
+  };
+
+  const handleTrackMove = async (track, direction) => {
+    if (!track || !direction) return;
+    closeTrackMenu();
+    const sorted = [...orderedTracks];
+    const currentIndex = sorted.findIndex((t) => t._id === track._id);
+    const targetIndex =
+      direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= sorted.length) return;
+    const targetTrack = sorted[targetIndex];
+    const currentOrder =
+      typeof track.trackOrder === "number" ? track.trackOrder : currentIndex;
+    const targetOrder =
+      typeof targetTrack.trackOrder === "number"
+        ? targetTrack.trackOrder
+        : targetIndex;
+
+    pushHistory();
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t._id === track._id) {
+          return { ...t, trackOrder: targetOrder };
+        }
+        if (t._id === targetTrack._id) {
+          return { ...t, trackOrder: currentOrder };
+        }
+        return t;
+      })
+    );
+
+    try {
+      await Promise.all([
+        updateTrack(projectId, track._id, { trackOrder: targetOrder }),
+        updateTrack(projectId, targetTrack._id, { trackOrder: currentOrder }),
+      ]);
+      refreshProject();
+    } catch (err) {
+      console.error("Error reordering tracks:", err);
+      refreshProject();
+    }
+  };
+
+  const handleTrackDelete = async (track) => {
+    if (!track) return;
+    closeTrackMenu();
+    if (
+      !window.confirm(
+        "Delete this track and all of its clips? This action cannot be undone."
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await deleteTrack(projectId, track._id);
+      pushHistory();
+      setTracks((prev) => prev.filter((t) => t._id !== track._id));
+      if (track.isBackingTrack) {
+        setBackingTrack(null);
+      }
+      if (
+        focusedClipId &&
+        (track.items || []).some((item) => item._id === focusedClipId)
+      ) {
+        setFocusedClipId(null);
+      }
+      refreshProject();
+    } catch (err) {
+      console.error("Error deleting track:", err);
+      refreshProject();
+    }
+  };
+
   // Handle clip dragging with smooth real-time updates
   useEffect(() => {
     if (!isDraggingItem || !selectedItem) return;
@@ -793,8 +1230,11 @@ const ProjectDetailPage = () => {
     let currentItem = null;
     let currentTrack = null;
 
-    // Find the item being dragged
-    tracks.forEach((track) => {
+    const candidateTracks = dragOffset.trackId
+      ? tracks.filter((track) => track._id === dragOffset.trackId)
+      : tracks;
+
+    candidateTracks.forEach((track) => {
       const item = track.items?.find((i) => i._id === selectedItem);
       if (item) {
         currentItem = item;
@@ -804,16 +1244,20 @@ const ProjectDetailPage = () => {
 
     if (!currentItem || !currentTrack) return;
 
-    const handleMouseMove = (e) => {
-      if (!timelineRef.current) return;
-
+    const computeSnappedTime = (event) => {
+      if (!timelineRef.current) return currentItem.startTime;
       const timelineElement = timelineRef.current;
       const timelineRect = timelineElement.getBoundingClientRect();
       const scrollLeft = timelineElement.scrollLeft || 0;
-      const x = e.clientX - timelineRect.left + scrollLeft;
-      const rawTime = Math.max(0, x / pixelsPerSecond);
-      const snappedTime = snapTime(rawTime);
+      const pointerX = event.clientX - timelineRect.left + scrollLeft;
+      const offsetX = dragOffset?.x || 0;
+      const adjustedX = Math.max(0, pointerX - offsetX);
+      const rawTime = Math.max(0, adjustedX / pixelsPerSecond);
+      return applyMagnet(rawTime, currentTrack, selectedItem);
+    };
 
+    const handleMouseMove = (e) => {
+      const snappedTime = computeSnappedTime(e);
       // Real-time visual update during drag
       setTracks((prevTracks) =>
         prevTracks.map((track) => ({
@@ -828,19 +1272,11 @@ const ProjectDetailPage = () => {
     };
 
     const handleMouseUp = async (e) => {
-      if (!timelineRef.current || !selectedItem) return;
-
-      const timelineElement = timelineRef.current;
-      const timelineRect = timelineElement.getBoundingClientRect();
-      const scrollLeft = timelineElement.scrollLeft || 0;
-      const x = e.clientX - timelineRect.left + scrollLeft;
-      const rawTime = Math.max(0, x / pixelsPerSecond);
-      const snappedTime = snapTime(rawTime);
-
+      const snappedTime = computeSnappedTime(e);
       await handleClipMove(selectedItem, snappedTime);
-
       setIsDraggingItem(false);
       setSelectedItem(null);
+      setDragOffset({ x: 0, trackId: null });
     };
 
     document.addEventListener("mousemove", handleMouseMove);
@@ -855,16 +1291,30 @@ const ProjectDetailPage = () => {
     isDraggingItem,
     selectedItem,
     pixelsPerSecond,
-    snapToGrid,
-    snapValue,
+
     secondsPerBeat,
     tracks,
+    dragOffset,
   ]);
 
-  const handleClipMouseDown = (e, item) => {
+  const handleClipMouseDown = (e, item, trackId) => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedItem(item._id);
+    setFocusedClipId(item._id);
+    if (timelineRef.current) {
+      const timelineRect = timelineRef.current.getBoundingClientRect();
+      const scrollLeft = timelineRef.current.scrollLeft || 0;
+      const pointerX = e.clientX - timelineRect.left + scrollLeft;
+      const itemStartX = item.startTime * pixelsPerSecond;
+      const offsetX = pointerX - itemStartX;
+      setDragOffset({
+        x: Number.isFinite(offsetX) ? Math.max(0, offsetX) : 0,
+        trackId,
+      });
+    } else {
+      setDragOffset({ x: 0, trackId: trackId || null });
+    }
     setIsDraggingItem(true);
   };
 
@@ -882,6 +1332,7 @@ const ProjectDetailPage = () => {
     }
     try {
       // Optimistic update - update item position in local state immediately
+      pushHistory();
       setTracks((prevTracks) =>
         prevTracks.map((track) => ({
           ...track,
@@ -908,10 +1359,10 @@ const ProjectDetailPage = () => {
       // Chord blocks have fixed duration for now
       return;
     }
-    const snappedDuration = snapTime(newDuration);
-    if (snappedDuration < 0.1) return; // Minimum duration
+    const snappedDuration = Math.max(0.1, newDuration);
     try {
       // Optimistic update - update item duration in local state immediately
+      pushHistory();
       setTracks((prevTracks) =>
         prevTracks.map((track) => ({
           ...track,
@@ -974,7 +1425,6 @@ const ProjectDetailPage = () => {
 
   if (!project) return null;
 
-  const timelineWidth = calculateTimelineWidth();
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
@@ -983,113 +1433,201 @@ const ProjectDetailPage = () => {
       year: "numeric",
     });
   };
+  const menuTrackIndex = menuTrack
+    ? orderedTracks.findIndex((track) => track._id === menuTrack._id)
+    : -1;
+  const canMoveMenuUp = menuTrackIndex > 0;
+  const canMoveMenuDown =
+    menuTrackIndex > -1 && menuTrackIndex < orderedTracks.length - 1;
+  const timelineWidth = calculateTimelineWidth();
+  const toolbarButtonClasses = (isActive, disabled) =>
+    [
+      "w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors",
+      disabled
+        ? "bg-gray-800 text-gray-500 cursor-not-allowed"
+        : isActive
+        ? "bg-white text-gray-900"
+        : "bg-gray-800 text-gray-200 hover:bg-gray-700",
+    ].join(" ");
 
   return (
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
       {/* Top Bar */}
-      <div className="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
-        {/* Left: Back Button and Project Title */}
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => navigate("/projects")}
-            className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm font-medium flex items-center gap-2 transition-colors"
-          >
-            <FaTimes size={14} className="rotate-45" />
-            Back to Projects
-          </button>
-          <h2 className="text-white font-semibold text-lg">
-            {project.title} - {formatDate(project.createdAt)}
-          </h2>
-        </div>
-
-        {/* Center: Playback Controls */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            {isPlaying ? (
-              <button
-                onClick={handlePause}
-                className="w-10 h-10 flex items-center justify-center bg-gray-800 hover:bg-gray-700 rounded text-white"
-              >
-                <FaPause size={14} />
-              </button>
-            ) : (
-              <button
-                onClick={handlePlay}
-                className="w-10 h-10 flex items-center justify-center bg-gray-800 hover:bg-gray-700 rounded text-white"
-              >
-                <FaPlay size={14} />
-              </button>
-            )}
+      <div className="bg-gray-900 border-b border-gray-800 px-6 py-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-3 justify-between">
+          <div className="flex items-center gap-3">
             <button
+              onClick={() => navigate("/projects")}
+              className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 transition-colors"
+            >
+              <FaTimes size={12} className="rotate-45" />
+              Back
+            </button>
+            <div className="flex items-center gap-1 bg-gray-800/70 rounded-full px-3 py-1">
+              <button
+                type="button"
+                className={toolbarButtonClasses(false, !historyStatus.canUndo)}
+                onClick={handleUndo}
+                disabled={!historyStatus.canUndo}
+                title="Undo"
+              >
+                <FaUndo size={12} />
+              </button>
+              <button
+                type="button"
+                className={toolbarButtonClasses(false, !historyStatus.canRedo)}
+                onClick={handleRedo}
+                disabled={!historyStatus.canRedo}
+                title="Redo"
+              >
+                <FaRedo size={12} />
+              </button>
+              <button
+                type="button"
+                className={toolbarButtonClasses(metronomeEnabled, false)}
+                onClick={() => setMetronomeEnabled((prev) => !prev)}
+                title="Metronome"
+              >
+                <RiPulseFill size={12} />
+              </button>
+            </div>
+            <div className="flex items-center gap-1 bg-gray-800/60 rounded-full px-3 py-1 text-xs text-gray-300">
+              <button
+                type="button"
+                onClick={() => setZoomLevel(Math.max(0.25, zoomLevel - 0.25))}
+                className="px-2 py-0.5 rounded-full bg-gray-900 hover:bg-gray-700 text-white"
+                title="Zoom out"
+              >
+                −
+              </button>
+              <span className="min-w-[48px] text-center">
+                {Math.round(zoomLevel * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomLevel(Math.min(4, zoomLevel + 0.25))}
+                className="px-2 py-0.5 rounded-full bg-gray-900 hover:bg-gray-700 text-white"
+                title="Zoom in"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap justify-center">
+            <div className="flex items-center bg-gray-800 rounded-full px-3 py-1 text-sm text-white gap-2">
+              <span className="text-xs uppercase text-gray-400">Tempo</span>
+              <input
+                type="number"
+                min={40}
+                max={300}
+                value={tempoDraft}
+                onChange={(e) => setTempoDraft(e.target.value)}
+                onBlur={commitTempoChange}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitTempoChange();
+                  }
+                }}
+                className="bg-transparent w-16 text-white text-sm focus:outline-none"
+              />
+              <span className="text-xs text-gray-400">bpm</span>
+            </div>
+            <div className="flex items-center bg-gray-800 rounded-full px-3 py-1 text-sm text-white gap-2">
+              <span className="text-xs uppercase text-gray-400">Time</span>
+              <select
+                value={project.timeSignature || "4/4"}
+                onChange={(e) => handleTimeSignatureChange(e.target.value)}
+                className="bg-transparent text-white text-sm focus:outline-none"
+              >
+                {TIME_SIGNATURES.map((signature) => (
+                  <option
+                    key={signature}
+                    className="bg-gray-900"
+                    value={signature}
+                  >
+                    {signature}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center bg-gray-800 rounded-full px-3 py-1 text-sm text-white gap-2">
+              <span className="text-xs uppercase text-gray-400">Key</span>
+              <select
+                value={project.key || "C Major"}
+                onChange={(e) => handleKeyChange(e.target.value)}
+                className="bg-transparent text-white text-sm focus:outline-none"
+              >
+                {KEY_OPTIONS.map((keyOption) => (
+                  <option
+                    key={keyOption}
+                    className="bg-gray-900"
+                    value={keyOption}
+                  >
+                    {keyOption}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 bg-gray-800/70 rounded-full px-3 py-1">
+            <button
+              type="button"
+              onClick={handleReturnToStart}
+              className={toolbarButtonClasses(false, false)}
+              title="Return to start"
+            >
+              <FaStepBackward size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={handlePlayToggle}
+              className={toolbarButtonClasses(isPlaying, false)}
+              title={isPlaying ? "Pause" : "Play"}
+            >
+              {isPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
+            </button>
+            <button
+              type="button"
               onClick={handleStop}
-              className="w-10 h-10 flex items-center justify-center bg-gray-800 hover:bg-gray-700 rounded text-white"
+              className={toolbarButtonClasses(false, false)}
+              title="Stop"
             >
-              <FaStop size={14} />
+              <FaStop size={12} />
             </button>
-            <button className="w-10 h-10 flex items-center justify-center bg-red-600 hover:bg-red-700 rounded text-white">
-              <FaCircle size={12} />
+            <button
+              type="button"
+              onClick={handleRecordToggle}
+              className={toolbarButtonClasses(recordArmed, false)}
+              title="Record arm"
+            >
+              <FaCircle
+                size={12}
+                className={recordArmed ? "text-red-500" : "text-gray-200"}
+              />
             </button>
-          </div>
-          <div className="text-center">
-            <div className="text-white font-medium">
-              {project.tempo || 120} BPM
-            </div>
-            <div className="text-gray-400 text-xs">
-              {project.timeSignature || "4/4"}
+            <button
+              type="button"
+              onClick={() => setLoopEnabled((prev) => !prev)}
+              className={toolbarButtonClasses(loopEnabled, false)}
+              title="Loop playback"
+            >
+              <FaSync size={12} />
+            </button>
+            <div className="text-xs font-mono text-blue-200 px-2">
+              {formattedPlayTime}
             </div>
           </div>
         </div>
-
-        {/* Right: Action Buttons & Zoom Controls */}
-        <div className="flex items-center gap-3">
-          {/* Zoom Controls */}
-          <div className="flex items-center gap-2 bg-gray-800 rounded px-2 py-1">
-            <button
-              onClick={() => setZoomLevel(Math.max(0.25, zoomLevel - 0.25))}
-              className="text-gray-400 hover:text-white px-2"
-              title="Zoom Out"
-            >
-              −
-            </button>
-            <span className="text-xs text-gray-400 min-w-[60px] text-center">
-              {Math.round(zoomLevel * 100)}%
-            </span>
-            <button
-              onClick={() => setZoomLevel(Math.min(4, zoomLevel + 0.25))}
-              className="text-gray-400 hover:text-white px-2"
-              title="Zoom In"
-            >
-              +
-            </button>
-          </div>
-
-          {/* Snap Toggle */}
-          <button
-            onClick={() => setSnapToGrid(!snapToGrid)}
-            className={`px-3 py-1 rounded text-xs font-medium ${
-              snapToGrid
-                ? "bg-orange-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-            }`}
-            title="Toggle Snap to Grid"
-          >
-            Snap
-          </button>
-
-          <button className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm font-medium">
-            Invite
-          </button>
-          <div className="flex items-center gap-1">
-            <div className="w-6 h-6 rounded-full bg-green-500 border-2 border-gray-900"></div>
-            <div className="w-6 h-6 rounded-full bg-green-500 border-2 border-gray-900"></div>
-            <div className="w-6 h-6 rounded-full bg-gray-600 border-2 border-gray-900"></div>
-          </div>
-          <button className="text-gray-400 hover:text-white">
-            <FaLock size={16} />
-          </button>
-          <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">
-            Publish
-          </button>
+        <div className="flex flex-wrap items-center justify-between text-xs text-gray-400">
+          <span>
+            {project.title} • {formatDate(project.createdAt)}
+          </span>
+          <span>
+            Zoom {Math.round(zoomLevel * 100)}% ·{" "}
+            {project.timeSignature || "4/4"} · {project.key || "Key"}
+          </span>
         </div>
       </div>
 
@@ -1111,7 +1649,14 @@ const ProjectDetailPage = () => {
             </div>
           </div>
           {/* Timeline Grid */}
-          <div className="flex-1 overflow-auto relative" ref={timelineRef}>
+          <div
+            className="flex-1 overflow-auto relative"
+            ref={timelineRef}
+            onClick={() => {
+              setFocusedClipId(null);
+              closeTrackMenu();
+            }}
+          >
             {/* Time Ruler with Beat Markers */}
             <div className="sticky top-0 z-20 flex">
               <div className="w-64 bg-gray-950 border-r border-gray-800 h-10 flex items-center px-4 text-xs font-semibold uppercase tracking-wide text-gray-400 sticky left-0 z-20">
@@ -1189,8 +1734,12 @@ const ProjectDetailPage = () => {
             )}
 
             {/* Track Lanes */}
-            {tracks.map((track, trackIndex) => {
+            {orderedTracks.map((track, trackIndex) => {
               const isHoveringTrack = dragOverTrack === track._id;
+              const isMenuOpen =
+                trackContextMenu.isOpen &&
+                trackContextMenu.trackId === track._id;
+              const trackAccent = track.color || "#2563eb";
               return (
                 <div
                   key={track._id}
@@ -1199,15 +1748,37 @@ const ProjectDetailPage = () => {
                 >
                   <div
                     className={`w-64 border-r border-gray-800 p-4 flex flex-col gap-3 sticky left-0 z-10 ${
-                      isHoveringTrack ? "bg-gray-900" : "bg-gray-950"
+                      isMenuOpen
+                        ? "bg-gray-800"
+                        : isHoveringTrack
+                        ? "bg-gray-900"
+                        : "bg-gray-950"
                     }`}
-                    style={{ minHeight: "inherit" }}
+                    style={{
+                      minHeight: "inherit",
+                      borderLeft: `4px solid ${trackAccent}`,
+                    }}
+                    onContextMenu={(e) => openTrackMenu(e, track)}
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-white font-medium text-sm">
-                        {track.trackName}
-                      </span>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: trackAccent }}
+                        />
+                        <span className="text-white font-medium text-sm truncate">
+                          {track.trackName}
+                        </span>
+                      </div>
                       <div className="flex gap-1">
+                        <button
+                          className="text-gray-500 hover:text-white p-1 rounded"
+                          title="Track options"
+                          onClick={(e) => openTrackMenu(e, track)}
+                        >
+                          <FaEllipsisV size={12} />
+                        </button>
                         <button
                           onClick={() =>
                             handleUpdateTrack(track._id, {
@@ -1250,7 +1821,8 @@ const ProjectDetailPage = () => {
                             volume: parseFloat(e.target.value),
                           })
                         }
-                        className="flex-1 h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-orange-500"
+                        className="flex-1 h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer"
+                        style={{ accentColor: trackAccent }}
                       />
                     </div>
                   </div>
@@ -1301,36 +1873,53 @@ const ProjectDetailPage = () => {
                         )
                       : track.items || []
                     ).map((item) => {
-                      const isSelected = selectedItem === item._id;
+                      const isSelected =
+                        focusedClipId === item._id || selectedItem === item._id;
                       const clipWidth = item.duration * pixelsPerSecond;
                       const clipLeft = item.startTime * pixelsPerSecond;
                       const isChord =
                         item._isChord ||
                         (item.chord && track.isBackingTrack && !item.lickId);
+                      const clipStyle = {
+                        left: `${clipLeft}px`,
+                        width: `${clipWidth}px`,
+                        top: "10px",
+                        height: "100px",
+                        minWidth: "60px",
+                        backgroundColor: !isChord ? trackAccent : undefined,
+                        borderColor: !isChord
+                          ? isSelected
+                            ? "#facc15"
+                            : trackAccent
+                          : undefined,
+                        boxShadow: isSelected
+                          ? "0 0 0 2px rgba(250, 204, 21, 0.55)"
+                          : !isChord
+                          ? "0 6px 12px rgba(0,0,0,0.35)"
+                          : undefined,
+                      };
 
                       return (
                         <div
                           key={item._id}
-                          className={`absolute rounded border-2 ${
+                          className={`absolute rounded border-2 text-white cursor-move transition-all ${
                             isChord
                               ? isSelected
                                 ? "bg-green-500 border-yellow-400 shadow-lg shadow-yellow-400/50"
                                 : "bg-green-600 border-green-700 hover:bg-green-700"
-                              : isSelected
-                              ? "bg-blue-500 border-yellow-400 shadow-lg shadow-yellow-400/50"
-                              : "bg-blue-600 border-blue-700 hover:bg-blue-700"
-                          } text-white cursor-move transition-all`}
-                          style={{
-                            left: `${clipLeft}px`,
-                            width: `${clipWidth}px`,
-                            top: "10px",
-                            height: "100px",
-                            minWidth: "60px",
-                          }}
+                              : ""
+                          }`}
+                          style={clipStyle}
                           title={
                             isChord ? item.chord : item.lickId?.title || "Lick"
                           }
-                          onMouseDown={(e) => handleClipMouseDown(e, item)}
+                          onMouseDown={(e) =>
+                            handleClipMouseDown(e, item, track._id)
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFocusedClipId(item._id);
+                          }}
                         >
                           {/* Waveform visualization if available */}
                           {item.lickId?.waveformData ? (
@@ -1405,6 +1994,9 @@ const ProjectDetailPage = () => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
+                              setFocusedClipId((prev) =>
+                                prev === item._id ? null : prev
+                              );
                               if (isChord) {
                                 handleRemoveChord(item._id);
                               } else {
@@ -1734,6 +2326,95 @@ const ProjectDetailPage = () => {
           </div>
         )}
       </div>
+
+      {trackContextMenu.isOpen && menuTrack && (
+        <div className="fixed inset-0 z-40" onClick={closeTrackMenu}>
+          <div
+            className="absolute z-50 w-64 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-4 space-y-3"
+            style={{
+              top: `${menuPosition.y}px`,
+              left: `${menuPosition.x}px`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <p className="text-sm font-semibold text-white truncate">
+                {menuTrack.trackName}
+              </p>
+              {menuTrack.isBackingTrack && (
+                <p className="text-xs text-orange-400 mt-1">Backing track</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => handleTrackRename(menuTrack)}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-gray-200 hover:bg-gray-800 transition-colors"
+            >
+              <FaPen size={12} />
+              Rename track
+            </button>
+            <div>
+              <div className="text-xs uppercase text-gray-400 mb-2 flex items-center gap-2">
+                <FaPalette size={12} />
+                Color
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {TRACK_COLOR_PALETTE.map((color) => {
+                  const isActive = menuTrack.color === color;
+                  return (
+                    <button
+                      type="button"
+                      key={color}
+                      onClick={() => handleTrackColorChange(menuTrack, color)}
+                      className={`w-6 h-6 rounded-full border ${
+                        isActive
+                          ? "ring-2 ring-white border-white"
+                          : "border-transparent"
+                      }`}
+                      style={{ backgroundColor: color }}
+                      title="Set track color"
+                    />
+                  );
+                })}
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={!canMoveMenuUp}
+              onClick={() => handleTrackMove(menuTrack, "up")}
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors ${
+                canMoveMenuUp
+                  ? "text-gray-200 hover:bg-gray-800"
+                  : "text-gray-600 cursor-not-allowed"
+              }`}
+            >
+              <FaArrowUp size={12} />
+              Move up
+            </button>
+            <button
+              type="button"
+              disabled={!canMoveMenuDown}
+              onClick={() => handleTrackMove(menuTrack, "down")}
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors ${
+                canMoveMenuDown
+                  ? "text-gray-200 hover:bg-gray-800"
+                  : "text-gray-600 cursor-not-allowed"
+              }`}
+            >
+              <FaArrowDown size={12} />
+              Move down
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTrackDelete(menuTrack)}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-red-400 hover:text-red-200 hover:bg-red-900/20 transition-colors"
+            >
+              <FaTrash size={12} />
+              Delete track
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Error Message */}
       {error && (
