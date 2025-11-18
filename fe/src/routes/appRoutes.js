@@ -8,6 +8,11 @@ import AdminLayout from "../layouts/adminLayout";
 import "bootstrap-icons/font/bootstrap-icons.css";
 import ProtectedRoute from "../components/common/ProtectedRoute";
 import AdminProtectedRoute from "../components/common/AdminProtectedRoute";
+// import LiveStreamCreate from "../pages/user/LiveRoomCreate";
+// import LiveStreamLive from "../pages/user/LiveRoomLive";
+import LiveListPage from "../pages/user/LiveListPage";
+import LiveViewPage from "../pages/user/LiveViewPage";
+import { initSocket } from "../services/user/socketService";
 import LickLibraryLayout from "../layouts/LickLibraryLayout";
 
 // Lazy load all page components for code splitting
@@ -179,6 +184,8 @@ const AppRoutes = () => {
           >
             {/* Nested routes accessible when authenticated */}
             <Route index element={<NewsFeed />} />
+            <Route path="live/:roomId" element={<LiveViewPage />} />
+            <Route path="live" element={<LiveListPage />} />
             <Route
               path="livestream/setup/:roomId"
               element={<LiveStreamCreate />}
@@ -197,40 +204,19 @@ const AppRoutes = () => {
             <Route path="licks/upload" element={<LickUploadPage />} />
             <Route path="licks/:lickId" element={<LickDetailPage />} />
             {/* Lick Library */}
-            <Route
-              path="library"
-              element={
-                <ProtectedRoute>
-                  <LickLibraryLayout />
-                </ProtectedRoute>
-              }
-            >
+            <Route path="library" element={<LickLibraryLayout />}>
               <Route index element={<Navigate to="my-licks" replace />} />
               <Route path="my-licks" element={<MyLicksPage />} />
               <Route path="community" element={<LickCommunityPage />} />
             </Route>
             {/* Playlists */}
-            <Route
-              path="playlists"
-              element={
-                <ProtectedRoute>
-                  <LickLibraryLayout />
-                </ProtectedRoute>
-              }
-            >
+            <Route path="playlists" element={<LickLibraryLayout />}>
               <Route index element={<MyPlaylistsPage />} />
               <Route path="community" element={<PlaylistCommunityPage />} />
               <Route path=":playlistId" element={<PlaylistDetailPage />} />
             </Route>
             {/* Projects */}
-            <Route
-              path="projects"
-              element={
-                <ProtectedRoute>
-                  <LickLibraryLayout />
-                </ProtectedRoute>
-              }
-            >
+            <Route path="projects" element={<LickLibraryLayout />}>
               <Route index element={<ProjectListPage />} />
               <Route path="create" element={<CreateProjectPage />} />
             </Route>

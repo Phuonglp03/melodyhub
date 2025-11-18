@@ -1,19 +1,21 @@
 // src/services/livestreamService.js
-import http from '../http';
+import api from '../api';
+import { store } from '../../redux/store';
 
 const getUserIdFromStorage = () => {
-  const userString = localStorage.getItem('user'); //
-  if (userString) {
-    const user = JSON.parse(userString);
-    // Giả định user object có _id (từ MongoDB)
-    return user._id || user.id || null; 
+
+  const state = store.getState();
+  const user = state.auth?.user?.user;
+  
+  if (user) {
+    return user._id || user.id || null;
   }
   return null;
 };
 
 
 const createLiveStream = async () => {
-  const { data } = await http.post('/livestreams', {});
+  const { data } = await api.post('/livestreams', {});
   return data;
 };
 
@@ -23,39 +25,55 @@ const getLiveStreamById = async (roomId) => {
   if (userId) {
     url += `?userId=${userId}`;
   }
-  const { data } = await http.get(url);
+  const { data } = await api.get(url);
   return data; 
 };
 
-const updateLiveStreamDetails = async (roomId, details) => {
-  const { data } = await http.patch(`/livestreams/${roomId}/details`, details);
-  return data;
-};
-
-const goLive = async (roomId) => {
-  const { data } = await http.patch(`/livestreams/${roomId}/go-live`);
-  return data;
-};
-
-const updatePrivacy = async (roomId, privacyType) => {
-  const { data } = await http.patch(`/livestreams/${roomId}/privacy`, { privacyType });
-  return data;
-};
-
-const endLiveStream = async (roomId) => {
-  const { data } = await http.patch(`/livestreams/${roomId}/end`);
-  return data;
-};
 
 const banUser = async (roomId, userId, { messageId }) => {
-  const { data } = await http.post(`/livestreams/${roomId}/ban/${userId}`, { messageId });
+  const { data } = await api.post(`/livestreams/${roomId}/ban/${userId}`, { messageId });
+  return data;
+};
+
+const unbanUser = async (roomId, userId) => {
+  const { data } = await api.post(`/livestreams/${roomId}/unban/${userId}`);
   return data;
 };
 
 const getChatHistory = async (roomId) => {
-  const { data } = await http.get(`/livestreams/${roomId}/chat`);
+  const { data } = await api.get(`/livestreams/${roomId}/chat`);
   return data;
 };
+const updateLiveStreamDetails = async (roomId, details) => {
+  const { data } = await api.patch(`/livestreams/${roomId}/details`, details);
+  return data;
+};
+const updatePrivacy = async (roomId, privacyType) => {
+  const { data } = await api.patch(`/livestreams/${roomId}/privacy`, { privacyType });
+  return data;
+};
+
+const endLiveStream = async (roomId) => {
+  const { data } = await api.patch(`/livestreams/${roomId}/end`);
+  return data;
+};
+
+const goLive = async (roomId) => {
+  const { data } = await api.patch(`/livestreams/${roomId}/go-live`);
+  return data;
+};
+
+const getActiveLiveStreams = async () => {
+  const { data } = await api.get('/livestreams'); 
+  return data; 
+};
+
+const getRoomViewers = async (roomId) => {
+  const { data} = await api.get(`/livestreams/${roomId}/viewers`);
+  return data;
+};
+
+
 export const livestreamService = {
   createLiveStream,
   getLiveStreamById,
@@ -65,4 +83,7 @@ export const livestreamService = {
   updatePrivacy,
   getChatHistory,
   banUser,
+  unbanUser,
+  getActiveLiveStreams,
+  getRoomViewers,
 };

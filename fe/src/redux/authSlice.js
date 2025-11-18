@@ -122,6 +122,24 @@ const authSlice = createSlice({
       state.isError = false;
       state.message = '';
     },
+    updateTokens: (state, action) => {
+      // Update tokens after refresh
+      if (state.user && action.payload) {
+        state.user = {
+          ...state.user,
+          token: action.payload.token,
+          refreshToken: action.payload.refreshToken,
+          user: {
+            ...state.user.user,
+            ...action.payload.user
+          }
+        };
+        console.log('[authSlice] Tokens updated:', { 
+          tokenPreview: action.payload.token?.substring(0, 20) + '...',
+          hasRefreshToken: !!action.payload.refreshToken 
+        });
+      }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -174,16 +192,25 @@ const authSlice = createSlice({
         state.isError = false;
         state.message = action.payload?.message || 'Đăng nhập thành công';
         
-        if (action.payload?.user) {
-          state.user = action.payload.user;
-        } else if (action.payload?.data?.user) {
-          state.user = action.payload.data.user;
-        }
-        
         // Handle email verification required
         if (action.payload?.requiresVerification) {
           state.requiresVerification = true;
           state.verificationEmail = action.payload.email;
+          return; // Don't set user if verification required
+        }
+        
+        // ✅ Save full data object including token & refreshToken
+        if (action.payload?.data) {
+          // authService returns { success, data: { token, refreshToken, user }, message }
+          state.user = action.payload.data;
+          console.log('[authSlice] Login successful, user data saved:', {
+            hasToken: !!action.payload.data.token,
+            hasRefreshToken: !!action.payload.data.refreshToken,
+            userId: action.payload.data.user?.id
+          });
+        } else if (action.payload?.user) {
+          // Fallback for other response formats
+          state.user = action.payload.user;
         }
       })
       .addCase(login.rejected, (state, action) => {
@@ -215,6 +242,6 @@ const authSlice = createSlice({
   },
 });
 
-export const { reset } = authSlice.actions;
+export const { reset, updateTokens } = authSlice.actions;
 
 export default authSlice.reducer;
