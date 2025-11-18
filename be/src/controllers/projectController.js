@@ -744,6 +744,103 @@ export const updateTimelineItem = async (req, res) => {
   }
 };
 
+// Bulk update timeline items (for buffered autosave)
+export const bulkUpdateTimelineItems = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { items } = req.body || {};
+    const userId = req.userId;
+
+    if (!Array.isArray(items) || !items.length) {
+      return res.status(400).json({
+        success: false,
+        message: "items array is required",
+      });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const isOwner = project.creatorId.toString() === userId;
+    const collaborator = await ProjectCollaborator.findOne({
+      projectId: project._id,
+      userId: new mongoose.Types.ObjectId(userId),
+    });
+
+    if (!isOwner && (!collaborator || collaborator.role === "viewer")) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to edit this project",
+      });
+    }
+
+    const sanitizeOne = (payload = {}) => {
+      const update = {};
+      if (payload.startTime !== undefined) {
+        update.startTime = Math.max(0, Number(payload.startTime) || 0);
+      }
+      if (payload.duration !== undefined) {
+        update.duration = Math.max(0, Number(payload.duration) || 0);
+      }
+      if (payload.offset !== undefined) {
+        update.offset = Math.max(0, Number(payload.offset) || 0);
+      }
+      if (payload.loopEnabled !== undefined) {
+        update.loopEnabled = Boolean(payload.loopEnabled);
+      }
+      if (payload.playbackRate !== undefined) {
+        update.playbackRate = Number(payload.playbackRate) || 1;
+      }
+      if (payload.sourceDuration !== undefined) {
+        update.sourceDuration = Math.max(
+          0,
+          Number(payload.sourceDuration) || 0
+        );
+      }
+      return update;
+    };
+
+    const ops = items.map(async (raw) => {
+      const { _id, itemId, trackId, ...rest } = raw || {};
+      const resolvedId = itemId || _id;
+      if (!resolvedId) return null;
+
+      const timelineItem = await ProjectTimelineItem.findById(resolvedId);
+      if (!timelineItem) return null;
+
+      const track = await ProjectTrack.findById(timelineItem.trackId);
+      if (!track || track.projectId.toString() !== projectId) {
+        return null;
+      }
+
+      const update = sanitizeOne(rest);
+      if (!Object.keys(update).length) return null;
+
+      await ProjectTimelineItem.updateOne({ _id: resolvedId }, { $set: update });
+      return resolvedId;
+    });
+
+    await Promise.all(ops);
+
+    return res.json({
+      success: true,
+      message: "Timeline items updated successfully",
+    });
+  } catch (error) {
+    console.error("Error bulk updating timeline items:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update timeline items",
+      error: error.message,
+    });
+  }
+};
+
 // Delete timeline item
 export const deleteTimelineItem = async (req, res) => {
   try {

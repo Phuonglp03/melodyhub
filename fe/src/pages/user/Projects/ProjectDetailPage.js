@@ -32,11 +32,13 @@ import {
   updateProject,
   addLickToTimeline,
   updateTimelineItem,
+  bulkUpdateTimelineItems,
   deleteTimelineItem,
   updateChordProgression as updateChordProgressionAPI,
   addTrack,
   updateTrack,
   deleteTrack,
+  deleteProject as deleteProjectApi,
   getInstruments,
 } from "../../../services/user/projectService";
 import { getCommunityLicks } from "../../../services/user/lickService";
@@ -254,6 +256,8 @@ const ProjectDetailPage = () => {
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isSavingTimeline, setIsSavingTimeline] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [zoomLevel, setZoomLevel] = useState(1); // Zoom multiplier
@@ -325,6 +329,8 @@ const ProjectDetailPage = () => {
   const historyRef = useRef([]);
   const futureRef = useRef([]);
   const playbackPositionRef = useRef(0);
+  const dirtyTimelineItemsRef = useRef(new Set());
+  const saveTimeoutRef = useRef(null);
   const menuPosition = useMemo(() => {
     const padding = 12;
     const width = 260;
@@ -339,6 +345,35 @@ const ProjectDetailPage = () => {
 
     return { x, y };
   }, [trackContextMenu.x, trackContextMenu.y, trackContextMenu.isOpen]);
+  const markTimelineItemDirty = useCallback((itemId) => {
+    if (!itemId) return;
+    dirtyTimelineItemsRef.current.add(itemId);
+  }, []);
+
+  const hasUnsavedTimelineChanges = dirtyTimelineItemsRef.current.size > 0;
+
+  const collectTimelineItemSnapshot = useCallback(
+    (itemId) => {
+      if (!itemId) return null;
+      for (const track of tracks) {
+        const found = (track.items || []).find((item) => item._id === itemId);
+        if (found) {
+          const normalized = normalizeTimelineItem(found);
+          return {
+            _id: normalized._id,
+            startTime: normalized.startTime,
+            duration: normalized.duration,
+            offset: normalized.offset,
+            loopEnabled: normalized.loopEnabled,
+            playbackRate: normalized.playbackRate,
+            sourceDuration: normalized.sourceDuration,
+          };
+        }
+      }
+      return null;
+    },
+    [tracks]
+  );
   const updateHistoryStatus = useCallback(() => {
     setHistoryStatus({
       canUndo: historyRef.current.length > 0,
@@ -356,6 +391,45 @@ const ProjectDetailPage = () => {
     futureRef.current = [];
     updateHistoryStatus();
   }, [tracks, chordProgression, updateHistoryStatus]);
+
+  const flushTimelineSaves = useCallback(async () => {
+    if (!projectId) return;
+    const ids = Array.from(dirtyTimelineItemsRef.current);
+    if (!ids.length) return;
+
+    const payload = ids
+      .map((id) => collectTimelineItemSnapshot(id))
+      .filter(Boolean);
+    if (!payload.length) {
+      dirtyTimelineItemsRef.current.clear();
+      return;
+    }
+
+    setIsSavingTimeline(true);
+    dirtyTimelineItemsRef.current.clear();
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+
+    try {
+      await bulkUpdateTimelineItems(projectId, payload);
+    } catch (err) {
+      console.error("Error bulk saving timeline:", err);
+      // Don't re-throw; we don't want to break the UI.
+    } finally {
+      setIsSavingTimeline(false);
+    }
+  }, [projectId, collectTimelineItemSnapshot]);
+
+  const scheduleTimelineAutosave = useCallback(() => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = setTimeout(() => {
+      flushTimelineSaves();
+    }, 15000);
+  }, [flushTimelineSaves]);
 
   const handleUndo = useCallback(() => {
     if (!historyRef.current.length) return;
@@ -474,6 +548,20 @@ const ProjectDetailPage = () => {
   useEffect(() => {
     playbackPositionRef.current = playbackPosition;
   }, [playbackPosition]);
+
+  // Warn on page unload if there are unsaved timeline changes
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      if (!dirtyTimelineItemsRef.current.size) return;
+      event.preventDefault();
+      // Chrome requires returnValue to be set.
+      event.returnValue = "";
+      return "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   useEffect(() => {
     setTempoDraft(String(project?.tempo || 120));
@@ -1130,6 +1218,27 @@ const ProjectDetailPage = () => {
     return () => window.removeEventListener("keydown", handleKeyDelete);
   }, [focusedClipId, handleDeleteTimelineItem, handleRemoveChord]);
 
+  const handleDeleteProject = async () => {
+    if (!project?._id || isDeleting) return;
+    if (
+      !window.confirm(
+        "Delete this project? All tracks, clips, and settings will be removed."
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setIsDeleting(true);
+      await deleteProjectApi(project._id);
+      navigate("/projects");
+    } catch (err) {
+      console.error("Error deleting project:", err);
+      setError(err.response?.data?.message || err.message || "Delete failed");
+      setIsDeleting(false);
+    }
+  };
+
   const handleAddTrack = async () => {
     const typeInput = prompt(
       "Create which type of track? Enter 'backing', 'audio', or 'midi':",
@@ -1322,7 +1431,7 @@ const ProjectDetailPage = () => {
     }
   };
 
-  // Handle clip dragging with smooth real-time updates (non-destructive)
+  // Handle clip dragging with smooth real-time updates (direct DOM, absolute positioning)
   useEffect(() => {
     if (!isDraggingItem || !selectedItem) return;
 
@@ -1343,38 +1452,48 @@ const ProjectDetailPage = () => {
 
     if (!currentItem || !currentTrack) return;
 
-    dragStateRef.current = {
-      originStart: currentItem.startTime,
-    };
-
     const clipElement = clipRefs.current.get(selectedItem);
     if (!clipElement) return;
 
-    const computeSnappedTime = (event) => {
-      if (!timelineRef.current) return currentItem.startTime;
+    const originalZIndex = clipElement.style.zIndex;
+    const originalCursor = clipElement.style.cursor;
+    clipElement.style.zIndex = "100";
+    clipElement.style.cursor = "grabbing";
+
+    // Use dragStateRef to keep drag aligned with the original start time,
+    // so normalization or re-renders don't make the clip "bounce" away from the cursor.
+    const computeRawTime = (event) => {
+      if (!timelineRef.current || !dragStateRef.current) {
+        return currentItem.startTime;
+      }
       const timelineElement = timelineRef.current;
       const timelineRect = timelineElement.getBoundingClientRect();
       const scrollLeft = timelineElement.scrollLeft || 0;
       const pointerX = event.clientX - timelineRect.left + scrollLeft;
-      const offsetX = dragOffset?.x || 0;
-      const adjustedX = Math.max(0, pointerX - offsetX);
-      const rawTime = Math.max(0, adjustedX / pixelsPerSecond);
-      return applyMagnet(rawTime, currentTrack, selectedItem);
+      const deltaX = pointerX - dragStateRef.current.originPointerX;
+      const rawTime =
+        dragStateRef.current.originStart + deltaX / pixelsPerSecond;
+      return Math.max(0, rawTime);
     };
 
     const handleMouseMove = (event) => {
-      if (!dragStateRef.current) return;
-      const snappedTime = computeSnappedTime(event);
-      const deltaSeconds = snappedTime - dragStateRef.current.originStart;
-      const deltaPixels = deltaSeconds * pixelsPerSecond;
-      clipElement.style.transform = `translateX(${deltaPixels}px)`;
+      const rawTime = computeRawTime(event);
+      const newLeftPixel = rawTime * pixelsPerSecond;
+      clipElement.style.left = `${newLeftPixel}px`;
     };
 
     const handleMouseUp = async (event) => {
-      if (!dragStateRef.current) return;
-      const snappedTime = computeSnappedTime(event);
-      clipElement.style.transform = "";
-      await handleClipMove(selectedItem, snappedTime);
+      const rawTime = computeRawTime(event);
+      const finalTime = Math.max(0, rawTime);
+
+      clipElement.style.zIndex = originalZIndex;
+      clipElement.style.cursor = originalCursor || "move";
+
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+
+      await handleClipMove(selectedItem, finalTime);
+
       setIsDraggingItem(false);
       setSelectedItem(null);
       setDragOffset({ x: 0, trackId: null });
@@ -1387,16 +1506,14 @@ const ProjectDetailPage = () => {
     return () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
-      if (clipElement) {
-        clipElement.style.transform = "";
-      }
+      clipElement.style.zIndex = originalZIndex;
+      clipElement.style.cursor = originalCursor;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isDraggingItem,
     selectedItem,
     pixelsPerSecond,
-    secondsPerBeat,
     tracks,
     dragOffset,
     applyMagnet,
@@ -1442,19 +1559,27 @@ const ProjectDetailPage = () => {
         })
       );
 
-      try {
-        await updateTimelineItem(projectId, itemId, sanitized);
-        refreshProject();
-      } catch (err) {
-        console.error("Error resizing clip:", err);
-        refreshProject();
-      }
+      // mark dirty & schedule autosave; actual DB write is deferred
+      markTimelineItemDirty(itemId);
+      scheduleTimelineAutosave();
     },
-    [projectId, refreshProject]
+    [markTimelineItemDirty, scheduleTimelineAutosave]
   );
 
   useEffect(() => {
     if (!resizeState) return;
+
+    const clipElement = clipRefs.current.get(resizeState.clipId);
+    if (!clipElement) return;
+
+    const waveformElement = clipElement.querySelector(
+      '[data-clip-waveform="true"]'
+    );
+    const originalStyles = {
+      width: clipElement.style.width,
+      left: clipElement.style.left,
+      waveformLeft: waveformElement?.style.left ?? null,
+    };
 
     const computeResizeValues = (event) => {
       const deltaX = event.clientX - resizeState.startX;
@@ -1470,16 +1595,19 @@ const ProjectDetailPage = () => {
           Math.max(deltaSeconds, lowerBound),
           upperBound
         );
-        const newStartTime = resizeState.originStart + clampedDelta;
-        const newOffset = Math.max(0, resizeState.originOffset + clampedDelta);
-        const newDuration = Math.max(
+
+        const startTime = resizeState.originStart + clampedDelta;
+        const duration = Math.max(
           MIN_CLIP_DURATION,
           resizeState.originDuration - clampedDelta
         );
+        const offset = Math.max(0, resizeState.originOffset + clampedDelta);
+
         return {
-          startTime: newStartTime,
-          duration: newDuration,
-          offset: newOffset,
+          startTime,
+          duration,
+          offset,
+          isLeft: true,
         };
       }
 
@@ -1492,32 +1620,39 @@ const ProjectDetailPage = () => {
         Math.max(deltaSeconds, lowerBound),
         upperBound
       );
-      const newDuration = Math.max(
+      const duration = Math.max(
         MIN_CLIP_DURATION,
         resizeState.originDuration + clampedDelta
       );
-      return { duration: newDuration };
+
+      return {
+        duration,
+        isLeft: false,
+      };
     };
 
     const handleMouseMove = (event) => {
       const values = computeResizeValues(event);
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => {
-          if (track._id !== resizeState.trackId) return track;
-          return {
-            ...track,
-            items: (track.items || []).map((item) =>
-              item._id === resizeState.clipId
-                ? normalizeTimelineItem({ ...item, ...values })
-                : item
-            ),
-          };
-        })
-      );
+      if (!values) return;
+
+      if (values.duration !== undefined) {
+        clipElement.style.width = `${values.duration * pixelsPerSecond}px`;
+      }
+
+      if (values.isLeft && values.startTime !== undefined) {
+        clipElement.style.left = `${values.startTime * pixelsPerSecond}px`;
+
+        if (waveformElement && values.offset !== undefined) {
+          waveformElement.style.left = `-${values.offset * pixelsPerSecond}px`;
+        }
+      }
     };
 
     const handleMouseUp = async (event) => {
-      const finalValues = computeResizeValues(event);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+
+      const finalValues = computeResizeValues(event) || {};
       setResizeState(null);
       await handleClipResize(resizeState.clipId, finalValues);
     };
@@ -1528,6 +1663,11 @@ const ProjectDetailPage = () => {
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
+      clipElement.style.width = originalStyles.width;
+      clipElement.style.left = originalStyles.left;
+      if (waveformElement && originalStyles.waveformLeft !== null) {
+        waveformElement.style.left = originalStyles.waveformLeft;
+      }
     };
   }, [resizeState, pixelsPerSecond, handleClipResize]);
 
@@ -1542,11 +1682,19 @@ const ProjectDetailPage = () => {
       const pointerX = e.clientX - timelineRect.left + scrollLeft;
       const itemStartX = item.startTime * pixelsPerSecond;
       const offsetX = pointerX - itemStartX;
+      dragStateRef.current = {
+        originStart: item.startTime || 0,
+        originPointerX: pointerX,
+      };
       setDragOffset({
         x: Number.isFinite(offsetX) ? Math.max(0, offsetX) : 0,
         trackId,
       });
     } else {
+      dragStateRef.current = {
+        originStart: item.startTime || 0,
+        originPointerX: 0,
+      };
       setDragOffset({ x: 0, trackId: trackId || null });
     }
     setIsDraggingItem(true);
@@ -1604,13 +1752,9 @@ const ProjectDetailPage = () => {
       })
     );
 
-    try {
-      await updateTimelineItem(projectId, itemId, { startTime: newStartTime });
-      refreshProject();
-    } catch (err) {
-      console.error("Error moving clip:", err);
-      refreshProject();
-    }
+    // mark dirty & schedule autosave; actual DB write is deferred
+    markTimelineItemDirty(itemId);
+    scheduleTimelineAutosave();
   };
 
   function getChordDuration() {
@@ -1692,6 +1836,14 @@ const ProjectDetailPage = () => {
               <FaTimes size={12} className="rotate-45" />
               Back
             </button>
+            <button
+              onClick={handleDeleteProject}
+              disabled={isDeleting}
+              className="flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium border border-red-800 text-red-200 bg-red-900/40 hover:bg-red-900/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <FaTrash size={12} />
+              {isDeleting ? "Deleting..." : "Delete"}
+            </button>
             <div className="flex items-center gap-1 bg-gray-800/70 rounded-full px-3 py-1">
               <button
                 type="button"
@@ -1711,6 +1863,25 @@ const ProjectDetailPage = () => {
               >
                 <FaRedo size={12} />
               </button>
+              <button
+                type="button"
+                onClick={flushTimelineSaves}
+                disabled={isSavingTimeline || !hasUnsavedTimelineChanges}
+                className={toolbarButtonClasses(
+                  hasUnsavedTimelineChanges,
+                  isSavingTimeline || !hasUnsavedTimelineChanges
+                )}
+                title="Save timeline changes"
+              >
+                Save
+              </button>
+              <span className="text-[10px] uppercase tracking-wide text-gray-400">
+                {isSavingTimeline
+                  ? "Saving..."
+                  : hasUnsavedTimelineChanges
+                  ? "Unsaved edits"
+                  : "All changes saved"}
+              </span>
               <button
                 type="button"
                 className={toolbarButtonClasses(metronomeEnabled, false)}
@@ -2130,13 +2301,7 @@ const ProjectDetailPage = () => {
                                 track.isBackingTrack) &&
                               !item.lickId);
                           const sourceDurationSeconds =
-                            item.sourceDuration ||
-                            item.lickId?.duration ||
-                            item.duration;
-                          const waveformWidth =
-                            sourceDurationSeconds * pixelsPerSecond;
-                          const waveformOffset =
-                            (item.offset || 0) * pixelsPerSecond;
+                            item.sourceDuration || item.lickId?.duration || 300;
                           const clipLabel = isChord
                             ? item.chordName ||
                               item.chord ||
@@ -2179,7 +2344,7 @@ const ProjectDetailPage = () => {
                                   clipRefs.current.delete(item._id);
                                 }
                               }}
-                              className={`absolute rounded border-2 text-white cursor-move transition-all overflow-hidden relative ${
+                              className={`absolute rounded border-2 text-white cursor-move transition-all overflow-hidden ${
                                 isChord
                                   ? isSelected
                                     ? "bg-green-500 border-yellow-400 shadow-lg shadow-yellow-400/50"
@@ -2210,37 +2375,59 @@ const ProjectDetailPage = () => {
                                       )
                                         ? waveform
                                         : [];
-                                      const sampleCount = Math.min(
-                                        50,
-                                        Math.floor(clipWidth / 4)
+                                      if (!waveformArray.length) return null;
+
+                                      // Use full source duration for the film-strip width
+                                      const waveformDurationSeconds =
+                                        item.lickId?.duration ||
+                                        item.sourceDuration ||
+                                        item.duration ||
+                                        1;
+
+                                      // Decide how many bars we want visible, based on clip width
+                                      const targetBarCount = Math.max(
+                                        25,
+                                        Math.min(100, Math.floor(clipWidth / 3))
                                       );
                                       const step = Math.max(
                                         1,
                                         Math.floor(
-                                          waveformArray.length / sampleCount
+                                          waveformArray.length / targetBarCount
                                         )
                                       );
 
+                                      const filmStripWidthPx =
+                                        waveformDurationSeconds *
+                                        pixelsPerSecond;
+
                                       return (
-                                        <div
-                                          className="absolute top-0 bottom-0"
-                                          style={{
-                                            left: `-${waveformOffset}px`,
-                                            width: `${waveformWidth}px`,
-                                          }}
-                                        >
-                                          <div className="h-full bg-blue-800/30 rounded flex items-end justify-around gap-0.5 px-2">
+                                        <div className="absolute inset-0 overflow-hidden">
+                                          <div
+                                            data-clip-waveform="true"
+                                            className="absolute top-0 bottom-0 h-full flex items-end gap-0.5 opacity-80 px-2 pointer-events-none"
+                                            style={{
+                                              // Full underlying audio duration, not just clip duration
+                                              width: `${filmStripWidthPx}px`,
+                                              // Shift left by offset so the "window" crops it
+                                              left: `-${
+                                                (item.offset || 0) *
+                                                pixelsPerSecond
+                                              }px`,
+                                            }}
+                                          >
                                             {waveformArray
+                                              // Downsample for performance only; do NOT slice by offset
                                               .filter(
-                                                (_, idx) => idx % step === 0
+                                                (_value, idx) =>
+                                                  idx % step === 0
                                               )
-                                              .slice(0, sampleCount)
                                               .map((value, idx) => (
                                                 <div
                                                   key={idx}
                                                   className="bg-white rounded-t"
                                                   style={{
-                                                    width: "2px",
+                                                    width: "3px",
+                                                    flexShrink: 0, // prevent squishing when zooming
                                                     height: `${Math.min(
                                                       100,
                                                       Math.abs(value || 0) * 100
@@ -2256,15 +2443,17 @@ const ProjectDetailPage = () => {
                                     }
                                   })()
                                 ) : (
-                                  <div className="absolute inset-0 flex flex-col justify-between p-2 bg-black/10">
-                                    <div className="font-medium text-sm truncate">
-                                      {clipLabel}
-                                    </div>
+                                  <div className="absolute inset-0 flex flex-col justify-end p-2 bg-black/10">
                                     <div className="text-xs opacity-75">
                                       {item.startTime.toFixed(2)}s
                                     </div>
                                   </div>
                                 )}
+                              </div>
+
+                              {/* Clip title + track name label */}
+                              <div className="absolute top-1 left-1 max-w-[85%] rounded bg-black/60 px-2 py-0.5 text-[10px] leading-tight font-medium truncate pointer-events-none">
+                                {track.trackName || "Track"} · {clipLabel}
                               </div>
 
                               {/* Resize handles */}

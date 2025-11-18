@@ -85,6 +85,19 @@ export const updateTimelineItem = async (projectId, itemId, updateData) => {
   }
 };
 
+// Bulk update timeline items (buffered autosave)
+export const bulkUpdateTimelineItems = async (projectId, items) => {
+  try {
+    const res = await http.put(`/projects/${projectId}/timeline/items/bulk`, {
+      items,
+    });
+    return res.data;
+  } catch (error) {
+    console.error("Error bulk updating timeline items:", error);
+    throw error;
+  }
+};
+
 // Delete timeline item
 export const deleteTimelineItem = async (projectId, itemId) => {
   try {
