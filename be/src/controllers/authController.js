@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import sendMail from './sendMail.js';
 import { validationResult } from 'express-validator';
 import crypto from 'crypto';
+import { DEFAULT_AVATAR_URL, normalizeAvatarUrl } from '../constants/userConstants.js';
 
 // Generate access and refresh tokens
 export const generateTokens = async (user) => {
@@ -127,7 +128,8 @@ export const login = async (req, res) => {
         username: user.username,
         displayName: user.displayName,
         roleId: user.roleId,
-        verifiedEmail: user.verifiedEmail
+        verifiedEmail: user.verifiedEmail,
+        avatarUrl: normalizeAvatarUrl(user.avatarUrl)
       }
     });
   } catch (error) {
@@ -178,7 +180,8 @@ export const refreshToken = async (req, res) => {
           username: user.username,
           displayName: user.displayName,
           roleId: user.roleId,
-          verifiedEmail: user.verifiedEmail
+          verifiedEmail: user.verifiedEmail,
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl)
         }
       });
     });
@@ -305,7 +308,8 @@ export const verifyEmail = async (req, res) => {
         username: user.username,
         displayName: user.displayName,
         roleId: user.roleId,
-        verifiedEmail: true
+        verifiedEmail: true,
+        avatarUrl: normalizeAvatarUrl(user.avatarUrl)
       }
     });
 
@@ -426,7 +430,8 @@ export const register = async (req, res) => {
       otpExpires,
       verifiedEmail: false,
       roleId: 'user',
-      isActive: true
+      isActive: true,
+      avatarUrl: DEFAULT_AVATAR_URL
     });
 
     // First save the user to get _id
@@ -446,7 +451,8 @@ export const register = async (req, res) => {
         username: newUser.username,
         displayName: newUser.displayName,
         roleId: newUser.roleId,
-        verifiedEmail: newUser.verifiedEmail
+        verifiedEmail: newUser.verifiedEmail,
+        avatarUrl: DEFAULT_AVATAR_URL
       },
       requiresVerification: true
     });
