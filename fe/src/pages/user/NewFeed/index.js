@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Upload, Select, Dropdown, Radio } from 'antd';
-import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined, MoreOutlined, FlagOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Select, Dropdown, Radio } from 'antd';
+import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined, MoreOutlined, FlagOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, CustomerServiceOutlined, LinkOutlined } from '@ant-design/icons';
 import { listPosts, createPost, getPostById, updatePost, deletePost } from '../../../services/user/post';
 import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments, getPostLikes } from '../../../services/user/post';
 import { followUser, unfollowUser, getFollowSuggestions, getProfileById, getFollowingList, getMyProfile } from '../../../services/user/profile';
@@ -122,6 +122,24 @@ const LeaderboardItem = ({ name, icon, iconColor = '#111' }) => (
   </Space>
 );
 
+const composerSectionStyle = {
+  background: '#141414',
+  border: '1px solid #262626',
+  borderRadius: 16,
+  padding: '18px 20px'
+};
+
+const composerLabelStyle = {
+  color: '#f8fafc',
+  fontWeight: 600,
+  fontSize: 15
+};
+
+const composerHintStyle = {
+  color: '#9ca3af',
+  fontSize: 13
+};
+
 const formatTime = (isoString) => {
   try {
     const date = new Date(isoString);
@@ -178,7 +196,7 @@ const NewsFeed = () => {
   const loaderRef = React.useRef(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newText, setNewText] = useState('');
-  const [files, setFiles] = useState([]);
+  const [showMediaUpload, setShowMediaUpload] = useState(false);
   const [posting, setPosting] = useState(false);
   const [maxChars] = useState(300);
   const [linkPreview, setLinkPreview] = useState(null);
@@ -242,6 +260,26 @@ const NewsFeed = () => {
     return null;
   });
   const [loadingProfile, setLoadingProfile] = useState(false);
+
+  const composerUser = useMemo(() => {
+    if (currentUser && Object.keys(currentUser).length > 0) return currentUser;
+    try {
+      const raw = localStorage.getItem('user');
+      if (raw) {
+        const obj = JSON.parse(raw);
+        return obj?.user || obj;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }, [currentUser]);
+
+  const composerAvatarUrl = composerUser?.avatarUrl || composerUser?.avatar_url || '';
+  const composerDisplayName = composerUser?.displayName || composerUser?.username || 'Bạn';
+  const composerInitial = composerDisplayName ? composerDisplayName[0].toUpperCase() : 'U';
+  const usedChars = newText?.length || 0;
+  const charPercent = maxChars ? Math.min(100, Math.round((usedChars / maxChars) * 100)) : 0;
 
   const extractFirstUrl = (text) => {
     if (!text) return null;
@@ -1032,42 +1070,18 @@ const NewsFeed = () => {
       console.log('[UI] Click Đăng, preparing payload...');
       // Không chặn khi thiếu userId ở UI; service sẽ tự chèn từ localStorage
       // và BE sẽ trả lỗi rõ ràng nếu thiếu
-      let newPost = null;
-      if (files.length > 0) {
-        const form = new FormData();
-        form.append('postType', 'status_update');
-        form.append('textContent', newText.trim());
-        if (linkPreview) {
-          form.append('linkPreview', JSON.stringify(linkPreview));
-        }
-        if (selectedLickIds.length > 0) {
-          form.append('attachedLickIds', JSON.stringify(selectedLickIds));
-        }
-        files.forEach((f) => {
-          if (f.originFileObj) form.append('media', f.originFileObj);
-        });
-        // eslint-disable-next-line no-console
-        console.log('[UI] Sending multipart createPost...', { fileCount: files.length, lickCount: selectedLickIds.length });
-        const response = await createPost(form);
-        // Service trả về { success: true, data: post } từ axios response.data
-        // axios đã unwrap response.data rồi, nên response chính là { success: true, data: post }
-        newPost = response?.data || response;
-        // eslint-disable-next-line no-console
-        console.log('[UI] Post created response:', { response, newPost, hasId: !!newPost?._id });
-      } else {
-        // eslint-disable-next-line no-console
-        console.log('[UI] Sending JSON createPost...');
-        const payload = { postType: 'status_update', textContent: newText.trim(), linkPreview };
-        if (selectedLickIds.length > 0) {
-          payload.attachedLickIds = selectedLickIds;
-        }
-        const response = await createPost(payload);
-        // Service trả về { success: true, data: post } từ axios response.data
-        // axios đã unwrap response.data rồi, nên response chính là { success: true, data: post }
-        newPost = response?.data || response;
-        // eslint-disable-next-line no-console
-        console.log('[UI] Post created response:', { response, newPost, hasId: !!newPost?._id });
+      // eslint-disable-next-line no-console
+      console.log('[UI] Sending JSON createPost...');
+      const payload = { postType: 'status_update', textContent: newText.trim(), linkPreview };
+      if (selectedLickIds.length > 0) {
+        payload.attachedLickIds = selectedLickIds;
       }
+      const response = await createPost(payload);
+      // Service trả về { success: true, data: post } từ axios response.data
+      // axios đã unwrap response.data rồi, nên response chính là { success: true, data: post }
+      let newPost = response?.data || response;
+      // eslint-disable-next-line no-console
+      console.log('[UI] Post created response:', { response, newPost, hasId: !!newPost?._id });
       
       // Thêm post mới vào đầu danh sách ngay lập tức
       if (newPost && newPost._id) {
@@ -1129,7 +1143,6 @@ const NewsFeed = () => {
       }
       
       setNewText('');
-      setFiles([]);
       setSelectedLickIds([]);
       setIsModalOpen(false);
       message.success('Đăng bài thành công');
@@ -1224,7 +1237,7 @@ const NewsFeed = () => {
                 <Avatar 
                   size={40} 
                   src={validAvatarUrl || undefined}
-                  style={{ backgroundColor: '#722ed1' }}
+                  
                 >
                   {initial}
                 </Avatar>
@@ -1257,8 +1270,7 @@ const NewsFeed = () => {
                   onClick={handleModalClose}
                   style={{ height: 44, borderRadius: 22, padding: 0, width: 108, background: '#1f1f1f', color: '#e5e7eb', borderColor: '#303030' }}
                 >Hủy</Button>
-                <Button 
-                  type="primary" 
+                <Button              
                   shape="round"
                   loading={posting} 
                   onClick={handleCreatePost}
@@ -1271,20 +1283,62 @@ const NewsFeed = () => {
               header: { background: '#0f0f10', borderBottom: '1px solid #1f1f1f' }
             }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <Input.TextArea
-                placeholder="Chia sẻ điều gì đó..."
-                autoSize={{ minRows: 3, maxRows: 8 }}
-                value={newText}
-                onChange={(e) => setNewText(e.target.value)}
-                maxLength={maxChars}
-                showCount
-              />
-              <div>
-                <Text style={{ color: '#e5e7eb', marginBottom: 8, display: 'block' }}>Đính kèm lick (chỉ licks active của bạn)</Text>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Space size={12} align="center">
+                  <Avatar
+                    size={48}
+                    src={composerAvatarUrl && typeof composerAvatarUrl === 'string' && composerAvatarUrl.trim() !== '' ? composerAvatarUrl : undefined}
+                    style={{ background: '#7c3aed' }}
+                  >
+                    {composerInitial}
+                  </Avatar>
+                  <div>
+                    <Text style={{ color: '#fff', fontWeight: 600 }}>{composerDisplayName}</Text>
+                    <div style={{ color: '#9ca3af', fontSize: 13 }}>Sẵn sàng chia sẻ cảm hứng với cộng đồng</div>
+                  </div>
+                </Space>
+                <Tag color="#7c3aed" style={{ borderRadius: 999, margin: 0, color: '#fff', border: 'none' }}>Bài viết mới</Tag>
+              </div>
+
+              <div style={{ ...composerSectionStyle, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <Input.TextArea
+                  placeholder="Chia sẻ điều gì đó..."
+                  autoSize={{ minRows: 4, maxRows: 10 }}
+                  value={newText}
+                  onChange={(e) => setNewText(e.target.value)}
+                  maxLength={maxChars}
+                  allowClear
+                  style={{
+                    background: '#0b0b0f',
+                    border: '1px solid #222',
+                    borderRadius: 14,
+                    padding: 16,
+                    color: '#f8fafc',
+                    fontSize: 16,
+                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.02)'
+                  }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#9ca3af', fontSize: 13 }}>Bạn có thể chèn link lick hoặc video để auto preview</span>
+                  <span style={{ color: '#fff', fontWeight: 600 }}>{usedChars}/{maxChars}</span>
+                </div>
+                <div style={{ height: 6, width: '100%', background: '#1f1f1f', borderRadius: 999 }}>
+                  <div style={{ height: '100%', width: `${charPercent}%`, background: charPercent > 80 ? '#f97316' : '#7c3aed', borderRadius: 999, transition: 'width 0.2s ease' }} />
+                </div>
+              </div>
+
+              <div style={{ ...composerSectionStyle, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={composerLabelStyle}>Đính kèm lick</div>
+                    <div style={composerHintStyle}>Chỉ hiển thị các lick đang active trong tài khoản</div>
+                  </div>
+                  <Tag color="#1f1f1f" style={{ borderRadius: 999, color: '#9ca3af', border: 'none' }}>Tùy chọn</Tag>
+                </div>
                 <Select
                   mode="multiple"
-                  placeholder="Chọn lick để đính kèm..."
+                  placeholder="Tìm và chọn lick để đính kèm..."
                   value={selectedLickIds}
                   onChange={setSelectedLickIds}
                   loading={loadingLicks}
@@ -1295,40 +1349,19 @@ const NewsFeed = () => {
                     (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
                   }
                   popupClassName="dark-select-dropdown"
+                  allowClear
                 />
               </div>
-              <Upload.Dragger
-                multiple
-                fileList={files}
-                accept="audio/*,video/*"
-                beforeUpload={() => false}
-                onChange={({ fileList }) => setFiles(fileList)}
-                listType="text"
-                style={{ padding: 8, borderColor: '#303030', background: '#0f0f10', color: '#e5e7eb', minHeight: 150 }}
-                itemRender={(originNode, file, fileList, actions) => (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', color: '#e5e7eb', padding: '6px 8px', borderBottom: '1px dashed #303030' }}>
-                    <span style={{ color: '#e5e7eb', fontSize: 16, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 12 }}>{file.name}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Button danger size="small" onClick={actions.remove}>Xóa</Button>
-                    </div>
-                  </div>
-                )}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-                  <p style={{ margin: 0, color: '#e5e7eb' }}>Kéo thả hoặc bấm để chọn file (audio/video)</p>
-                  <Text style={{ color: '#bfbfbf' }}>Hỗ trợ tối đa 10 file, 100MB mỗi file</Text>
-                </div>
-              </Upload.Dragger>
               {extractFirstUrl(newText) && (
-                <div style={{ border: '1px solid #303030', borderRadius: 8, padding: 12, background: '#111', color: '#e5e7eb' }}>
+                <div style={{ ...composerSectionStyle, border: '1px solid #303030', background: '#111', color: '#e5e7eb', display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {linkLoading ? (
                     <Text style={{ color: '#bfbfbf' }}>Đang tải preview…</Text>
                   ) : (
                     <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                       {linkPreview?.thumbnailUrl ? (
-                        <img src={linkPreview.thumbnailUrl} alt="preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6 }} />
+                        <img src={linkPreview.thumbnailUrl} alt="preview" style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 10 }} />
                       ) : (
-                        <div style={{ width: 64, height: 64, borderRadius: 6, background: '#1f1f1f' }} />
+                        <div style={{ width: 64, height: 64, borderRadius: 10, background: '#1f1f1f' }} />
                       )}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{linkPreview?.title || extractFirstUrl(newText)}</div>

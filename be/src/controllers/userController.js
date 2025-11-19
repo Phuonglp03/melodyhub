@@ -3,14 +3,7 @@ import Post from '../models/Post.js';
 import UserFollow from '../models/UserFollow.js';
 import cloudinary, { uploadImage } from '../config/cloudinary.js';
 import { notifyUserFollowed } from '../utils/notificationHelper.js';
-
-// Helper function to normalize avatar URL
-const normalizeAvatarUrl = (avatarUrl) => {
-  if (!avatarUrl || typeof avatarUrl !== 'string' || avatarUrl.trim() === '') {
-    return '/default-avatar.svg';
-  }
-  return avatarUrl.trim();
-};
+import { normalizeAvatarUrl } from '../constants/userConstants.js';
 
 // Get current user profile (authenticated user)
 export const getCurrentUserProfile = async (req, res) => {
@@ -48,7 +41,7 @@ export const getCurrentUserProfile = async (req, res) => {
           location: user.location,
           bio: user.bio,
           links: user.links || [],
-          avatarUrl: user.avatarUrl,
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl),
           coverPhotoUrl: user.coverPhotoUrl,
           roleId: user.roleId,
           isActive: user.isActive,
@@ -169,7 +162,7 @@ export const getUserProfileById = async (req, res) => {
           birthday: user.birthday,
           bio: user.bio,
           links: user.links || [],
-          avatarUrl: user.avatarUrl,
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl),
           coverPhotoUrl: user.coverPhotoUrl,
           verifiedEmail: user.verifiedEmail,
           totalLikesReceived: user.totalLikesReceived,
@@ -271,7 +264,7 @@ export const getUserProfileByUsername = async (req, res) => {
           birthday: user.birthday,
           bio: user.bio,
           links: user.links || [],
-          avatarUrl: user.avatarUrl,
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl),
           coverPhotoUrl: user.coverPhotoUrl,
           verifiedEmail: user.verifiedEmail,
           totalLikesReceived: user.totalLikesReceived,
@@ -396,7 +389,7 @@ export const updateUserProfile = async (req, res) => {
           location: user.location,
           bio: user.bio,
           links: user.links || [],
-          avatarUrl: user.avatarUrl,
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl),
           coverPhotoUrl: user.coverPhotoUrl,
           roleId: user.roleId,
           verifiedEmail: user.verifiedEmail,

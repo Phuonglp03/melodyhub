@@ -2,6 +2,7 @@ import { io } from 'socket.io-client';
 import { store } from '../../redux/store';
 // URL của server (cổng Express/Socket.IO)
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:9999';
+console.log('[Socket.IO] SOCKET_URL resolved to:', SOCKET_URL);
 
 
 const getUserIdFromStorage = () => {
@@ -21,6 +22,7 @@ export const initSocket = (explicitUserId) => {
   }
   const userId = explicitUserId || store.getState().auth.user?.user?.id;
   if (userId) {
+    console.log('[Socket.IO] Attempting connection to:', SOCKET_URL);
     socket = io(SOCKET_URL, {
       query: { userId: userId },
     });
