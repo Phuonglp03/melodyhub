@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { livestreamService } from '../../../services/user/livestreamService';
 import { Card, Avatar } from 'antd'; 
+import { normalizeAvatarUrl } from '../../../constants/user';
 
 const { Meta } = Card;
 
@@ -57,7 +58,7 @@ const LiveListPage = () => {
             onClick={() => handleStreamClick(stream._id)}
           >
             <Meta
-              avatar={<Avatar src={stream.hostId.avatarUrl || 'default_avatar.png'} />}
+              avatar={<Avatar src={normalizeAvatarUrl(stream?.hostId?.avatarUrl)} />}
               title={<span style={{ color: 'white' }}>{stream.title}</span>}
               description={<span style={{ color: 'gray' }}>{stream.hostId.displayName}</span>}
             />

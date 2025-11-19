@@ -1,9 +1,11 @@
+// authController.js
 import User from '../models/User.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import sendMail from './sendMail.js';
 import { validationResult } from 'express-validator';
 import crypto from 'crypto';
+import { DEFAULT_AVATAR_URL, normalizeAvatarUrl } from '../constants/userConstants.js';
 
 // Generate access and refresh tokens
 export const generateTokens = async (user) => {
@@ -13,6 +15,7 @@ export const generateTokens = async (user) => {
       userId: user._id,
       email: user.email,
       roleId: user.roleId
+      // THÊM permissions vào payload JWT nếu cần
     },
     process.env.JWT_SECRET || 'your-secret-key',
     { expiresIn: '1h' }
@@ -76,7 +79,9 @@ export const login = async (req, res) => {
     const { email, password } = req.body;
     
     // Kiểm tra thông tin đăng nhập
-    const user = await User.findOne({ email }).select('+passwordHash');
+    // ⭐ LƯU Ý: User.findOne({ email }).select('+passwordHash')
+    // Nếu bạn muốn lấy 'permissions', nó phải được Mongoose trả về.
+    const user = await User.findOne({ email }).select('+passwordHash +permissions'); // ⭐ THÊM +permissions
     
     // Kiểm tra xem tài khoản có tồn tại không
     if (!user) {
@@ -87,7 +92,7 @@ export const login = async (req, res) => {
     }
 
     // Kiểm tra mật khẩu
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({ 
         success: false,
@@ -104,7 +109,7 @@ export const login = async (req, res) => {
         email: user.email
       });
     }
-
+console.log('User Permissions after Mongoose query:', user.permissions);
     const { accessToken, refreshToken } = await generateTokens(user);
 
     // Set refresh token vào httpOnly cookie
@@ -127,7 +132,9 @@ export const login = async (req, res) => {
         username: user.username,
         displayName: user.displayName,
         roleId: user.roleId,
-        verifiedEmail: user.verifiedEmail
+        verifiedEmail: user.verifiedEmail,
+        permissions: user.permissions || [], // ⭐ THÊM permissions
+        avatarUrl: normalizeAvatarUrl(user.avatarUrl)
       }
     });
   } catch (error) {
@@ -148,7 +155,7 @@ export const refreshToken = async (req, res) => {
     }
 
     // Tìm user có refresh token này
-    const user = await User.findOne({ refreshToken: refreshToken }).select('+refreshToken');
+    const user = await User.findOne({ refreshToken: refreshToken }).select('+refreshToken +permissions'); // ⭐ THÊM +permissions
     if (!user) {
       return res.status(403).json({ message: 'Refresh token không hợp lệ' });
     }
@@ -178,7 +185,9 @@ export const refreshToken = async (req, res) => {
           username: user.username,
           displayName: user.displayName,
           roleId: user.roleId,
-          verifiedEmail: user.verifiedEmail
+          verifiedEmail: user.verifiedEmail,
+          permissions: user.permissions || [], // ⭐ THÊM permissions
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl)
         }
       });
     });
@@ -305,7 +314,9 @@ export const verifyEmail = async (req, res) => {
         username: user.username,
         displayName: user.displayName,
         roleId: user.roleId,
-        verifiedEmail: true
+        verifiedEmail: true,
+        permissions: user.permissions || [], // ⭐ THÊM permissions
+        avatarUrl: normalizeAvatarUrl(user.avatarUrl)
       }
     });
 
@@ -426,7 +437,8 @@ export const register = async (req, res) => {
       otpExpires,
       verifiedEmail: false,
       roleId: 'user',
-      isActive: true
+      isActive: true,
+      avatarUrl: DEFAULT_AVATAR_URL
     });
 
     // First save the user to get _id
@@ -446,7 +458,8 @@ export const register = async (req, res) => {
         username: newUser.username,
         displayName: newUser.displayName,
         roleId: newUser.roleId,
-        verifiedEmail: newUser.verifiedEmail
+        verifiedEmail: newUser.verifiedEmail,
+        avatarUrl: DEFAULT_AVATAR_URL
       },
       requiresVerification: true
     });
@@ -535,7 +548,7 @@ export const forgotPassword = async (req, res) => {
     const resetToken = generateResetToken();
     const resetTokenExpiry = Date.now() + 3600000; // 1 hour (3600000 ms) from now
 
-    // Save reset token to user
+    // Save reset token
     user.resetPasswordToken = resetToken;
     user.resetPasswordExpires = resetTokenExpiry;
     await user.save();
