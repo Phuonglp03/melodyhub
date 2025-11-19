@@ -10,7 +10,8 @@ import {
     updatePrivacy,
     getChatHistory,
     banUser,
-    unbanUser
+    unbanUser,
+    getRoomViewers
   } from '../../controllers/user/liveroomController.js';
 
 const router = Router();
