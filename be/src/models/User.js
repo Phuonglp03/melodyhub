@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { DEFAULT_AVATAR_URL, normalizeAvatarUrl } from '../constants/userConstants.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -12,7 +13,7 @@ const userSchema = new mongoose.Schema(
     location: { type: String, trim: true, default: '' },
     bio: { type: String },
     links: { type: [String], default: [] },
-    avatarUrl: { type: String,trim: true,default: '' },
+    avatarUrl: { type: String, trim: true, default: DEFAULT_AVATAR_URL },
     coverPhotoUrl: { type: String, trim: true, default: '' },
     roleId: { type: String, enum: ['user', 'admin'], default: 'user', required: true },
     permissions: { type: [String], default: [] },
@@ -49,6 +50,7 @@ const userSchema = new mongoose.Schema(
         delete ret.otpExpires;
         delete ret.resetPasswordToken;
         delete ret.resetPasswordExpires;
+        ret.avatarUrl = normalizeAvatarUrl(ret.avatarUrl);
         return ret;
       },
     },
@@ -68,6 +70,11 @@ userSchema.pre('save', async function (next) {
   } catch (error) {
     next(error);
   }
+});
+
+userSchema.pre('save', function (next) {
+  this.avatarUrl = normalizeAvatarUrl(this.avatarUrl);
+  next();
 });
 
 // Phương thức kiểm tra mật khẩu
