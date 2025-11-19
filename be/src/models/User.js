@@ -15,6 +15,7 @@ const userSchema = new mongoose.Schema(
     avatarUrl: { type: String,trim: true,default: '' },
     coverPhotoUrl: { type: String, trim: true, default: '' },
     roleId: { type: String, enum: ['user', 'admin'], default: 'user', required: true },
+    permissions: { type: [String], default: [] },
     isActive: { type: Boolean, default: true, required: true },
     verifiedEmail: { type: Boolean, default: false, required: true },
     otp: { type: String },
