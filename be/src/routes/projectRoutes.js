@@ -57,6 +57,9 @@ router.post(
 
 router.get("/", getUserProjects);
 
+// Get available instruments - MUST be before /:projectId route
+router.get("/instruments", getInstruments);
+
 router.get("/:projectId", getProjectById);
 
 router.put(
@@ -73,9 +76,6 @@ router.put(
 );
 
 router.delete("/:projectId", deleteProject);
-
-// Get available instruments
-router.get("/instruments", getInstruments);
 
 // Timeline operations
 router.post(

@@ -6,6 +6,7 @@ import ProjectCollaborator from "../models/ProjectCollaborator.js";
 import User from "../models/User.js";
 import Lick from "../models/Lick.js";
 import Instrument from "../models/Instrument.js";
+import { getAllInstruments, getInstrumentById } from "../services/instrumentService.js";
 
 const TRACK_TYPES = ["audio", "midi", "backing"];
 const TIMELINE_ITEM_TYPES = ["lick", "chord", "midi"];
@@ -333,7 +334,7 @@ export const updateProject = async (req, res) => {
     if (backingInstrumentId !== undefined) {
       // Validate instrument exists
       if (backingInstrumentId) {
-        const instrument = await Instrument.findById(backingInstrumentId);
+        const instrument = await getInstrumentById(backingInstrumentId);
         if (!instrument) {
           return res.status(400).json({
             success: false,
@@ -364,17 +365,19 @@ export const updateProject = async (req, res) => {
 // Get all available instruments
 export const getInstruments = async (req, res) => {
   try {
-    const instruments = await Instrument.find().sort({ name: 1 });
+    const instruments = await getAllInstruments();
+    
     res.json({
       success: true,
       data: instruments,
     });
   } catch (error) {
     console.error("Error fetching instruments:", error);
+    console.error("Error stack:", error.stack);
     res.status(500).json({
       success: false,
       message: "Failed to fetch instruments",
-      error: error.message,
+      error: error.message || "Unknown error",
     });
   }
 };
@@ -751,6 +754,20 @@ export const bulkUpdateTimelineItems = async (req, res) => {
     const { items } = req.body || {};
     const userId = req.userId;
 
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "User not authenticated",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(projectId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid project ID format",
+      });
+    }
+
     if (!Array.isArray(items) || !items.length) {
       return res.status(400).json({
         success: false,
@@ -758,7 +775,18 @@ export const bulkUpdateTimelineItems = async (req, res) => {
       });
     }
 
-    const project = await Project.findById(projectId);
+    let project;
+    try {
+      project = await Project.findById(projectId);
+    } catch (err) {
+      console.error("Error finding project:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Database error finding project",
+        error: err.message,
+      });
+    }
+
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -767,10 +795,19 @@ export const bulkUpdateTimelineItems = async (req, res) => {
     }
 
     const isOwner = project.creatorId.toString() === userId;
-    const collaborator = await ProjectCollaborator.findOne({
-      projectId: project._id,
-      userId: new mongoose.Types.ObjectId(userId),
-    });
+    let collaborator = null;
+    
+    if (!isOwner) {
+      try {
+        collaborator = await ProjectCollaborator.findOne({
+          projectId: project._id,
+          userId: new mongoose.Types.ObjectId(userId),
+        });
+      } catch (err) {
+         console.error("Error checking collaborator:", err);
+         // Continue as if not collaborator, will fail permission check below
+      }
+    }
 
     if (!isOwner && (!collaborator || collaborator.role === "viewer")) {
       return res.status(403).json({
@@ -810,11 +847,16 @@ export const bulkUpdateTimelineItems = async (req, res) => {
         try {
           const { _id, itemId, trackId, ...rest } = raw || {};
           const resolvedId = itemId || _id;
-          if (!resolvedId) {
-            return { success: false, id: null, error: "Missing item ID" };
+          
+          if (!resolvedId || !mongoose.Types.ObjectId.isValid(resolvedId)) {
+            return { success: false, id: resolvedId, error: "Invalid or missing item ID" };
           }
 
-          const timelineItem = await ProjectTimelineItem.findById(resolvedId);
+          // We don't need to fetch the item if we just want to update it by ID
+          // But we need to verify it belongs to the project.
+          // Optimization: Fetch only trackId to verify project ownership
+          const timelineItem = await ProjectTimelineItem.findById(resolvedId).select("trackId");
+          
           if (!timelineItem) {
             return {
               success: false,
@@ -823,7 +865,7 @@ export const bulkUpdateTimelineItems = async (req, res) => {
             };
           }
 
-          const track = await ProjectTrack.findById(timelineItem.trackId);
+          const track = await ProjectTrack.findById(timelineItem.trackId).select("projectId");
           if (!track || track.projectId.toString() !== projectId) {
             return {
               success: false,

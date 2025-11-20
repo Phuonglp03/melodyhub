@@ -47,6 +47,8 @@ import {
 } from "../../../services/user/lickService";
 import { getChords } from "../../../services/chordService";
 import { useSelector } from "react-redux";
+import { fetchTagsGrouped } from "../../../services/user/tagService";
+import * as Tone from "tone";
 
 const HISTORY_LIMIT = 50;
 const MIN_CLIP_DURATION = 0.1;
@@ -280,10 +282,18 @@ const ProjectDetailPage = () => {
   const [availableLicks, setAvailableLicks] = useState([]);
   const [loadingLicks, setLoadingLicks] = useState(false);
 
-  // Tag filters for lick search
+  // Tag filters for lick search - all 6 categories from upload page
   const [selectedGenre, setSelectedGenre] = useState(null);
-  const [selectedInstrumentTag, setSelectedInstrumentTag] = useState(null);
-  const [selectedMood, setSelectedMood] = useState(null);
+  const [selectedType, setSelectedType] = useState(null); // Type (Instrument)
+  const [selectedEmotional, setSelectedEmotional] = useState(null); // Emotional (Mood)
+  const [selectedTimbre, setSelectedTimbre] = useState(null);
+  const [selectedArticulation, setSelectedArticulation] = useState(null);
+  const [selectedCharacter, setSelectedCharacter] = useState(null);
+  
+  // Tag groups from database
+  const [tagGroups, setTagGroups] = useState({});
+  const [activeTagDropdown, setActiveTagDropdown] = useState(null); // which dropdown is open
+  const tagDropdownRef = useRef(null);
 
   // Chord progression - now stored as backing track items
   const [chordProgression, setChordProgression] = useState([]);
@@ -336,9 +346,8 @@ const ProjectDetailPage = () => {
   const playbackPositionRef = useRef(0);
   const dirtyTimelineItemsRef = useRef(new Set());
   const saveTimeoutRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const audioBuffersRef = useRef(new Map()); // Cache audio buffers
-  const scheduledSourcesRef = useRef([]); // Track scheduled audio sources
+  const playersRef = useRef(null); // Tone.Players for managing audio clips
+  const audioBuffersRef = useRef(new Map()); // Cache loaded audio URLs
   const menuPosition = useMemo(() => {
     const padding = 12;
     const width = 260;
@@ -424,6 +433,9 @@ const ProjectDetailPage = () => {
       await bulkUpdateTimelineItems(projectId, payload);
     } catch (err) {
       console.error("Error bulk saving timeline:", err);
+      if (err.response && err.response.data) {
+        console.error("Backend error details:", err.response.data);
+      }
       // Don't re-throw; we don't want to break the UI.
     } finally {
       setIsSavingTimeline(false);
@@ -670,7 +682,7 @@ const ProjectDetailPage = () => {
     );
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lickSearchTerm, selectedGenre, selectedInstrumentTag, selectedMood]);
+  }, [lickSearchTerm, selectedGenre, selectedType, selectedEmotional, selectedTimbre, selectedArticulation, selectedCharacter]);
 
   // Fetch project with loading state (only for initial load)
   const fetchProject = async (showLoading = false) => {
@@ -743,12 +755,17 @@ const ProjectDetailPage = () => {
     try {
       setLoadingLicks(true);
 
-      // Build tags filter
+      // Build tags filter - backend expects comma-separated tag names only
       const tagsArray = [];
-      if (selectedGenre) tagsArray.push(`genre:${selectedGenre}`);
-      if (selectedInstrumentTag)
-        tagsArray.push(`instrument:${selectedInstrumentTag}`);
-      if (selectedMood) tagsArray.push(`mood:${selectedMood}`);
+      
+      // Collect all selected tag names from all 6 categories
+      if (selectedGenre) tagsArray.push(selectedGenre);
+      if (selectedType) tagsArray.push(selectedType);
+      if (selectedEmotional) tagsArray.push(selectedEmotional);
+      if (selectedTimbre) tagsArray.push(selectedTimbre);
+      if (selectedArticulation) tagsArray.push(selectedArticulation);
+      if (selectedCharacter) tagsArray.push(selectedCharacter);
+      
       const tagsFilter = tagsArray.join(",");
 
       const response = await getCommunityLicks({
@@ -772,22 +789,38 @@ const ProjectDetailPage = () => {
     }
   };
 
-  // Playback control with playhead movement
+  // Playback control with playhead movement synced to Tone.Transport
   useEffect(() => {
     let animationFrame = null;
-    let startTimestamp = null;
+    let lastStateUpdate = 0;
 
     if (isPlaying) {
       const width = calculateTimelineWidth();
       const loopLenSeconds = Math.max(1, width / pixelsPerSecond);
 
-      const animate = (timestamp) => {
-        if (startTimestamp === null) {
-          startTimestamp = timestamp - playbackPositionRef.current * 1000;
+      const animate = () => {
+        // Sync position with Tone.Transport
+        const position = loopEnabled 
+          ? Tone.Transport.seconds % loopLenSeconds 
+          : Tone.Transport.seconds;
+        
+        // 1. Direct DOM update for smooth 60fps animation without re-renders
+        if (playheadRef.current) {
+          const leftPos = TRACK_COLUMN_WIDTH + position * pixelsPerSecond;
+          playheadRef.current.style.left = `${leftPos}px`;
         }
-        const elapsed = (timestamp - startTimestamp) / 1000;
-        const position = loopEnabled ? elapsed % loopLenSeconds : elapsed;
-        setPlaybackPosition(position);
+
+        // 2. Update ref immediately for logic (pause/resume accuracy)
+        playbackPositionRef.current = position;
+
+        // 3. Throttled state update for timer display (every 100ms is enough for UI)
+        // This prevents the component from re-rendering 60 times a second
+        const now = Date.now();
+        if (now - lastStateUpdate > 100) {
+          setPlaybackPosition(position);
+          lastStateUpdate = now;
+        }
+
         animationFrame = requestAnimationFrame(animate);
       };
       animationFrame = requestAnimationFrame(animate);
@@ -800,63 +833,65 @@ const ProjectDetailPage = () => {
     };
   }, [isPlaying, loopEnabled, pixelsPerSecond, tracks]);
 
-  // Initialize AudioContext
+  // Initialize Tone.js
   useEffect(() => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext ||
-        window.webkitAudioContext)();
+    // Initialize Tone.Players for managing multiple audio clips
+    if (!playersRef.current) {
+      playersRef.current = new Tone.Players().toDestination();
     }
+
+    // Set initial BPM
+    Tone.Transport.bpm.value = bpm;
+
     return () => {
-      // Cleanup: stop all audio and close context if needed
-      scheduledSourcesRef.current.forEach((source) => {
-        try {
-          source.stop();
-        } catch (e) {
-          // Source might already be stopped
-        }
-      });
-      scheduledSourcesRef.current = [];
+      // Cleanup: stop transport and dispose players
+      if (Tone.Transport.state === "started") {
+        Tone.Transport.stop();
+      }
+      if (playersRef.current) {
+        playersRef.current.dispose();
+        playersRef.current = null;
+      }
     };
   }, []);
 
-  // Load audio buffer for a lick
-  const loadAudioBuffer = async (audioUrl) => {
-    if (audioBuffersRef.current.has(audioUrl)) {
-      return audioBuffersRef.current.get(audioUrl);
+  // Sync BPM changes with Tone.Transport
+  useEffect(() => {
+    Tone.Transport.bpm.value = bpm;
+  }, [bpm]);
+
+  // Load audio into Tone.js Players
+  const loadAudioToPlayer = async (clipId, audioUrl) => {
+    if (!playersRef.current) return false;
+
+    // Check if already loaded
+    if (audioBuffersRef.current.has(clipId)) {
+      return true;
     }
 
     try {
-      const response = await fetch(audioUrl);
-      const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = await audioContextRef.current.decodeAudioData(
-        arrayBuffer
-      );
-      audioBuffersRef.current.set(audioUrl, audioBuffer);
-      return audioBuffer;
+      // Add the audio buffer to the Tone.Players
+      await new Promise((resolve, reject) => {
+        playersRef.current.add(clipId, audioUrl, () => {
+          audioBuffersRef.current.set(clipId, audioUrl);
+          resolve();
+        }, reject);
+      });
+      return true;
     } catch (error) {
-      console.error("Error loading audio:", error);
-      return null;
+      console.error("Error loading audio to Tone.js:", error);
+      return false;
     }
   };
 
-  // Schedule audio playback for timeline items
+  // Schedule audio playback for timeline items using Tone.js
   const scheduleAudioPlayback = async (startTime = 0) => {
-    if (!audioContextRef.current || !isPlaying) return;
+    if (!playersRef.current || !isPlaying) return;
 
-    // Stop any existing playback
-    scheduledSourcesRef.current.forEach((source) => {
-      try {
-        source.stop();
-      } catch (e) {
-        // Source might already be stopped
-      }
-    });
-    scheduledSourcesRef.current = [];
+    // Stop all currently playing clips
+    playersRef.current.stopAll();
 
-    const currentTime = audioContextRef.current.currentTime;
-    const scheduleOffset = 0.1; // Small delay to ensure smooth playback
-
-    // Schedule all clips that should be playing
+    // Load and schedule all clips that should be playing
     for (const track of tracks) {
       if (track.muted) continue; // Skip muted tracks
 
@@ -865,9 +900,10 @@ const ProjectDetailPage = () => {
 
         const clipStart = item.startTime || 0;
         const clipEnd = clipStart + (item.duration || 0);
+        const clipId = item._id;
 
-        // Check if clip should be playing at startTime
-        if (clipStart <= startTime && clipEnd > startTime) {
+        // Check if clip overlaps with current playback time
+        if (clipEnd > startTime) {
           try {
             // Get audio URL for the lick
             const audioResponse = await playLickAudio(
@@ -878,36 +914,40 @@ const ProjectDetailPage = () => {
               continue;
 
             const audioUrl = audioResponse.data.audioUrl;
-            const audioBuffer = await loadAudioBuffer(audioUrl);
-            if (!audioBuffer) continue;
+            
+            // Load audio into Tone.Players
+            const loaded = await loadAudioToPlayer(clipId, audioUrl);
+            if (!loaded) continue;
 
-            // Create source and schedule playback
-            const source = audioContextRef.current.createBufferSource();
-            source.buffer = audioBuffer;
-            source.playbackRate.value = item.playbackRate || 1;
+            // Get the player for this clip
+            const player = playersRef.current.player(clipId);
+            if (!player) continue;
 
-            // Apply track volume
-            const gainNode = audioContextRef.current.createGain();
-            gainNode.gain.value = (track.volume || 1) * (track.solo ? 1 : 0.7);
+            // Set playback rate
+            player.playbackRate = item.playbackRate || 1;
 
-            source.connect(gainNode);
-            gainNode.connect(audioContextRef.current.destination);
+            // Set volume (Tone.js uses decibels)
+            const volumeDb = Tone.gainToDb((track.volume || 1) * (track.solo ? 1 : 0.7));
+            player.volume.value = volumeDb;
 
-            // Calculate when to start playback
-            const playOffset = item.offset || 0;
-            const scheduleTime = currentTime + scheduleOffset;
+            // Calculate when to start relative to current transport position
+            const offset = item.offset || 0;
+            const duration = item.duration || 0;
 
-            // Start playback from the correct offset
-            source.start(scheduleTime, playOffset);
-
-            scheduledSourcesRef.current.push(source);
-
-            // Handle when clip should stop
-            const clipDuration = item.duration || 0;
-            const remainingDuration = clipEnd - startTime;
-            if (remainingDuration < clipDuration) {
-              source.stop(scheduleTime + remainingDuration);
+            // Calculate the time offset from current playback position
+            let playOffset = offset;
+            let timeFromNow = clipStart - startTime;
+            
+            if (clipStart < startTime) {
+              // Clip has already started, we need to start mid-clip immediately
+              playOffset = offset + (startTime - clipStart);
+              timeFromNow = 0;
             }
+
+            // Schedule playback using immediate start or scheduled time
+            // Time is relative to "now", so we use `+${timeFromNow}` notation
+            const startTimeNotation = timeFromNow === 0 ? "now" : `+${timeFromNow}`;
+            player.start(startTimeNotation, playOffset, duration);
           } catch (error) {
             console.error("Error scheduling audio playback:", error);
           }
@@ -917,40 +957,49 @@ const ProjectDetailPage = () => {
   };
 
   const handlePlay = async () => {
-    if (audioContextRef.current?.state === "suspended") {
-      await audioContextRef.current.resume();
-    }
+    // Start Tone.js audio context if needed
+    await Tone.start();
+
+    // Set the transport position to current playback position
+    Tone.Transport.seconds = playbackPositionRef.current;
+
+    // Update BPM in case it changed
+    Tone.Transport.bpm.value = bpm;
 
     setIsPlaying(true);
+    
+    // Schedule audio playback
     await scheduleAudioPlayback(playbackPositionRef.current);
+    
+    // Start the Tone.js Transport
+    Tone.Transport.start();
   };
 
   const handlePause = () => {
     setIsPlaying(false);
-    // Stop all audio sources
-    scheduledSourcesRef.current.forEach((source) => {
-      try {
-        source.stop();
-      } catch (e) {
-        // Source might already be stopped
-      }
-    });
-    scheduledSourcesRef.current = [];
+    
+    // Pause the Tone.js Transport
+    Tone.Transport.pause();
+    
+    // Stop all audio players
+    if (playersRef.current) {
+      playersRef.current.stopAll();
+    }
   };
 
   const handleStop = () => {
     setIsPlaying(false);
     setPlaybackPosition(0);
     playbackPositionRef.current = 0;
-    // Stop all audio sources
-    scheduledSourcesRef.current.forEach((source) => {
-      try {
-        source.stop();
-      } catch (e) {
-        // Source might already be stopped
-      }
-    });
-    scheduledSourcesRef.current = [];
+    
+    // Stop the Tone.js Transport and reset position
+    Tone.Transport.stop();
+    Tone.Transport.seconds = 0;
+    
+    // Stop all audio players
+    if (playersRef.current) {
+      playersRef.current.stopAll();
+    }
   };
 
   const handleReturnToStart = () => {
@@ -2470,7 +2519,7 @@ const ProjectDetailPage = () => {
             </div>
 
             {/* Playhead */}
-            {playbackPosition > 0 && (
+            {(playbackPosition > 0 || isPlaying) && (
               <div
                 ref={playheadRef}
                 className="absolute top-10 bottom-0 w-0.5 bg-red-500 z-30 pointer-events-none"
@@ -2495,10 +2544,10 @@ const ProjectDetailPage = () => {
                 <div
                   key={track._id}
                   className="flex border-b border-gray-800"
-                  style={{ minHeight: "120px" }}
+                  style={{ minHeight: "90px" }}
                 >
                   <div
-                    className={`w-64 border-r border-gray-800 p-4 flex flex-col gap-3 sticky left-0 z-10 ${
+                    className={`w-64 border-r border-gray-800 p-2.5 flex flex-col gap-2 sticky left-0 z-10 ${
                       isMenuOpen
                         ? "bg-gray-800"
                         : isHoveringTrack
@@ -2666,8 +2715,8 @@ const ProjectDetailPage = () => {
                           const clipStyle = {
                             left: `${clipLeft}px`,
                             width: `${clipWidth}px`,
-                            top: "10px",
-                            height: "100px",
+                            top: "5px",
+                            height: "70px",
                             minWidth: "60px",
                             backgroundColor: !isChord ? trackAccent : undefined,
                             borderColor: isChord
@@ -2731,30 +2780,74 @@ const ProjectDetailPage = () => {
                                       )
                                         ? waveform
                                         : [];
+
                                       if (!waveformArray.length) return null;
 
-                                      // Use full source duration for the film-strip width
-                                      const waveformDurationSeconds =
-                                        item.lickId?.duration ||
+                                      // Get the actual current width from the DOM element
+                                      // This ensures waveform stays correct even during resize drag
+                                      const clipElement = clipRefs.current.get(item._id);
+                                      const actualClipWidth = clipElement?.offsetWidth || clipWidth;
+
+                                      // ADAPTIVE DENSITY IMPLEMENTATION
+                                      // 1. Determine the full source duration to map samples to time
+                                      const fullSourceDuration =
                                         item.sourceDuration ||
+                                        item.lickId?.duration ||
                                         item.duration ||
                                         1;
 
-                                      // Decide how many bars we want visible, based on clip width
-                                      const targetBarCount = Math.max(
-                                        25,
-                                        Math.min(100, Math.floor(clipWidth / 3))
+                                      // 2. Calculate sample rate of the data
+                                      const totalSamples = waveformArray.length;
+                                      const samplesPerSecond =
+                                        totalSamples / fullSourceDuration;
+
+                                      // 3. Determine the visible slice of audio
+                                      const startSample = Math.floor(
+                                        (item.offset || 0) * samplesPerSecond
                                       );
+                                      const endSample = Math.floor(
+                                        ((item.offset || 0) +
+                                          (item.duration || 0)) *
+                                          samplesPerSecond
+                                      );
+
+                                      // 4. Get the visible samples (clamped to array bounds)
+                                      const visibleSamples = waveformArray.slice(
+                                        Math.max(0, startSample),
+                                        Math.min(totalSamples, endSample)
+                                      );
+
+                                      if (!visibleSamples.length) return null;
+
+                                      // 5. Calculate step to achieve target density in the visible area
+                                      // We want roughly 1 bar every 5 pixels (3px width + 2px gap)
+                                      const targetBarCount = Math.max(
+                                        10,
+                                        Math.floor(actualClipWidth / 5)
+                                      );
+
                                       const step = Math.max(
                                         1,
-                                        Math.floor(
-                                          waveformArray.length / targetBarCount
+                                        Math.ceil(
+                                          visibleSamples.length / targetBarCount
                                         )
                                       );
 
-                                      const filmStripWidthPx =
-                                        waveformDurationSeconds *
-                                        pixelsPerSecond;
+                                      // DEBUG LOGGING - REMOVED
+                                      /*
+                                      console.log("Waveform Adaptive Debug:", {
+                                        id: item._id,
+                                        offset: item.offset,
+                                        duration: item.duration,
+                                        clipWidth: actualClipWidth,
+                                        fullSourceDuration,
+                                        totalSamples,
+                                        visibleSamplesCount:
+                                          visibleSamples.length,
+                                        targetBarCount,
+                                        step,
+                                      });
+                                      */
 
                                       return (
                                         <div className="absolute inset-0 overflow-hidden">
@@ -2762,17 +2855,11 @@ const ProjectDetailPage = () => {
                                             data-clip-waveform="true"
                                             className="absolute top-0 bottom-0 h-full flex items-end gap-0.5 opacity-80 px-2 pointer-events-none"
                                             style={{
-                                              // Full underlying audio duration, not just clip duration
-                                              width: `${filmStripWidthPx}px`,
-                                              // Shift left by offset so the "window" crops it
-                                              left: `-${
-                                                (item.offset || 0) *
-                                                pixelsPerSecond
-                                              }px`,
+                                              width: "100%", // Fill the visible clip
+                                              left: 0, // No offset needed as we sliced the data
                                             }}
                                           >
-                                            {waveformArray
-                                              // Downsample for performance only; do NOT slice by offset
+                                            {visibleSamples
                                               .filter(
                                                 (_value, idx) =>
                                                   idx % step === 0
@@ -2783,7 +2870,7 @@ const ProjectDetailPage = () => {
                                                   className="bg-white rounded-t"
                                                   style={{
                                                     width: "3px",
-                                                    flexShrink: 0, // prevent squishing when zooming
+                                                    flexShrink: 0,
                                                     height: `${Math.min(
                                                       100,
                                                       Math.abs(value || 0) * 100
@@ -2795,6 +2882,7 @@ const ProjectDetailPage = () => {
                                         </div>
                                       );
                                     } catch (e) {
+                                      console.error("Waveform Error:", e);
                                       return null;
                                     }
                                   })()
@@ -2882,8 +2970,8 @@ const ProjectDetailPage = () => {
         {/* Right Panel - Libraries */}
         <div className="w-80 bg-gray-950 border-l border-gray-800 flex flex-col">
           {/* Backing Tracks */}
-          <div className="p-4 border-b border-gray-800">
-            <h3 className="text-white font-medium mb-3">Backing Tracks</h3>
+          <div className="p-3 border-b border-gray-800">
+            <h3 className="text-white font-medium text-sm mb-2">Backing Tracks</h3>
             <div className="relative">
               <FaSearch
                 className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
@@ -2898,9 +2986,9 @@ const ProjectDetailPage = () => {
           </div>
 
           {/* Chord Library */}
-          <div className="p-4 border-b border-gray-800">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-white font-medium">Chord Library</h3>
+          <div className="p-3 border-b border-gray-800">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-white font-medium text-sm">Chord Library</h3>
               {loadingChords && (
                 <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-orange-500" />
               )}
@@ -2910,7 +2998,7 @@ const ProjectDetailPage = () => {
                 {chordLibraryError}. Showing defaults.
               </p>
             )}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-1.5">
               {chordPalette.map((chord) => {
                 const key = chord._id || chord.chordId || chord.chordName;
                 return (
@@ -2920,15 +3008,15 @@ const ProjectDetailPage = () => {
                     onDragStart={() => handleChordDragStart(chord)}
                     onDragEnd={() => setDraggedChord(null)}
                     onClick={() => handleAddChord(chord)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded text-sm font-medium transition-colors cursor-grab active:cursor-grabbing text-left"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-2 rounded text-xs font-medium transition-colors cursor-grab active:cursor-grabbing text-left"
                     title="Drag onto the backing track or click to append"
                   >
                     <span className="block font-semibold">
                       {chord.chordName || "Chord"}
                     </span>
                     {chord.midiNotes?.length ? (
-                      <span className="text-[11px] text-blue-100/80 mt-1 block">
-                        MIDI: {chord.midiNotes.join(", ")}
+                      <span className="text-[10px] text-blue-100/70 mt-0.5 block truncate">
+                        {chord.midiNotes.slice(0, 4).join(", ")}
                       </span>
                     ) : null}
                   </button>
@@ -2945,7 +3033,7 @@ const ProjectDetailPage = () => {
         <div className="flex items-center border-b border-gray-800">
           <button
             onClick={() => setActiveTab("instrument")}
-            className={`px-6 py-3 text-sm font-medium transition-colors ${
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === "instrument"
                 ? "bg-gray-800 text-white border-b-2 border-white"
                 : "text-gray-400 hover:text-white"
@@ -2955,7 +3043,7 @@ const ProjectDetailPage = () => {
           </button>
           <button
             onClick={() => setActiveTab("midi-editor")}
-            className={`px-6 py-3 text-sm font-medium transition-colors ${
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
               activeTab === "midi-editor"
                 ? "bg-gray-800 text-white border-b-2 border-white"
                 : "text-gray-400 hover:text-white"
@@ -2977,7 +3065,7 @@ const ProjectDetailPage = () => {
 
         {/* Instrument Tab Content */}
         {activeTab === "instrument" && (
-          <div className="p-6">
+          <div className="p-4">
             <div className="mb-4">
               <h3 className="text-white font-semibold mb-2">
                 Select Backing Instrument
@@ -3036,7 +3124,7 @@ const ProjectDetailPage = () => {
 
         {/* Lick Library Content */}
         {activeTab === "lick-library" && (
-          <div className="p-4 flex flex-col gap-4 h-full">
+          <div className="p-3 flex flex-col gap-3 h-full">
             {/* Search and Filters Row */}
             <div className="flex items-center gap-4">
               {/* Search */}
@@ -3054,8 +3142,8 @@ const ProjectDetailPage = () => {
                 />
               </div>
 
-              {/* Filters */}
-              <div className="flex gap-2">
+              {/* Filters - All 6 Tag Categories */}
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => {
                     const value = prompt(
@@ -3065,48 +3153,98 @@ const ProjectDetailPage = () => {
                     if (value === null) return;
                     setSelectedGenre(value.trim() || null);
                   }}
-                  className={`px-4 py-2 rounded text-sm transition-colors ${
+                  className={`px-3 py-2 rounded text-sm transition-colors ${
                     selectedGenre
                       ? "bg-orange-600 hover:bg-orange-700 text-white"
                       : "bg-gray-700 hover:bg-gray-600 text-gray-300"
                   }`}
                 >
-                  Genre {selectedGenre && `(${selectedGenre})`}
+                  🎶 Genre {selectedGenre && `(${selectedGenre})`}
                 </button>
                 <button
                   onClick={() => {
                     const value = prompt(
-                      "Filter by instrument (leave empty to clear):",
-                      selectedInstrumentTag || ""
+                      "Filter by type/instrument (leave empty to clear):",
+                      selectedType || ""
                     );
                     if (value === null) return;
-                    setSelectedInstrumentTag(value.trim() || null);
+                    setSelectedType(value.trim() || null);
                   }}
-                  className={`px-4 py-2 rounded text-sm transition-colors ${
-                    selectedInstrumentTag
+                  className={`px-3 py-2 rounded text-sm transition-colors ${
+                    selectedType
                       ? "bg-orange-600 hover:bg-orange-700 text-white"
                       : "bg-gray-700 hover:bg-gray-600 text-gray-300"
                   }`}
                 >
-                  Instrument{" "}
-                  {selectedInstrumentTag && `(${selectedInstrumentTag})`}
+                  🎸 Type {selectedType && `(${selectedType})`}
                 </button>
                 <button
                   onClick={() => {
                     const value = prompt(
-                      "Filter by mood (leave empty to clear):",
-                      selectedMood || ""
+                      "Filter by emotional/mood (leave empty to clear):",
+                      selectedEmotional || ""
                     );
                     if (value === null) return;
-                    setSelectedMood(value.trim() || null);
+                    setSelectedEmotional(value.trim() || null);
                   }}
-                  className={`px-4 py-2 rounded text-sm transition-colors ${
-                    selectedMood
+                  className={`px-3 py-2 rounded text-sm transition-colors ${
+                    selectedEmotional
                       ? "bg-orange-600 hover:bg-orange-700 text-white"
                       : "bg-gray-700 hover:bg-gray-600 text-gray-300"
                   }`}
                 >
-                  Mood {selectedMood && `(${selectedMood})`}
+                  💖 Emotional {selectedEmotional && `(${selectedEmotional})`}
+                </button>
+                <button
+                  onClick={() => {
+                    const value = prompt(
+                      "Filter by timbre (leave empty to clear):",
+                      selectedTimbre || ""
+                    );
+                    if (value === null) return;
+                    setSelectedTimbre(value.trim() || null);
+                  }}
+                  className={`px-3 py-2 rounded text-sm transition-colors ${
+                    selectedTimbre
+                      ? "bg-orange-600 hover:bg-orange-700 text-white"
+                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                  }`}
+                >
+                  🌈 Timbre {selectedTimbre && `(${selectedTimbre})`}
+                </button>
+                <button
+                  onClick={() => {
+                    const value = prompt(
+                      "Filter by articulation (leave empty to clear):",
+                      selectedArticulation || ""
+                    );
+                    if (value === null) return;
+                    setSelectedArticulation(value.trim() || null);
+                  }}
+                  className={`px-3 py-2 rounded text-sm transition-colors ${
+                    selectedArticulation
+                      ? "bg-orange-600 hover:bg-orange-700 text-white"
+                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                  }`}
+                >
+                  ⚙️ Articulation {selectedArticulation && `(${selectedArticulation})`}
+                </button>
+                <button
+                  onClick={() => {
+                    const value = prompt(
+                      "Filter by character (leave empty to clear):",
+                      selectedCharacter || ""
+                    );
+                    if (value === null) return;
+                    setSelectedCharacter(value.trim() || null);
+                  }}
+                  className={`px-3 py-2 rounded text-sm transition-colors ${
+                    selectedCharacter
+                      ? "bg-orange-600 hover:bg-orange-700 text-white"
+                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                  }`}
+                >
+                  💫 Character {selectedCharacter && `(${selectedCharacter})`}
                 </button>
               </div>
             </div>
@@ -3126,18 +3264,18 @@ const ProjectDetailPage = () => {
                   )}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-2.5">
                   {availableLicks.map((lick) => (
                     <div
                       key={lick._id || lick.lick_id}
                       draggable
                       onDragStart={() => handleDragStart(lick)}
-                      className="bg-gray-800 border border-gray-700 rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-orange-500 transition-colors"
+                      className="bg-gray-800 border border-gray-700 rounded-lg p-2.5 cursor-grab active:cursor-grabbing hover:border-orange-500 transition-colors"
                     >
-                      <div className="font-medium text-white text-sm mb-1 truncate">
+                      <div className="font-medium text-white text-xs mb-0.5 truncate">
                         {lick.title || lick.name}
                       </div>
-                      <div className="text-xs text-gray-400 mb-2">
+                      <div className="text-[11px] text-gray-400 mb-1 truncate">
                         by{" "}
                         {lick.userId?.displayName ||
                           lick.userId?.username ||
@@ -3152,7 +3290,7 @@ const ProjectDetailPage = () => {
                             .map((tag, idx) => (
                               <span
                                 key={idx}
-                                className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded"
+                                className="text-[10px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded"
                               >
                                 {typeof tag === "string"
                                   ? tag

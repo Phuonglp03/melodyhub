@@ -167,6 +167,8 @@ export const getInstruments = async () => {
     return res.data;
   } catch (error) {
     console.error("Error fetching instruments:", error);
-    throw error;
+    // Provide more specific error message
+    const errorMessage = error?.response?.data?.message || error?.message || "Failed to fetch instruments";
+    throw new Error(errorMessage);
   }
 };
