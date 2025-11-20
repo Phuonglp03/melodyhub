@@ -50,8 +50,8 @@ import userRoutes from "./routes/userRoutes.js";
 import tagRoutes from "./routes/tagRoutes.js";
 import playlistRoutes from "./routes/playlistRoutes.js";
 import projectRoutes from "./routes/projectRoutes.js";
-import chordRoutes from "./routes/chordRoutes.js";
-
+import userManageRoute from "./routes/admin/userManageRoute.js";
+import createAdminRoute from "./routes/admin/createAdminRoute.js";
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import dmRoutes from "./routes/dmRoutes.js";
@@ -84,6 +84,7 @@ socketServer(httpServer);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+
 // Static file serving
 const uploadDir = process.env.UPLOAD_DIR || "uploads";
 app.use("/static", express.static(path.join(__dirname, "..", uploadDir)));
@@ -109,9 +110,9 @@ app.use("/api/dm", dmRoutes);
 app.use("/api/tags", tagRoutes);
 app.use("/api/playlists", playlistRoutes);
 app.use("/api/projects", projectRoutes);
-app.use("/api/chords", chordRoutes);
 app.use("/api/reports", reportRoutes);
-
+app.use('/api/admin', userManageRoute);
+app.use('/api/admin', createAdminRoute);
 // 404 handler - must be after all routes
 app.use((req, res, next) => {
   res.status(404).json({
@@ -159,41 +160,39 @@ async function start() {
     httpServer.listen(port, () => {
       console.log(`melodyhub-be listening on port ${port}`);
       nodeMediaServer();
-
+      
       // Schedule job to delete old archived posts (run daily at 2 AM)
       // Run immediately on startup, then schedule daily
       deleteOldArchivedPosts().catch((err) => {
-        console.error("[PostArchive] Error in initial cleanup:", err);
+        console.error('[PostArchive] Error in initial cleanup:', err);
       });
-
+      
       // Run daily at 2 AM
       const scheduleDailyCleanup = () => {
         const now = new Date();
         const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
         tomorrow.setHours(2, 0, 0, 0);
-
+        
         const msUntil2AM = tomorrow.getTime() - now.getTime();
-
+        
         setTimeout(() => {
           // Run cleanup
           deleteOldArchivedPosts().catch((err) => {
-            console.error("[PostArchive] Error in scheduled cleanup:", err);
+            console.error('[PostArchive] Error in scheduled cleanup:', err);
           });
-
+          
           // Schedule next run (24 hours later)
           setInterval(() => {
             deleteOldArchivedPosts().catch((err) => {
-              console.error("[PostArchive] Error in scheduled cleanup:", err);
+              console.error('[PostArchive] Error in scheduled cleanup:', err);
             });
           }, 24 * 60 * 60 * 1000); // 24 hours
         }, msUntil2AM);
       };
-
+      
       scheduleDailyCleanup();
-      console.log(
-        "[PostArchive] Scheduled job initialized - will delete archived posts older than 30 days daily at 2 AM"
-      );
+      console.log('[PostArchive] Scheduled job initialized - will delete archived posts older than 30 days daily at 2 AM');
     });
   } catch (err) {
     console.error("Failed to start server:", err);
