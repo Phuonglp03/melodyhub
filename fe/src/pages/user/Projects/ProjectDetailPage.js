@@ -557,10 +557,56 @@ const ProjectDetailPage = () => {
 
   useEffect(() => {
     const handlePointerUp = () => {
-      if (isDraggingItem) {
-        setIsDraggingItem(false);
-        setSelectedItem(null);
+      console.log('[DRAG] Pointerup fired!', { 
+        isDraggingItem, 
+        selectedItem, 
+        hasDragState: !!dragStateRef.current 
+      });
+
+      if (!isDraggingItem) return;
+
+      console.log('[DRAG] Drag detected - will commit changes');
+
+      // Get the dragged clip and its final position
+      if (selectedItem && clipRefs.current.has(selectedItem)) {
+        const clipElement = clipRefs.current.get(selectedItem);
+        if (clipElement && timelineRef.current) {
+          // Read final position from visual element
+          const currentLeft = parseFloat(clipElement.style.left) || 0;
+          const finalStartTime = Math.max(0, currentLeft / pixelsPerSecond);
+
+          console.log('[DRAG] Committing position change:', { 
+            clipId: selectedItem, 
+            finalStartTime 
+          });
+
+          // Update state
+          pushHistory();
+          setTracks((prevTracks) =>
+            prevTracks.map((track) => {
+              const hasClip = (track.items || []).find((item) => item._id === selectedItem);
+              if (!hasClip) return track;
+              return {
+                ...track,
+                items: (track.items || []).map((item) =>
+                  item._id === selectedItem
+                    ? normalizeTimelineItem({ ...item, startTime: finalStartTime })
+                    : item
+                ),
+              };
+            })
+          );
+
+          // Trigger autosave
+          markTimelineItemDirty(selectedItem);
+          scheduleTimelineAutosave();
+        }
       }
+
+      // Clean up drag state
+      setIsDraggingItem(false);
+      setSelectedItem(null);
+      dragStateRef.current = null;
     };
 
     window.addEventListener("pointerup", handlePointerUp);
@@ -570,7 +616,7 @@ const ProjectDetailPage = () => {
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("blur", handlePointerUp);
     };
-  }, [isDraggingItem]);
+  }, [isDraggingItem, selectedItem, pixelsPerSecond, pushHistory, markTimelineItemDirty, scheduleTimelineAutosave]);
 
   useEffect(() => {
     playbackPositionRef.current = playbackPosition;
@@ -610,6 +656,7 @@ const ProjectDetailPage = () => {
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [closeTrackMenu]);
+
 
   const chordDurationSeconds = useMemo(
     () => getChordDuration() * secondsPerBeat,
@@ -1000,7 +1047,7 @@ const ProjectDetailPage = () => {
     }
   };
 
-  // Auto-reschedule audio when tracks change during playback
+  //  Auto-reschedule audio when tracks change during playback
   // This is key for live editing while playing (like professional DAWs)
   useEffect(() => {
     if (isPlaying && playersRef.current) {
@@ -1012,6 +1059,61 @@ const ProjectDetailPage = () => {
       return () => clearTimeout(timeoutId);
     }
   }, [tracks, isPlaying]); // Reschedule when tracks or playback state changes
+
+  // Auto-save when clips are moved/edited (catches all clip position changes)
+  const prevTracksRef = useRef(null);
+  useEffect(() => {
+    console.log('[DEBUG] Autosave useEffect running! tracks changed:', tracks.length);
+    
+    // Skip on initial load
+    if (!prevTracksRef.current) {
+      console.log('[DEBUG] First run, skipping autosave check');
+      prevTracksRef.current = tracks;
+      return;
+    }
+
+    // Check if any clip positions have changed
+    let hasChanges = false;
+    const changedItemIds = new Set();
+
+    tracks.forEach((track) => {
+      const prevTrack = prevTracksRef.current.find((t) => t._id === track._id);
+      if (!prevTrack) return;
+
+      (track.items || []).forEach((item) => {
+        const prevItem = (prevTrack.items || []).find((i) => i._id === item._id);
+        if (!prevItem) {
+          // New item added
+          console.log('[DEBUG] New item detected:', item._id);
+          changedItemIds.add(item._id);
+          hasChanges = true;
+        } else if (
+          item.startTime !== prevItem.startTime ||
+          item.duration !== prevItem.duration ||
+          item.offset !== prevItem.offset
+        ) {
+          // Item position/size changed
+          console.log('[DEBUG] Item changed:', item._id, {
+            startTime: { old: prevItem.startTime, new: item.startTime },
+            duration: { old: prevItem.duration, new: item.duration },
+            offset: { old: prevItem.offset, new: item.offset }
+          });
+          changedItemIds.add(item._id);
+          hasChanges = true;
+        }
+      });
+    });
+
+    if (hasChanges) {
+      console.log(`[Autosave] Detected ${changedItemIds.size} changed clips via tracks state`);
+      changedItemIds.forEach((itemId) => markTimelineItemDirty(itemId));
+      scheduleTimelineAutosave();
+    } else {
+      console.log('[DEBUG] No clip changes detected');
+    }
+
+    prevTracksRef.current = tracks;
+  }, [tracks, markTimelineItemDirty, scheduleTimelineAutosave]);
 
   const handlePlay = async () => {
     // Start Tone.js audio context if needed
@@ -2190,6 +2292,7 @@ const ProjectDetailPage = () => {
 
   // Handle clip move
   const handleClipMove = async (itemId, newStartTime, options = {}) => {
+    console.log('[DEBUG] handleClipMove called!', { itemId, newStartTime, options });
     if (newStartTime < 0) return;
     const chordIndex = getChordIndexFromId(itemId);
     if (chordIndex !== null) {
