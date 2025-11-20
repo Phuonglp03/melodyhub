@@ -365,6 +365,7 @@ const ProjectDetailPage = () => {
   const markTimelineItemDirty = useCallback((itemId) => {
     if (!itemId) return;
     dirtyTimelineItemsRef.current.add(itemId);
+    console.log(`[Autosave] Marked item as dirty: ${itemId}. Total dirty items: ${dirtyTimelineItemsRef.current.size}`);
   }, []);
 
   const hasUnsavedTimelineChanges = dirtyTimelineItemsRef.current.size > 0;
@@ -405,18 +406,20 @@ const ProjectDetailPage = () => {
     historyRef.current = [...historyRef.current, snapshot].slice(
       -HISTORY_LIMIT
     );
-    futureRef.current = [];
-    updateHistoryStatus();
   }, [tracks, chordProgression, updateHistoryStatus]);
 
   const flushTimelineSaves = useCallback(async () => {
-    if (!projectId) return;
     const ids = Array.from(dirtyTimelineItemsRef.current);
+    console.log(`[Autosave] flushTimelineSaves called. Dirty items: ${ids.length}`, ids);
+    
     if (!ids.length) return;
 
     const payload = ids
       .map((id) => collectTimelineItemSnapshot(id))
       .filter(Boolean);
+    
+    console.log(`[Autosave] Collected ${payload.length} item snapshots to save:`, payload);
+    
     if (!payload.length) {
       dirtyTimelineItemsRef.current.clear();
       return;
@@ -430,11 +433,13 @@ const ProjectDetailPage = () => {
     }
 
     try {
+      console.log(`[Autosave] Calling bulkUpdateTimelineItems with ${payload.length} items...`);
       await bulkUpdateTimelineItems(projectId, payload);
+      console.log(`[Autosave] ✅ Successfully saved ${payload.length} timeline items`);
     } catch (err) {
-      console.error("Error bulk saving timeline:", err);
+      console.error("[Autosave] ❌ Error bulk saving timeline:", err);
       if (err.response && err.response.data) {
-        console.error("Backend error details:", err.response.data);
+        console.error("[Autosave] Backend error details:", err.response.data);
       }
       // Don't re-throw; we don't want to break the UI.
     } finally {
@@ -443,12 +448,13 @@ const ProjectDetailPage = () => {
   }, [projectId, collectTimelineItemSnapshot]);
 
   const scheduleTimelineAutosave = useCallback(() => {
+    console.log('[Autosave] scheduleTimelineAutosave called. Scheduling save in 2 seconds...');
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
     saveTimeoutRef.current = setTimeout(() => {
       flushTimelineSaves();
-    }, 15000);
+    }, 2000); // 2 seconds for faster autosave
   }, [flushTimelineSaves]);
 
   const handleUndo = useCallback(() => {
@@ -464,6 +470,7 @@ const ProjectDetailPage = () => {
     setFocusedClipId(null);
     updateHistoryStatus();
   }, [tracks, chordProgression, updateHistoryStatus]);
+  
   const handleRedo = useCallback(() => {
     if (!futureRef.current.length) return;
     const nextState = futureRef.current.pop();
@@ -919,8 +926,6 @@ const ProjectDetailPage = () => {
   const scheduleAudioPlayback = async () => {
     if (!playersRef.current) return;
 
-    console.log(`[Audio] Starting scheduleAudioPlayback. Tracks:`, tracks.length);
-
     // First, unsync and stop all players to clear previous scheduling
     playersRef.current.forEach((player) => {
       if (player) {
@@ -932,43 +937,28 @@ const ProjectDetailPage = () => {
     // Load and sync all clips to the Transport timeline
     let scheduledCount = 0;
     for (const track of tracks) {
-      console.log(`[Audio] Processing track "${track.trackName}", muted: ${track.muted}, items: ${track.items?.length || 0}`);
-      
       if (track.muted) continue; // Skip muted tracks
 
       for (const item of track.items || []) {
-        console.log(`[Audio] Processing item ${item._id}, type: ${item.type}, has lickId: ${!!item.lickId}`);
-        
         if (item.type !== "lick" || !item.lickId) continue;
 
         const clipStart = item.startTime || 0;
         const clipId = item._id;
 
         try {
-          console.log(`[Audio] Fetching audio for lick ${item.lickId._id || item.lickId}`);
-          
           // Get audio URL for the lick
           const audioResponse = await playLickAudio(
             item.lickId._id || item.lickId,
             user?._id
           );
           
-          console.log(`[Audio] Audio response:`, audioResponse);
-          
           // Check for both audio_url (snake_case from API) and audioUrl (camelCase)
           const audioUrl = audioResponse?.data?.audio_url || audioResponse?.data?.audioUrl;
           
           if (!audioResponse?.success || !audioUrl) {
-            console.warn(`[Audio] Failed to get audio URL for clip ${clipId}`, {
-              hasResponse: !!audioResponse,
-              success: audioResponse?.success,
-              hasData: !!audioResponse?.data,
-              audioUrl: audioUrl
-            });
+            console.warn(`[Audio] Failed to get audio URL for clip ${clipId}`);
             continue;
           }
-
-          console.log(`[Audio] Loading audio from ${audioUrl}`);
           
           // Load audio into Tone.Player
           const loaded = await loadAudioToPlayer(clipId, audioUrl);
@@ -995,29 +985,33 @@ const ProjectDetailPage = () => {
           const offset = item.offset || 0;
           const duration = item.duration || 0;
 
-          console.log(`[Audio] Scheduling clip ${clipId}:`, {
-            clipStart,
-            offset,
-            duration,
-            trackMuted: track.muted,
-            volume: volumeDb
-          });
-
-          // CRITICAL: Sync the player to the Transport timeline
-          // This tells Tone.js: "This audio belongs at exactly clipStart seconds on the timeline"
+          // Sync the player to the Transport timeline and start it
           player.sync().start(clipStart, offset, duration);
-          
           scheduledCount++;
-          console.log(`[Audio] Successfully scheduled clip ${clipId} at ${clipStart}s`);
           
         } catch (error) {
-          console.error("Error scheduling audio playback:", error);
+          console.error(`[Audio] Error scheduling clip ${clipId}:`, error);
         }
       }
     }
     
-    console.log(`[Audio] Finished scheduling ${scheduledCount} clips (${playersRef.current.size} total players in map)`);
+    if (scheduledCount === 0) {
+      console.warn('[Audio] No audio clips were scheduled');
+    }
   };
+
+  // Auto-reschedule audio when tracks change during playback
+  // This is key for live editing while playing (like professional DAWs)
+  useEffect(() => {
+    if (isPlaying && playersRef.current) {
+      // Debounce rescheduling to avoid too many updates
+      const timeoutId = setTimeout(() => {
+        scheduleAudioPlayback();
+      },  50); // 50ms debounce
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [tracks, isPlaying]); // Reschedule when tracks or playback state changes
 
   const handlePlay = async () => {
     // Start Tone.js audio context if needed

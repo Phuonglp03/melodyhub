@@ -102,18 +102,7 @@ router.post(
   addLickToTimeline
 );
 
-router.put(
-  "/:projectId/timeline/items/:itemId",
-  [
-    body("startTime").optional().isNumeric(),
-    body("duration").optional().isNumeric(),
-    body("trackId").optional().notEmpty(),
-  ],
-  validate,
-  updateTimelineItem
-);
-
-// Bulk update timeline items (for buffered autosave)
+// Bulk update timeline items (for buffered autosave) - MUST be before /:itemId route
 router.put(
   "/:projectId/timeline/items/bulk",
   [
@@ -128,6 +117,17 @@ router.put(
   ],
   validate,
   bulkUpdateTimelineItems
+);
+
+router.put(
+  "/:projectId/timeline/items/:itemId",
+  [
+    body("startTime").optional().isNumeric(),
+    body("duration").optional().isNumeric(),
+    body("trackId").optional().notEmpty(),
+  ],
+  validate,
+  updateTimelineItem
 );
 
 router.delete("/:projectId/timeline/items/:itemId", deleteTimelineItem);
