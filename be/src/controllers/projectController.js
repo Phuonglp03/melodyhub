@@ -805,31 +805,78 @@ export const bulkUpdateTimelineItems = async (req, res) => {
       return update;
     };
 
-    const ops = items.map(async (raw) => {
-      const { _id, itemId, trackId, ...rest } = raw || {};
-      const resolvedId = itemId || _id;
-      if (!resolvedId) return null;
+    const results = await Promise.allSettled(
+      items.map(async (raw) => {
+        try {
+          const { _id, itemId, trackId, ...rest } = raw || {};
+          const resolvedId = itemId || _id;
+          if (!resolvedId) {
+            return { success: false, id: null, error: "Missing item ID" };
+          }
 
-      const timelineItem = await ProjectTimelineItem.findById(resolvedId);
-      if (!timelineItem) return null;
+          const timelineItem = await ProjectTimelineItem.findById(resolvedId);
+          if (!timelineItem) {
+            return {
+              success: false,
+              id: resolvedId,
+              error: "Timeline item not found",
+            };
+          }
 
-      const track = await ProjectTrack.findById(timelineItem.trackId);
-      if (!track || track.projectId.toString() !== projectId) {
-        return null;
-      }
+          const track = await ProjectTrack.findById(timelineItem.trackId);
+          if (!track || track.projectId.toString() !== projectId) {
+            return {
+              success: false,
+              id: resolvedId,
+              error: "Track not found or doesn't belong to project",
+            };
+          }
 
-      const update = sanitizeOne(rest);
-      if (!Object.keys(update).length) return null;
+          const update = sanitizeOne(rest);
+          if (!Object.keys(update).length) {
+            return {
+              success: false,
+              id: resolvedId,
+              error: "No valid fields to update",
+            };
+          }
 
-      await ProjectTimelineItem.updateOne({ _id: resolvedId }, { $set: update });
-      return resolvedId;
-    });
+          await ProjectTimelineItem.updateOne(
+            { _id: resolvedId },
+            { $set: update }
+          );
+          return { success: true, id: resolvedId };
+        } catch (err) {
+          return {
+            success: false,
+            id: raw?._id || raw?.itemId || null,
+            error: err.message,
+          };
+        }
+      })
+    );
 
-    await Promise.all(ops);
+    const successful = results.filter(
+      (r) => r.status === "fulfilled" && r.value?.success
+    ).length;
+    const failed = results.length - successful;
+
+    if (failed > 0) {
+      const errors = results
+        .filter((r) => r.status === "rejected" || !r.value?.success)
+        .map((r) =>
+          r.status === "rejected"
+            ? r.reason?.message || "Unknown error"
+            : r.value?.error || "Update failed"
+        );
+      console.error("Some timeline items failed to update:", errors);
+    }
 
     return res.json({
       success: true,
-      message: "Timeline items updated successfully",
+      message: `Timeline items updated: ${successful} successful, ${failed} failed`,
+      updated: successful,
+      failed,
     });
   } catch (error) {
     console.error("Error bulk updating timeline items:", error);

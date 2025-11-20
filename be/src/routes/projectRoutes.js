@@ -8,6 +8,7 @@ import {
   deleteProject,
   addLickToTimeline,
   updateTimelineItem,
+  bulkUpdateTimelineItems,
   deleteTimelineItem,
   updateChordProgression,
   addTrack,
@@ -110,6 +111,23 @@ router.put(
   ],
   validate,
   updateTimelineItem
+);
+
+// Bulk update timeline items (for buffered autosave)
+router.put(
+  "/:projectId/timeline/items/bulk",
+  [
+    body("items")
+      .isArray()
+      .withMessage("items must be an array")
+      .notEmpty()
+      .withMessage("items array cannot be empty"),
+    // Each item should have either _id or itemId (handled in controller)
+    body("items.*._id").optional().isMongoId(),
+    body("items.*.itemId").optional().isMongoId(),
+  ],
+  validate,
+  bulkUpdateTimelineItems
 );
 
 router.delete("/:projectId/timeline/items/:itemId", deleteTimelineItem);

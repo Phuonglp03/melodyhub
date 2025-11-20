@@ -41,7 +41,10 @@ import {
   deleteProject as deleteProjectApi,
   getInstruments,
 } from "../../../services/user/projectService";
-import { getCommunityLicks } from "../../../services/user/lickService";
+import {
+  getCommunityLicks,
+  playLickAudio,
+} from "../../../services/user/lickService";
 import { getChords } from "../../../services/chordService";
 import { useSelector } from "react-redux";
 
@@ -220,7 +223,7 @@ const normalizeTimelineItem = (item) => {
   const sourceDuration = Math.max(sourceDurationRaw, offset + duration);
 
   return {
-    ...item,
+    ...item, // Preserve ALL original properties including lickId, waveformData, etc.
     startTime,
     duration,
     offset,
@@ -236,6 +239,8 @@ const normalizeTimelineItem = (item) => {
           .map((event) => normalizeMidiEvent(event))
           .filter(Boolean)
       : [],
+    // Explicitly preserve lickId and all its properties (including waveformData)
+    lickId: item.lickId || null,
   };
 };
 
@@ -331,6 +336,9 @@ const ProjectDetailPage = () => {
   const playbackPositionRef = useRef(0);
   const dirtyTimelineItemsRef = useRef(new Set());
   const saveTimeoutRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const audioBuffersRef = useRef(new Map()); // Cache audio buffers
+  const scheduledSourcesRef = useRef([]); // Track scheduled audio sources
   const menuPosition = useMemo(() => {
     const padding = 12;
     const width = 260;
@@ -792,24 +800,157 @@ const ProjectDetailPage = () => {
     };
   }, [isPlaying, loopEnabled, pixelsPerSecond, tracks]);
 
-  const handlePlay = () => {
+  // Initialize AudioContext
+  useEffect(() => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext ||
+        window.webkitAudioContext)();
+    }
+    return () => {
+      // Cleanup: stop all audio and close context if needed
+      scheduledSourcesRef.current.forEach((source) => {
+        try {
+          source.stop();
+        } catch (e) {
+          // Source might already be stopped
+        }
+      });
+      scheduledSourcesRef.current = [];
+    };
+  }, []);
+
+  // Load audio buffer for a lick
+  const loadAudioBuffer = async (audioUrl) => {
+    if (audioBuffersRef.current.has(audioUrl)) {
+      return audioBuffersRef.current.get(audioUrl);
+    }
+
+    try {
+      const response = await fetch(audioUrl);
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await audioContextRef.current.decodeAudioData(
+        arrayBuffer
+      );
+      audioBuffersRef.current.set(audioUrl, audioBuffer);
+      return audioBuffer;
+    } catch (error) {
+      console.error("Error loading audio:", error);
+      return null;
+    }
+  };
+
+  // Schedule audio playback for timeline items
+  const scheduleAudioPlayback = async (startTime = 0) => {
+    if (!audioContextRef.current || !isPlaying) return;
+
+    // Stop any existing playback
+    scheduledSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch (e) {
+        // Source might already be stopped
+      }
+    });
+    scheduledSourcesRef.current = [];
+
+    const currentTime = audioContextRef.current.currentTime;
+    const scheduleOffset = 0.1; // Small delay to ensure smooth playback
+
+    // Schedule all clips that should be playing
+    for (const track of tracks) {
+      if (track.muted) continue; // Skip muted tracks
+
+      for (const item of track.items || []) {
+        if (item.type !== "lick" || !item.lickId) continue;
+
+        const clipStart = item.startTime || 0;
+        const clipEnd = clipStart + (item.duration || 0);
+
+        // Check if clip should be playing at startTime
+        if (clipStart <= startTime && clipEnd > startTime) {
+          try {
+            // Get audio URL for the lick
+            const audioResponse = await playLickAudio(
+              item.lickId._id || item.lickId,
+              user?._id
+            );
+            if (!audioResponse.success || !audioResponse.data?.audioUrl)
+              continue;
+
+            const audioUrl = audioResponse.data.audioUrl;
+            const audioBuffer = await loadAudioBuffer(audioUrl);
+            if (!audioBuffer) continue;
+
+            // Create source and schedule playback
+            const source = audioContextRef.current.createBufferSource();
+            source.buffer = audioBuffer;
+            source.playbackRate.value = item.playbackRate || 1;
+
+            // Apply track volume
+            const gainNode = audioContextRef.current.createGain();
+            gainNode.gain.value = (track.volume || 1) * (track.solo ? 1 : 0.7);
+
+            source.connect(gainNode);
+            gainNode.connect(audioContextRef.current.destination);
+
+            // Calculate when to start playback
+            const playOffset = item.offset || 0;
+            const scheduleTime = currentTime + scheduleOffset;
+
+            // Start playback from the correct offset
+            source.start(scheduleTime, playOffset);
+
+            scheduledSourcesRef.current.push(source);
+
+            // Handle when clip should stop
+            const clipDuration = item.duration || 0;
+            const remainingDuration = clipEnd - startTime;
+            if (remainingDuration < clipDuration) {
+              source.stop(scheduleTime + remainingDuration);
+            }
+          } catch (error) {
+            console.error("Error scheduling audio playback:", error);
+          }
+        }
+      }
+    }
+  };
+
+  const handlePlay = async () => {
+    if (audioContextRef.current?.state === "suspended") {
+      await audioContextRef.current.resume();
+    }
+
     setIsPlaying(true);
-    // Playback is handled by the playhead animation
-    // TODO: Implement actual audio playback with Tone.js for full DAW functionality
-    // This would require:
-    // 1. Loading audio files for licks
-    // 2. Scheduling playback based on timeline items
-    // 3. Generating backing track audio from chord progression + selected instrument
+    await scheduleAudioPlayback(playbackPositionRef.current);
   };
 
   const handlePause = () => {
     setIsPlaying(false);
+    // Stop all audio sources
+    scheduledSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch (e) {
+        // Source might already be stopped
+      }
+    });
+    scheduledSourcesRef.current = [];
   };
 
   const handleStop = () => {
     setIsPlaying(false);
     setPlaybackPosition(0);
     playbackPositionRef.current = 0;
+    // Stop all audio sources
+    scheduledSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+      } catch (e) {
+        // Source might already be stopped
+      }
+    });
+    scheduledSourcesRef.current = [];
   };
 
   const handleReturnToStart = () => {
@@ -830,7 +971,7 @@ const ProjectDetailPage = () => {
     setRecordArmed((prev) => !prev);
   };
 
-  // Snap time to grid
+  // Snap time to grid and clip edges
   // Soft magnetic snapping to neighboring clips on the same track
   const applyMagnet = (time, track, itemId) => {
     if (!track) return time;
@@ -839,6 +980,15 @@ const ProjectDetailPage = () => {
     let closestTime = time;
     let minDelta = thresholdSeconds;
 
+    // Snap to beat grid
+    const beatTime = Math.round(time / secondsPerBeat) * secondsPerBeat;
+    const beatDelta = Math.abs(beatTime - time);
+    if (beatDelta < minDelta) {
+      minDelta = beatDelta;
+      closestTime = beatTime;
+    }
+
+    // Snap to clip edges
     const hasTimelineChords = (track.items || []).some(
       (clip) => clip?.type === "chord"
     );
@@ -866,6 +1016,75 @@ const ProjectDetailPage = () => {
     });
 
     return closestTime;
+  };
+
+  // Handle clip overlap: Trim overlapping clips (like openDAW/Ableton)
+  // When a clip overlaps another, trim the underlying clip
+  const handleClipOverlap = (
+    track,
+    movedItemId,
+    newStartTime,
+    movedDuration
+  ) => {
+    if (!track) return track;
+
+    const movedItem = track.items?.find((item) => item._id === movedItemId);
+    if (!movedItem) return track;
+
+    const movedEnd = newStartTime + movedDuration;
+    const updatedItems = (track.items || [])
+      .map((item) => {
+        if (item._id === movedItemId) {
+          // Update the moved item
+          return { ...item, startTime: newStartTime };
+        }
+
+        const itemStart = item.startTime || 0;
+        const itemEnd = itemStart + (item.duration || 0);
+
+        // Check if moved clip overlaps this item
+        const overlaps = !(newStartTime >= itemEnd || movedEnd <= itemStart);
+
+        if (overlaps) {
+          // Trim the underlying clip
+          if (newStartTime > itemStart && newStartTime < itemEnd) {
+            // Moved clip starts inside this item - trim the end
+            const newDuration = newStartTime - itemStart;
+            if (newDuration >= MIN_CLIP_DURATION) {
+              return { ...item, duration: newDuration };
+            } else {
+              // Too small, remove it
+              return null;
+            }
+          } else if (movedEnd > itemStart && movedEnd < itemEnd) {
+            // Moved clip ends inside this item - trim the start
+            const trimAmount = movedEnd - itemStart;
+            const newStart = itemStart + trimAmount;
+            const newDuration = item.duration - trimAmount;
+            if (newDuration >= MIN_CLIP_DURATION) {
+              return {
+                ...item,
+                startTime: newStart,
+                offset: (item.offset || 0) + trimAmount,
+              };
+            } else {
+              // Too small, remove it
+              return null;
+            }
+          } else if (newStartTime <= itemStart && movedEnd >= itemEnd) {
+            // Moved clip completely covers this item - remove it
+            return null;
+          }
+        }
+
+        return item;
+      })
+      .filter(Boolean); // Remove null items
+
+    return {
+      ...track,
+      items: updatedItems,
+    };
   };
 
   // Calculate timeline width based on content
@@ -1432,6 +1651,7 @@ const ProjectDetailPage = () => {
   };
 
   // Handle clip dragging with smooth real-time updates (direct DOM, absolute positioning)
+  // Professional DAW behavior: The point you click stays under your cursor during drag
   useEffect(() => {
     if (!isDraggingItem || !selectedItem) return;
 
@@ -1460,31 +1680,45 @@ const ProjectDetailPage = () => {
     clipElement.style.zIndex = "100";
     clipElement.style.cursor = "grabbing";
 
-    // Use dragStateRef to keep drag aligned with the original start time,
-    // so normalization or re-renders don't make the clip "bounce" away from the cursor.
-    const computeRawTime = (event) => {
+    // Professional DAW Logic:
+    // 1. Record where user clicked INSIDE the clip (offset from clip's left edge)
+    // 2. During drag, keep that point under the cursor
+    // 3. Only startTime changes, offset and duration stay constant
+    const computeNewStartTime = (event) => {
       if (!timelineRef.current || !dragStateRef.current) {
         return currentItem.startTime;
       }
       const timelineElement = timelineRef.current;
       const timelineRect = timelineElement.getBoundingClientRect();
       const scrollLeft = timelineElement.scrollLeft || 0;
-      const pointerX = event.clientX - timelineRect.left + scrollLeft;
-      const deltaX = pointerX - dragStateRef.current.originPointerX;
-      const rawTime =
+
+      // Current mouse position in timeline coordinates
+      const currentPointerX = event.clientX - timelineRect.left + scrollLeft;
+
+      // Where the user originally clicked (in timeline coordinates)
+      const originPointerX = dragStateRef.current.originPointerX;
+
+      // How far the mouse has moved
+      const deltaX = currentPointerX - originPointerX;
+
+      // Calculate new startTime: original start + mouse movement
+      // The click offset (dragOffset.x) is already accounted for in originPointerX
+      const newStartTime =
         dragStateRef.current.originStart + deltaX / pixelsPerSecond;
-      return Math.max(0, rawTime);
+
+      return Math.max(0, newStartTime);
     };
 
     const handleMouseMove = (event) => {
-      const rawTime = computeRawTime(event);
-      const newLeftPixel = rawTime * pixelsPerSecond;
+      const newStartTime = computeNewStartTime(event);
+      const newLeftPixel = newStartTime * pixelsPerSecond;
       clipElement.style.left = `${newLeftPixel}px`;
+      // Don't update state here to avoid re-render lag during drag
     };
 
     const handleMouseUp = async (event) => {
-      const rawTime = computeRawTime(event);
-      const finalTime = Math.max(0, rawTime);
+      const newStartTime = computeNewStartTime(event);
+      const finalTime = Math.max(0, newStartTime);
 
       clipElement.style.zIndex = originalZIndex;
       clipElement.style.cursor = originalCursor || "move";
@@ -1492,7 +1726,35 @@ const ProjectDetailPage = () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
 
-      await handleClipMove(selectedItem, finalTime);
+      // Optional snapping: Hold Shift to disable snapping (like professional DAWs)
+      const shouldSnap = !event.shiftKey;
+      const finalSnappedTime = shouldSnap
+        ? applyMagnet(finalTime, currentTrack, selectedItem)
+        : finalTime;
+
+      // Push history once before making changes
+      pushHistory();
+
+      // Handle clip overlap: Trim overlapping clips (like openDAW/Ableton)
+      const trimmedTracks = handleClipOverlap(
+        currentTrack,
+        selectedItem,
+        finalSnappedTime,
+        currentItem.duration
+      );
+
+      // Update state IMMEDIATELY with overlap handling
+      setTracks((prevTracks) =>
+        prevTracks.map((track) => {
+          if (track._id !== currentTrack._id) return track;
+          return trimmedTracks;
+        })
+      );
+
+      // Final update (this will also save to DB) - don't push history again
+      await handleClipMove(selectedItem, finalSnappedTime, {
+        skipHistory: true,
+      });
 
       setIsDraggingItem(false);
       setSelectedItem(null);
@@ -1542,18 +1804,42 @@ const ProjectDetailPage = () => {
         return;
       }
 
+      // Use functional update to get the LATEST state (not stale)
+      // This ensures we don't overwrite data that was just updated in handleMouseUp
       setTracks((prevTracks) =>
         prevTracks.map((track) => {
           const hasClip = (track.items || []).some(
             (item) => item._id === itemId
           );
           if (!hasClip) return track;
+
+          // Find the current item with ALL its data (waveform, lickId, etc.)
+          const currentItem = (track.items || []).find(
+            (item) => item._id === itemId
+          );
+          if (!currentItem) return track;
+
+          // Check if values are already updated (avoid unnecessary re-render)
+          const needsUpdate =
+            (sanitized.startTime !== undefined &&
+              currentItem.startTime !== sanitized.startTime) ||
+            (sanitized.duration !== undefined &&
+              currentItem.duration !== sanitized.duration) ||
+            (sanitized.offset !== undefined &&
+              currentItem.offset !== sanitized.offset);
+
+          if (!needsUpdate) return track;
+
+          // Merge updates while preserving ALL original data
+          const updatedItem = {
+            ...currentItem, // Preserve ALL original data (waveform, lickId, sourceDuration, etc.)
+            ...sanitized, // Apply only the sanitized updates
+          };
+
           return {
             ...track,
             items: (track.items || []).map((item) =>
-              item._id === itemId
-                ? normalizeTimelineItem({ ...item, ...sanitized })
-                : item
+              item._id === itemId ? normalizeTimelineItem(updatedItem) : item
             ),
           };
         })
@@ -1646,6 +1932,7 @@ const ProjectDetailPage = () => {
           waveformElement.style.left = `-${values.offset * pixelsPerSecond}px`;
         }
       }
+      // Don't update state here to avoid re-render lag during resize
     };
 
     const handleMouseUp = async (event) => {
@@ -1653,8 +1940,51 @@ const ProjectDetailPage = () => {
       window.removeEventListener("mouseup", handleMouseUp);
 
       const finalValues = computeResizeValues(event) || {};
+      const clipId = resizeState.clipId;
       setResizeState(null);
-      await handleClipResize(resizeState.clipId, finalValues);
+
+      // Update state IMMEDIATELY using functional update to get latest data
+      // This ensures we preserve ALL original clip data (waveform, lickId, etc.)
+      if (Object.keys(finalValues).length > 0) {
+        setTracks((prevTracks) => {
+          // Find the current clip with ALL its data from the latest state
+          let currentClip = null;
+          for (const track of prevTracks) {
+            const found = (track.items || []).find(
+              (item) => item._id === clipId
+            );
+            if (found) {
+              currentClip = found;
+              break;
+            }
+          }
+
+          if (!currentClip) return prevTracks;
+
+          // Merge updates while preserving ALL original data
+          const updatedItem = {
+            ...currentClip, // Preserve ALL original data (waveform, lickId, sourceDuration, etc.)
+            ...finalValues, // Apply the resize values
+          };
+
+          return prevTracks.map((track) => {
+            const hasClip = (track.items || []).some(
+              (item) => item._id === clipId
+            );
+            if (!hasClip) return track;
+            return {
+              ...track,
+              items: (track.items || []).map((item) =>
+                item._id === clipId ? normalizeTimelineItem(updatedItem) : item
+              ),
+            };
+          });
+        });
+      }
+
+      // Final update with validation (this will also save to DB)
+      // handleClipResize uses functional updates so it will get the latest state
+      await handleClipResize(clipId, finalValues);
     };
 
     window.addEventListener("mousemove", handleMouseMove);
@@ -1663,31 +1993,47 @@ const ProjectDetailPage = () => {
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
-      clipElement.style.width = originalStyles.width;
-      clipElement.style.left = originalStyles.left;
-      if (waveformElement && originalStyles.waveformLeft !== null) {
-        waveformElement.style.left = originalStyles.waveformLeft;
-      }
+      // Don't reset styles on cleanup - let React re-render with updated state
+      // Resetting styles here causes the "snap back" bug
     };
   }, [resizeState, pixelsPerSecond, handleClipResize]);
 
   const handleClipMouseDown = (e, item, trackId) => {
     e.preventDefault();
     e.stopPropagation();
+
+    // Don't start drag if clicking on resize handles or delete button
+    if (
+      e.target.closest("[data-resize-handle]") ||
+      e.target.closest("button")
+    ) {
+      return;
+    }
+
     setSelectedItem(item._id);
     setFocusedClipId(item._id);
+
     if (timelineRef.current) {
       const timelineRect = timelineRef.current.getBoundingClientRect();
       const scrollLeft = timelineRef.current.scrollLeft || 0;
+
+      // Where the user clicked in timeline coordinates
       const pointerX = e.clientX - timelineRect.left + scrollLeft;
-      const itemStartX = item.startTime * pixelsPerSecond;
-      const offsetX = pointerX - itemStartX;
+
+      // Where the clip currently starts in timeline coordinates
+      const itemStartX = (item.startTime || 0) * pixelsPerSecond;
+
+      // How far from the clip's left edge the user clicked (in pixels)
+      const clickOffsetX = pointerX - itemStartX;
+
+      // Store the original state for smooth dragging
       dragStateRef.current = {
         originStart: item.startTime || 0,
-        originPointerX: pointerX,
+        originPointerX: pointerX, // Where user clicked (absolute timeline position)
       };
+
       setDragOffset({
-        x: Number.isFinite(offsetX) ? Math.max(0, offsetX) : 0,
+        x: Number.isFinite(clickOffsetX) ? Math.max(0, clickOffsetX) : 0,
         trackId,
       });
     } else {
@@ -1724,7 +2070,7 @@ const ProjectDetailPage = () => {
   };
 
   // Handle clip move
-  const handleClipMove = async (itemId, newStartTime) => {
+  const handleClipMove = async (itemId, newStartTime, options = {}) => {
     if (newStartTime < 0) return;
     const chordIndex = getChordIndexFromId(itemId);
     if (chordIndex !== null) {
@@ -1736,7 +2082,12 @@ const ProjectDetailPage = () => {
       return;
     }
 
-    pushHistory();
+    // Only push history if not skipped (e.g., when called from drag handler)
+    if (!options.skipHistory) {
+      pushHistory();
+    }
+
+    // Update state to ensure consistency
     setTracks((prevTracks) =>
       prevTracks.map((track) => {
         const hasClip = (track.items || []).some((item) => item._id === itemId);
@@ -2464,6 +2815,7 @@ const ProjectDetailPage = () => {
                               {/* Resize handles */}
                               {showResizeHandles && (
                                 <div
+                                  data-resize-handle="left"
                                   className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
                                   onMouseDown={(e) =>
                                     startClipResize(e, item, track._id, "left")
@@ -2472,6 +2824,7 @@ const ProjectDetailPage = () => {
                               )}
                               {showResizeHandles && (
                                 <div
+                                  data-resize-handle="right"
                                   className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
                                   onMouseDown={(e) =>
                                     startClipResize(e, item, track._id, "right")
