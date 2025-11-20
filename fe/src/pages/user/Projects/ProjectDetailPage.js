@@ -800,9 +800,11 @@ const ProjectDetailPage = () => {
 
       const animate = () => {
         // Sync position with Tone.Transport
-        const position = loopEnabled 
-          ? Tone.Transport.seconds % loopLenSeconds 
-          : Tone.Transport.seconds;
+        const position = Tone.Transport 
+          ? (loopEnabled 
+              ? Tone.Transport.seconds % loopLenSeconds 
+              : Tone.Transport.seconds)
+          : playbackPositionRef.current;
         
         // 1. Direct DOM update for smooth 60fps animation without re-renders
         if (playheadRef.current) {
@@ -835,21 +837,42 @@ const ProjectDetailPage = () => {
 
   // Initialize Tone.js
   useEffect(() => {
-    // Initialize Tone.Players for managing multiple audio clips
-    if (!playersRef.current) {
-      playersRef.current = new Tone.Players().toDestination();
-    }
+    // Initialize Tone context
+    const initTone = async () => {
+      try {
+        // Start Tone.js audio context
+        await Tone.start();
+        
+        // Initialize empty Map for managing individual Tone.Player instances
+        if (!playersRef.current) {
+          playersRef.current = new Map(); // Map of clipId -> Tone.Player
+        }
 
-    // Set initial BPM
-    Tone.Transport.bpm.value = bpm;
+        // Set initial BPM (Transport should be available after Tone.start())
+        if (Tone.Transport) {
+          Tone.Transport.bpm.value = bpm;
+        }
+      } catch (error) {
+        console.error("Error initializing Tone.js:", error);
+      }
+    };
+
+    initTone();
 
     return () => {
-      // Cleanup: stop transport and dispose players
-      if (Tone.Transport.state === "started") {
+      // Cleanup: stop transport and dispose all players
+      if (Tone.Transport && Tone.Transport.state === "started") {
         Tone.Transport.stop();
       }
       if (playersRef.current) {
-        playersRef.current.dispose();
+        // Dispose all individual players
+        playersRef.current.forEach((player) => {
+          if (player) {
+            player.unsync();
+            player.dispose();
+          }
+        });
+        playersRef.current.clear();
         playersRef.current = null;
       }
     };
@@ -857,26 +880,34 @@ const ProjectDetailPage = () => {
 
   // Sync BPM changes with Tone.Transport
   useEffect(() => {
-    Tone.Transport.bpm.value = bpm;
+    if (Tone.Transport) {
+      Tone.Transport.bpm.value = bpm;
+    }
   }, [bpm]);
 
-  // Load audio into Tone.js Players
+  // Load audio into individual Tone.Player
   const loadAudioToPlayer = async (clipId, audioUrl) => {
     if (!playersRef.current) return false;
 
     // Check if already loaded
-    if (audioBuffersRef.current.has(clipId)) {
+    if (playersRef.current.has(clipId)) {
       return true;
     }
 
     try {
-      // Add the audio buffer to the Tone.Players
-      await new Promise((resolve, reject) => {
-        playersRef.current.add(clipId, audioUrl, () => {
+      // Create a new Tone.Player for this clip
+      const player = new Tone.Player({
+        url: audioUrl,
+        onload: () => {
           audioBuffersRef.current.set(clipId, audioUrl);
-          resolve();
-        }, reject);
-      });
+        }
+      }).toDestination();
+      
+      // Wait for the player to load
+      await Tone.loaded();
+      
+      // Store the player in our Map
+      playersRef.current.set(clipId, player);
       return true;
     } catch (error) {
       console.error("Error loading audio to Tone.js:", error);
@@ -884,81 +915,118 @@ const ProjectDetailPage = () => {
     }
   };
 
-  // Schedule audio playback for timeline items using Tone.js
-  const scheduleAudioPlayback = async (startTime = 0) => {
-    if (!playersRef.current || !isPlaying) return;
+  // Schedule audio playback for timeline items using Tone.js Transport sync
+  const scheduleAudioPlayback = async () => {
+    if (!playersRef.current) return;
 
-    // Stop all currently playing clips
-    playersRef.current.stopAll();
+    console.log(`[Audio] Starting scheduleAudioPlayback. Tracks:`, tracks.length);
 
-    // Load and schedule all clips that should be playing
+    // First, unsync and stop all players to clear previous scheduling
+    playersRef.current.forEach((player) => {
+      if (player) {
+        player.unsync();
+        player.stop();
+      }
+    });
+
+    // Load and sync all clips to the Transport timeline
+    let scheduledCount = 0;
     for (const track of tracks) {
+      console.log(`[Audio] Processing track "${track.trackName}", muted: ${track.muted}, items: ${track.items?.length || 0}`);
+      
       if (track.muted) continue; // Skip muted tracks
 
       for (const item of track.items || []) {
+        console.log(`[Audio] Processing item ${item._id}, type: ${item.type}, has lickId: ${!!item.lickId}`);
+        
         if (item.type !== "lick" || !item.lickId) continue;
 
         const clipStart = item.startTime || 0;
-        const clipEnd = clipStart + (item.duration || 0);
         const clipId = item._id;
 
-        // Check if clip overlaps with current playback time
-        if (clipEnd > startTime) {
-          try {
-            // Get audio URL for the lick
-            const audioResponse = await playLickAudio(
-              item.lickId._id || item.lickId,
-              user?._id
-            );
-            if (!audioResponse.success || !audioResponse.data?.audioUrl)
-              continue;
-
-            const audioUrl = audioResponse.data.audioUrl;
-            
-            // Load audio into Tone.Players
-            const loaded = await loadAudioToPlayer(clipId, audioUrl);
-            if (!loaded) continue;
-
-            // Get the player for this clip
-            const player = playersRef.current.player(clipId);
-            if (!player) continue;
-
-            // Set playback rate
-            player.playbackRate = item.playbackRate || 1;
-
-            // Set volume (Tone.js uses decibels)
-            const volumeDb = Tone.gainToDb((track.volume || 1) * (track.solo ? 1 : 0.7));
-            player.volume.value = volumeDb;
-
-            // Calculate when to start relative to current transport position
-            const offset = item.offset || 0;
-            const duration = item.duration || 0;
-
-            // Calculate the time offset from current playback position
-            let playOffset = offset;
-            let timeFromNow = clipStart - startTime;
-            
-            if (clipStart < startTime) {
-              // Clip has already started, we need to start mid-clip immediately
-              playOffset = offset + (startTime - clipStart);
-              timeFromNow = 0;
-            }
-
-            // Schedule playback using immediate start or scheduled time
-            // Time is relative to "now", so we use `+${timeFromNow}` notation
-            const startTimeNotation = timeFromNow === 0 ? "now" : `+${timeFromNow}`;
-            player.start(startTimeNotation, playOffset, duration);
-          } catch (error) {
-            console.error("Error scheduling audio playback:", error);
+        try {
+          console.log(`[Audio] Fetching audio for lick ${item.lickId._id || item.lickId}`);
+          
+          // Get audio URL for the lick
+          const audioResponse = await playLickAudio(
+            item.lickId._id || item.lickId,
+            user?._id
+          );
+          
+          console.log(`[Audio] Audio response:`, audioResponse);
+          
+          // Check for both audio_url (snake_case from API) and audioUrl (camelCase)
+          const audioUrl = audioResponse?.data?.audio_url || audioResponse?.data?.audioUrl;
+          
+          if (!audioResponse?.success || !audioUrl) {
+            console.warn(`[Audio] Failed to get audio URL for clip ${clipId}`, {
+              hasResponse: !!audioResponse,
+              success: audioResponse?.success,
+              hasData: !!audioResponse?.data,
+              audioUrl: audioUrl
+            });
+            continue;
           }
+
+          console.log(`[Audio] Loading audio from ${audioUrl}`);
+          
+          // Load audio into Tone.Player
+          const loaded = await loadAudioToPlayer(clipId, audioUrl);
+          if (!loaded) {
+            console.warn(`[Audio] Failed to load audio for clip ${clipId}`);
+            continue;
+          }
+
+          // Get the player for this clip
+          const player = playersRef.current.get(clipId);
+          if (!player) {
+            console.warn(`[Audio] Player not found for clip ${clipId}`);
+            continue;
+          }
+
+          // Set playback rate
+          player.playbackRate = item.playbackRate || 1;
+
+          // Set volume (Tone.js uses decibels)
+          const volumeDb = Tone.gainToDb((track.volume || 1) * (track.solo ? 1 : 0.7));
+          player.volume.value = volumeDb;
+
+          // Calculate playback parameters
+          const offset = item.offset || 0;
+          const duration = item.duration || 0;
+
+          console.log(`[Audio] Scheduling clip ${clipId}:`, {
+            clipStart,
+            offset,
+            duration,
+            trackMuted: track.muted,
+            volume: volumeDb
+          });
+
+          // CRITICAL: Sync the player to the Transport timeline
+          // This tells Tone.js: "This audio belongs at exactly clipStart seconds on the timeline"
+          player.sync().start(clipStart, offset, duration);
+          
+          scheduledCount++;
+          console.log(`[Audio] Successfully scheduled clip ${clipId} at ${clipStart}s`);
+          
+        } catch (error) {
+          console.error("Error scheduling audio playback:", error);
         }
       }
     }
+    
+    console.log(`[Audio] Finished scheduling ${scheduledCount} clips (${playersRef.current.size} total players in map)`);
   };
 
   const handlePlay = async () => {
     // Start Tone.js audio context if needed
     await Tone.start();
+
+    if (!Tone.Transport) {
+      console.error("Tone.Transport is not available");
+      return;
+    }
 
     // Set the transport position to current playback position
     Tone.Transport.seconds = playbackPositionRef.current;
@@ -968,8 +1036,8 @@ const ProjectDetailPage = () => {
 
     setIsPlaying(true);
     
-    // Schedule audio playback
-    await scheduleAudioPlayback(playbackPositionRef.current);
+    // Schedule audio playback (no longer needs startTime parameter)
+    await scheduleAudioPlayback();
     
     // Start the Tone.js Transport
     Tone.Transport.start();
@@ -979,11 +1047,15 @@ const ProjectDetailPage = () => {
     setIsPlaying(false);
     
     // Pause the Tone.js Transport
-    Tone.Transport.pause();
+    if (Tone.Transport) {
+      Tone.Transport.pause();
+    }
     
     // Stop all audio players
     if (playersRef.current) {
-      playersRef.current.stopAll();
+      playersRef.current.forEach((player) => {
+        if (player) player.stop();
+      });
     }
   };
 
@@ -993,12 +1065,16 @@ const ProjectDetailPage = () => {
     playbackPositionRef.current = 0;
     
     // Stop the Tone.js Transport and reset position
-    Tone.Transport.stop();
-    Tone.Transport.seconds = 0;
+    if (Tone.Transport) {
+      Tone.Transport.stop();
+      Tone.Transport.seconds = 0;
+    }
     
     // Stop all audio players
     if (playersRef.current) {
-      playersRef.current.stopAll();
+      playersRef.current.forEach((player) => {
+        if (player) player.stop();
+      });
     }
   };
 
