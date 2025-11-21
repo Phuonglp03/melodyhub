@@ -20,7 +20,6 @@ import {
 } from "../../../services/user/playlistService";
 import { getCommunityLicks } from "../../../services/user/lickService";
 import LickCard from "../../../components/LickCard";
-import http from "../../../services/http";
 import { useSelector } from "react-redux";
 
 const PlaylistDetailPage = () => {
@@ -70,15 +69,15 @@ const PlaylistDetailPage = () => {
     try {
       setLoading(true);
       setError(null);
-      const res = await http.get(`/playlists/${playlistId}`);
-      if (res.data.success) {
-        setPlaylist(res.data.data);
+      const res = await getPlaylistById(playlistId);
+      if (res.success) {
+        setPlaylist(res.data);
       } else {
         setError("Playlist not found");
       }
     } catch (err) {
       console.error("Error fetching playlist:", err);
-      setError(err.response?.data?.message || "Failed to load playlist");
+      setError(err.message || "Failed to load playlist");
     } finally {
       setLoading(false);
     }

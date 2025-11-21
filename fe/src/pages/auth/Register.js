@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Form, Input, Button, message, ConfigProvider, Select } from 'antd';
 import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import api from '../../services/api';
+import { register as registerUser } from '../../services/authService';
 import './Register.css';
 
 message.config({
@@ -27,9 +28,8 @@ const Register = () => {
     const fetchProvinces = async () => {
       setAddressLoading(true);
       try {
-        const response = await axios.get('http://localhost:9999/api/locations/provinces', {
-          params: { depth: 3 },
-          withCredentials: true
+        const response = await api.get('/locations/provinces', {
+          params: { depth: 3 }
         });
         setProvinces(response.data || []);
       } catch (error) {
@@ -105,9 +105,9 @@ const Register = () => {
       
       console.log('Sending registration data:', requestData);
       
-      const response = await axios.post('http://localhost:9999/api/auth/register', requestData);
+      const result = await registerUser(requestData);
       
-      console.log('Registration response:', response.data);
+      console.log('Registration response:', result);
       messageApi.success('Please check your email for OTP verification code');
       
       // Navigate to OTP verification page after short delay
@@ -120,15 +120,8 @@ const Register = () => {
         });
       }, 1000);
     } catch (error) {
-      console.error('Registration error:', error.response?.data || error.message);
-      
-      // Display detailed error message
-      if (error.response?.data?.errors) {
-        const errorMessages = error.response.data.errors.map(err => err.msg).join(', ');
-        messageApi.error(errorMessages);
-      } else {
-        messageApi.error(error.response?.data?.message || 'Registration failed. Please try again.');
-      }
+      console.error('Registration error:', error.message);
+      messageApi.error(error.message || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }

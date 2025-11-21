@@ -1,18 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Music, Clock, User, Check, X, Play, Pause, Eye, Calendar, FileText, Tag, Music2 } from 'lucide-react';
-import axios from 'axios';
-
-const getToken = () => {
-  try {
-    const userString = localStorage.getItem('user');
-    if (!userString) return null;
-    const userObject = JSON.parse(userString);
-    return userObject.token;
-  } catch (error) {
-    console.error("Error parsing user token:", error);
-    return null;
-  }
-};
+import api from '../../../services/api';
 
 const LickApprovement = () => {
   // State quản lý Tab: 'pending' hoặc 'resolved'
@@ -31,16 +19,9 @@ const LickApprovement = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const token = getToken();
-      if (!token) {
-        setLoading(false);
-        return;
-      }
 
       // 1. Gọi API lấy Pending Licks
-      const pendingRes = await axios.get('http://localhost:9999/api/licks/pending', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const pendingRes = await api.get('/licks/pending');
 
       // 2. Gọi API lấy Resolved Licks (Active hoặc Inactive)
       // Bạn cần tạo thêm API này ở backend hoặc lọc từ danh sách tất cả nếu backend hỗ trợ
@@ -111,10 +92,7 @@ const LickApprovement = () => {
 
   const handleApprove = async (id) => {
     try {
-      const token = getToken();
-      await axios.patch(`http://localhost:9999/api/licks/${id}/approve`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.patch(`/licks/${id}/approve`, {});
       
       // Di chuyển từ Pending sang Resolved
       const approvedLick = pendingLicks.find(l => l.id === id);
@@ -134,10 +112,7 @@ const LickApprovement = () => {
   const handleReject = async (id) => {
     if (!window.confirm("Are you sure you want to reject this lick?")) return;
     try {
-      const token = getToken();
-      await axios.patch(`http://localhost:9999/api/licks/${id}/reject`, {}, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await api.patch(`/licks/${id}/reject`, {});
       
       // Di chuyển từ Pending sang Resolved
       const rejectedLick = pendingLicks.find(l => l.id === id);

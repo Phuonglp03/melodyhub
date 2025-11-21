@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaSearch, FaPlus, FaFilter, FaLock, FaTimes } from "react-icons/fa";
-import http from "../../../services/http";
 import {
   deleteLick,
   updateLick as apiUpdateLick,
+  getMyLicks,
 } from "../../../services/user/lickService";
 import {
   fetchTagsGrouped,
@@ -83,11 +83,11 @@ const MyLicksPage = () => {
         params.status = statusFilter;
       }
 
-      const res = await http.get(`/licks/user/me`, { params });
+      const res = await getMyLicks(params);
 
-      if (res.data.success) {
-        setLicks(res.data.data);
-        setPagination(res.data.pagination);
+      if (res.success) {
+        setLicks(res.data);
+        setPagination(res.pagination);
       }
     } catch (err) {
       console.error("Error fetching my licks:", err);

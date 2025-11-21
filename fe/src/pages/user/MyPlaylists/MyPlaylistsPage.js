@@ -6,7 +6,6 @@ import {
   deletePlaylist,
 } from "../../../services/user/playlistService";
 import CreatePlaylistModal from "../../../components/CreatePlaylistModal";
-import http from "../../../services/http";
 
 const MyPlaylistsPage = () => {
   const navigate = useNavigate();
@@ -34,11 +33,11 @@ const MyPlaylistsPage = () => {
       if (searchTerm) params.search = searchTerm;
       if (filterPublic !== "") params.isPublic = filterPublic === "true";
 
-      const res = await http.get("/playlists/me", { params });
+      const res = await getMyPlaylists(params);
 
-      if (res.data.success) {
-        setPlaylists(res.data.data);
-        setPagination(res.data.pagination);
+      if (res.success) {
+        setPlaylists(res.data);
+        setPagination(res.pagination);
       }
     } catch (err) {
       console.error("Error fetching playlists:", err);

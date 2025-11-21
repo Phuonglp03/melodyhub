@@ -2,48 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Lock, Unlock, Search, Edit } from 'lucide-react';
-import axios from 'axios'; 
-
-const API_BASE_URL = '/api/admin/users'; // URL cơ sở
-
-const getToken = () => {
-    try {
-        const userString = localStorage.getItem('user');
-        if (!userString) return null;
-
-        const userObject = JSON.parse(userString);
-        return userObject.token;
-    } catch (e) {
-        console.error("Lỗi khi đọc Token từ Local Storage:", e);
-        return null;
-    }
-};
-
-const apiCall = async (method, url, data = null, params = {}) => {
-    const token = getToken(); 
-    if (!token) {
-        throw new Error("Người dùng chưa đăng nhập. Không tìm thấy Access Token.");
-    }
-    
-    const config = {
-      headers: { 
-        'Authorization': `Bearer ${token}`, 
-        'Content-Type': 'application/json' 
-      },
-      method: method,
-      url: url,
-      data: data,
-      params: params
-    };
-
-    try {
-        const response = await axios(config);
-        return response.data;
-    } catch (error) {
-        console.error("API Error:", error.response || error);
-        throw error.response?.data?.message || error.message || "Lỗi không xác định";
-    }
-};
+import api from '../../../services/api';
 
 const UserManagement = () => {
     const [users, setUsers] = useState([]);
@@ -81,13 +40,13 @@ const UserManagement = () => {
         }
 
         try {
-            const response = await apiCall('GET', API_BASE_URL, null, params); 
+            const response = await api.get('/admin/users', { params }); 
             
-            setUsers(response.data);
-            setTotal(response.pagination.total);
-            setTotalPages(response.pagination.totalPages);
+            setUsers(response.data.data);
+            setTotal(response.data.pagination.total);
+            setTotalPages(response.data.pagination.totalPages);
         } catch (err) {
-            setError(`Lỗi khi tải dữ liệu: ${err}`);
+            setError(`Lỗi khi tải dữ liệu: ${err.message}`);
             setUsers([]);
         } finally {
             setLoading(false);
@@ -103,15 +62,15 @@ const UserManagement = () => {
         const action = currentIsActive ? 'khóa' : 'mở khóa';
         if (window.confirm(`Bạn có chắc chắn muốn ${action} người dùng này?`)) {
             try {
-                const response = await apiCall('PATCH', `/api/admin/users/${userId}/lock`, {});                
+                const response = await api.patch(`/admin/users/${userId}/lock`, {});                
                 setUsers(users.map(user => 
                     user._id === userId 
-                        ? { ...user, isActive: response.data.isActive }
+                        ? { ...user, isActive: response.data.data.isActive }
                         : user
                 ));
-                alert(response.message);
+                alert(response.data.message);
             } catch (err) {
-                alert(`Lỗi khi ${action}: ${err}`);
+                alert(`Lỗi khi ${action}: ${err.message}`);
             }
         }
     };
@@ -136,16 +95,16 @@ const UserManagement = () => {
                 roleId: editingUser.roleId,
             };
             
-            const response = await apiCall('PUT', `/api/admin/users/${editingUser._id}`, updates); 
+            const response = await api.put(`/admin/users/${editingUser._id}`, updates); 
             
             setUsers(users.map(user => 
-                user._id === editingUser._id ? response.data : user
+                user._id === editingUser._id ? response.data.data : user
             ));
 
             setShowModal(false);
             setEditingUser(null);
         } catch (err) {
-            setError(`Lỗi khi cập nhật người dùng: ${err}`);
+            setError(`Lỗi khi cập nhật người dùng: ${err.message}`);
         }
     };
 

@@ -13,9 +13,7 @@ import {
   AlertCircle,
   User 
 } from 'lucide-react';
-import axios from 'axios';
-
-const API_ENDPOINT = '/api/admin/create-admin'; 
+import api from '../../../services/api'; 
 
 // ✅ DI CHUYỂN InputField RA NGOÀI - ĐÂY LÀ GIẢI PHÁP CHÍNH
 const InputField = React.memo(({ 
@@ -142,44 +140,6 @@ const CreateAdmin = () => {
     return isValid;
   };
 
-  const getToken = () => {
-    try {
-      const userString = localStorage.getItem('user');
-      if (!userString) return null;
-      const userObject = JSON.parse(userString);
-      return userObject.token;
-    } catch (e) {
-      console.error("Lỗi khi đọc Token từ Local Storage:", e);
-      return null;
-    }
-  };
-
-  const apiCall = async (method, url, data = null, params = {}) => {
-    const token = getToken(); 
-    if (!token) {
-      throw new Error("Người dùng chưa đăng nhập. Không tìm thấy Access Token.");
-    }
-    
-    const config = {
-      headers: { 
-        'Authorization': `Bearer ${token}`, 
-        'Content-Type': 'application/json' 
-      },
-      method: method,
-      url: url,
-      data: data,
-      params: params
-    };
-
-    try {
-      const response = await axios(config);
-      return response.data;
-    } catch (error) {
-      console.error("API Error:", error.response || error);
-      throw error.response?.data?.message || error.message || "Lỗi không xác định";
-    }
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setGlobalMessage({ type: '', text: '' });
@@ -204,9 +164,9 @@ const CreateAdmin = () => {
         roleKey: roleKey 
       };
       
-      const response = await apiCall('POST', API_ENDPOINT, payload);
+      const response = await api.post('/admin/create-admin', payload);
 
-      alert(response.data.message || `Tạo tài khoản Admin ${selectedRole.label} thành công!`);
+      alert(response.data?.message || `Tạo tài khoản Admin ${selectedRole.label} thành công!`);
       
       setFormData({
         username: '',
@@ -221,7 +181,7 @@ const CreateAdmin = () => {
 
     } catch (error) {
       console.error('Error creating admin:', error);
-      const errorMessage = error.response?.data?.message || 'Lỗi kết nối hoặc lỗi máy chủ.';
+      const errorMessage = error.message || 'Lỗi kết nối hoặc lỗi máy chủ.';
       setGlobalMessage({ type: 'error', text: errorMessage });
     } finally {
       setIsSubmitting(false);

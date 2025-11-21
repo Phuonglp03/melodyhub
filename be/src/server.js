@@ -9,6 +9,7 @@ import http from "http";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 
+import { corsMiddleware } from "./config/cors.js";
 import { connectToDatabase } from "./config/db.js";
 import { socketServer } from "./config/socket.js";
 import { nodeMediaServer } from "./config/media.js";
@@ -69,12 +70,7 @@ app.use(
     contentSecurityPolicy: false,
   })
 );
-app.use(
-  cors({
-    origin: "http://localhost:3000", // URL của frontend
-    credentials: true,
-  })
-);
+app.use(corsMiddleware());
 app.use(morgan("dev"));
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
