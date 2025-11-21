@@ -56,7 +56,7 @@ import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import dmRoutes from "./routes/dmRoutes.js";
 import reportRoutes from "./routes/reportRoutes.js";
-
+import approveLickRoute from "./routes/admin/approveLickRoute.js";
 const app = express();
 const httpServer = http.createServer(app);
 
@@ -103,6 +103,7 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/posts", postRoutes);
+app.use("/api/licks", approveLickRoute);
 app.use("/api/licks", lickRoutes);
 app.use("/api/livestreams", liveroomRoutes);
 app.use("/api/notifications", notificationRoutes);
