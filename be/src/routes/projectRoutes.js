@@ -64,6 +64,9 @@ router.get("/", getUserProjects);
 // Get available instruments - MUST be before /:projectId route
 router.get("/instruments", getInstruments);
 
+// Get rhythm patterns - MUST be before /:projectId route
+router.get("/rhythm-patterns", getRhythmPatterns);
+
 router.get("/:projectId", getProjectById);
 
 router.put(
@@ -174,9 +177,6 @@ router.put(
 
 router.delete("/:projectId/tracks/:trackId", deleteTrack);
 
-// Rhythm pattern routes
-router.get("/rhythm-patterns", getRhythmPatterns);
-
 router.put(
   "/:projectId/timeline/items/:itemId/apply-pattern",
   [
@@ -206,7 +206,6 @@ router.post(
 // Generate AI backing track with Suno
 router.post(
   "/:projectId/generate-ai-backing",
-  authenticateToken,
   generateAIBackingTrack
 );
 

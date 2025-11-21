@@ -24,12 +24,29 @@ import {
   FaUndo,
   FaRedo,
   FaStepBackward,
-  getCommunityLicks,
-  playLickAudio,
-} from "../../../services/user/lickService";
+  FaSync,
+} from "react-icons/fa";
+import { RiPulseFill } from "react-icons/ri";
+import { getCommunityLicks, playLickAudio } from "../../../services/user/lickService";
 import { getChords } from "../../../services/chordService";
 import { useSelector } from "react-redux";
 import { fetchTagsGrouped } from "../../../services/user/tagService";
+import {
+  getProjectById,
+  updateProject,
+  deleteProject as deleteProjectApi,
+  addLickToTimeline,
+  updateTimelineItem,
+  bulkUpdateTimelineItems,
+  deleteTimelineItem,
+  updateChordProgression as updateChordProgressionAPI,
+  addTrack,
+  updateTrack,
+  deleteTrack,
+  getInstruments,
+  getRhythmPatterns,
+  generateBackingTrack as generateBackingTrackAPI,
+} from "../../../services/user/projectService";
 import BackingTrackPanel from "../../../components/BackingTrackPanel";
 import MidiEditor from "../../../components/MidiEditor";
 import * as Tone from "tone";
