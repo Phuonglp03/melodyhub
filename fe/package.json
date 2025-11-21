@@ -41,11 +41,11 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "DISABLE_ESLINT_PLUGIN=true react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
-  "proxy": "http://localhost:9999",
+  "proxy": "https://api.melodyhub.online",
   "eslintConfig": {
     "extends": [
       "react-app",
