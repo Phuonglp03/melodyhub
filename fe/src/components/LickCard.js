@@ -7,6 +7,7 @@ import {
   FaDownload,
   FaMusic,
   FaWaveSquare,
+  FaFolderPlus,
 } from "react-icons/fa";
 import { playLickAudio, getLickById } from "../services/user/lickService";
 import { toggleLickLike } from "../services/user/lickService";
@@ -14,6 +15,7 @@ import { toggleLickLike } from "../services/user/lickService";
 import { useDispatch, useSelector } from "react-redux";
 import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
 import { getProfileById } from "../services/user/profile";
+import AddToPlaylistModal from "./AddToPlaylistModal";
 
 const LickCard = ({ lick, onClick }) => {
   const {
@@ -135,6 +137,7 @@ const LickCard = ({ lick, onClick }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0); // Track playback progress (0-1)
   const audioRef = useRef(null);
+  const [showPlaylistModal, setShowPlaylistModal] = useState(false);
   const dispatch = useDispatch();
   const authUser = useSelector((s) => s.auth.user);
   const likeState = useSelector((s) => s.likes.byId[lick_id]);
@@ -380,8 +383,26 @@ const LickCard = ({ lick, onClick }) => {
               <span>{commentsCount}</span>
             </span>
           </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowPlaylistModal(true);
+            }}
+            className="flex items-center gap-1 text-gray-300 hover:text-orange-400 transition-colors"
+            title="Add to playlist"
+          >
+            <FaFolderPlus size={16} />
+          </button>
         </div>
       </div>
+
+      {/* Add to Playlist Modal */}
+      <AddToPlaylistModal
+        isOpen={showPlaylistModal}
+        onClose={() => setShowPlaylistModal(false)}
+        lickId={effectiveId}
+        lickTitle={title}
+      />
     </div>
   );
 };
