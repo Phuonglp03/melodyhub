@@ -15,7 +15,11 @@ import {
   updateTrack,
   deleteTrack,
   getInstruments,
+  getRhythmPatterns,
+  applyRhythmPattern,
+  generateBackingTrack,
 } from "../controllers/projectController.js";
+import { generateAIBackingTrack } from "../controllers/sunoAIController.js";
 import middlewareController from "../middleware/auth.js";
 const { verifyToken } = middlewareController;
 
@@ -169,6 +173,42 @@ router.put(
 );
 
 router.delete("/:projectId/tracks/:trackId", deleteTrack);
+
+// Rhythm pattern routes
+router.get("/rhythm-patterns", getRhythmPatterns);
+
+router.put(
+  "/:projectId/timeline/items/:itemId/apply-pattern",
+  [
+    body("rhythmPatternId").optional().isString(),
+  ],
+  validate,
+  applyRhythmPattern
+);
+
+// Backing track generation
+router.post(
+  "/:projectId/generate-backing",
+  [
+    body("chords")
+      .isArray()
+      .withMessage("chords must be an array")
+      .notEmpty()
+      .withMessage("chords array cannot be empty"),
+    body("instrumentId").optional().isMongoId(),
+    body("rhythmPatternId").optional().isString(),
+    body("chordDuration").optional().isInt({ min: 1, max: 16 }),
+  ],
+  validate,
+  generateBackingTrack
+);
+
+// Generate AI backing track with Suno
+router.post(
+  "/:projectId/generate-ai-backing",
+  authenticateToken,
+  generateAIBackingTrack
+);
 
 export default router;
 

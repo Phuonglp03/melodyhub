@@ -24,30 +24,14 @@ import {
   FaUndo,
   FaRedo,
   FaStepBackward,
-  FaSync,
-} from "react-icons/fa";
-import { RiPulseFill } from "react-icons/ri";
-import {
-  getProjectById,
-  updateProject,
-  addLickToTimeline,
-  updateTimelineItem,
-  bulkUpdateTimelineItems,
-  deleteTimelineItem,
-  updateChordProgression as updateChordProgressionAPI,
-  addTrack,
-  updateTrack,
-  deleteTrack,
-  deleteProject as deleteProjectApi,
-  getInstruments,
-} from "../../../services/user/projectService";
-import {
   getCommunityLicks,
   playLickAudio,
 } from "../../../services/user/lickService";
 import { getChords } from "../../../services/chordService";
 import { useSelector } from "react-redux";
 import { fetchTagsGrouped } from "../../../services/user/tagService";
+import BackingTrackPanel from "../../../components/BackingTrackPanel";
+import MidiEditor from "../../../components/MidiEditor";
 import * as Tone from "tone";
 
 const HISTORY_LIMIT = 50;
@@ -307,6 +291,15 @@ const ProjectDetailPage = () => {
   const [loadingInstruments, setLoadingInstruments] = useState(false);
   const [selectedInstrumentId, setSelectedInstrumentId] = useState(null);
 
+  // Rhythm Patterns
+  const [rhythmPatterns, setRhythmPatterns] = useState([]);
+  const [loadingRhythmPatterns, setLoadingRhythmPatterns] = useState(false);
+  const [selectedRhythmPatternId, setSelectedRhythmPatternId] = useState(null);
+
+  // MIDI Editor
+  const [midiEditorOpen, setMidiEditorOpen] = useState(false);
+  const [editingTimelineItem, setEditingTimelineItem] = useState(null);
+
   // Drag and drop
   const [draggedLick, setDraggedLick] = useState(null);
   const [draggedChord, setDraggedChord] = useState(null);
@@ -361,11 +354,10 @@ const ProjectDetailPage = () => {
     }
 
     return { x, y };
-  }, [trackContextMenu.x, trackContextMenu.y, trackContextMenu.isOpen]);
+  }, [trackContextMenu.x, trackContextMenu.y]);
+
   const markTimelineItemDirty = useCallback((itemId) => {
-    if (!itemId) return;
     dirtyTimelineItemsRef.current.add(itemId);
-    console.log(`[Autosave] Marked item as dirty: ${itemId}. Total dirty items: ${dirtyTimelineItemsRef.current.size}`);
   }, []);
 
   const hasUnsavedTimelineChanges = dirtyTimelineItemsRef.current.size > 0;
@@ -392,12 +384,16 @@ const ProjectDetailPage = () => {
     },
     [tracks]
   );
+
+  const autosaveTimeoutRef = useRef(null);
+
   const updateHistoryStatus = useCallback(() => {
     setHistoryStatus({
       canUndo: historyRef.current.length > 0,
       canRedo: futureRef.current.length > 0,
     });
   }, []);
+
   const pushHistory = useCallback(() => {
     const snapshot = {
       tracks: cloneTracksForHistory(tracks),
@@ -410,51 +406,33 @@ const ProjectDetailPage = () => {
 
   const flushTimelineSaves = useCallback(async () => {
     const ids = Array.from(dirtyTimelineItemsRef.current);
-    console.log(`[Autosave] flushTimelineSaves called. Dirty items: ${ids.length}`, ids);
-    
     if (!ids.length) return;
 
-    const payload = ids
+    const snapshots = ids
       .map((id) => collectTimelineItemSnapshot(id))
-      .filter(Boolean);
-    
-    console.log(`[Autosave] Collected ${payload.length} item snapshots to save:`, payload);
-    
-    if (!payload.length) {
-      dirtyTimelineItemsRef.current.clear();
-      return;
-    }
+      .filter((s) => s !== null);
 
+    if (!snapshots.length) return;
+
+    const payload = snapshots;
     setIsSavingTimeline(true);
     dirtyTimelineItemsRef.current.clear();
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = null;
-    }
 
     try {
-      console.log(`[Autosave] Calling bulkUpdateTimelineItems with ${payload.length} items...`);
       await bulkUpdateTimelineItems(projectId, payload);
-      console.log(`[Autosave] ✅ Successfully saved ${payload.length} timeline items`);
-    } catch (err) {
-      console.error("[Autosave] ❌ Error bulk saving timeline:", err);
-      if (err.response && err.response.data) {
-        console.error("[Autosave] Backend error details:", err.response.data);
-      }
-      // Don't re-throw; we don't want to break the UI.
+    } catch (error) {
+      console.error("Timeline items bulk save failed:", error);
+      ids.forEach((id) => dirtyTimelineItemsRef.current.add(id));
     } finally {
       setIsSavingTimeline(false);
     }
   }, [projectId, collectTimelineItemSnapshot]);
 
   const scheduleTimelineAutosave = useCallback(() => {
-    console.log('[Autosave] scheduleTimelineAutosave called. Scheduling save in 2 seconds...');
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-    saveTimeoutRef.current = setTimeout(() => {
+    clearTimeout(autosaveTimeoutRef.current);
+    autosaveTimeoutRef.current = setTimeout(() => {
       flushTimelineSaves();
-    }, 2000); // 2 seconds for faster autosave
+    }, 2000);
   }, [flushTimelineSaves]);
 
   const handleUndo = useCallback(() => {
@@ -533,6 +511,7 @@ const ProjectDetailPage = () => {
   useEffect(() => {
     fetchProject(true); // Show loading only on initial load
     fetchInstruments();
+    fetchRhythmPatterns();
   }, [projectId]);
 
   useEffect(() => {
@@ -557,15 +536,7 @@ const ProjectDetailPage = () => {
 
   useEffect(() => {
     const handlePointerUp = () => {
-      console.log('[DRAG] Pointerup fired!', { 
-        isDraggingItem, 
-        selectedItem, 
-        hasDragState: !!dragStateRef.current 
-      });
-
       if (!isDraggingItem) return;
-
-      console.log('[DRAG] Drag detected - will commit changes');
 
       // Get the dragged clip and its final position
       if (selectedItem && clipRefs.current.has(selectedItem)) {
@@ -574,11 +545,6 @@ const ProjectDetailPage = () => {
           // Read final position from visual element
           const currentLeft = parseFloat(clipElement.style.left) || 0;
           const finalStartTime = Math.max(0, currentLeft / pixelsPerSecond);
-
-          console.log('[DRAG] Committing position change:', { 
-            clipId: selectedItem, 
-            finalStartTime 
-          });
 
           // Update state
           pushHistory();
@@ -725,6 +691,139 @@ const ProjectDetailPage = () => {
       setLoadingInstruments(false);
     }
   };
+
+  // Fetch rhythm patterns
+  const fetchRhythmPatterns = async () => {
+    try {
+      setLoadingRhythmPatterns(true);
+      const response = await getRhythmPatterns();
+      if (response.success) {
+        setRhythmPatterns(response.data || []);
+      }
+    } catch (err) {
+      console.error("Error fetching rhythm patterns:", err);
+    } finally {
+      setLoadingRhythmPatterns(false);
+    }
+  };
+
+  // Handle adding chord to timeline from backing track panel
+  const handleAddChordToTimeline = async (chordData) => {
+    try {
+      if (!backingTrack) {
+        alert("No backing track found. Please create one first.");
+        return;
+      }
+
+      // Find the chord in the library to get full MIDI data
+      const chord = chordLibrary.find(c => c.chordName === chordData.chordName);
+      if (!chord) {
+        alert("Chord not found in library");
+        return;
+      }
+
+      // Calculate start time (place at the end of existing items)
+      const existingItems = backingTrack.items || [];
+      const lastItem = existingItems.length > 0 
+        ? existingItems.reduce((max, item) => {
+            const endTime = item.startTime + item.duration;
+            return endTime > max ? endTime : max;
+          }, 0)
+        : 0;
+
+      const bpm = project?.tempo || 120;
+      const secondsPerBeat = 60 / bpm;
+      const durationInSeconds = (chordData.duration || 4) * secondsPerBeat;
+
+      // Parse MIDI notes - they're stored as JSON string
+      let midiNotes = [];
+      if (chord.midiNotes) {
+        if (typeof chord.midiNotes === 'string') {
+          try {
+            midiNotes = JSON.parse(chord.midiNotes);
+          } catch (e) {
+            console.error("Failed to parse MIDI notes:", e);
+            midiNotes = [];
+          }
+        } else if (Array.isArray(chord.midiNotes)) {
+          midiNotes = chord.midiNotes;
+        }
+      }
+
+      const timelineData = {
+        trackId: backingTrack._id,
+        startTime: lastItem,
+        duration: durationInSeconds,
+        offset: 0,
+        type: "chord",
+        chordName: chord.chordName,
+        rhythmPatternId: chordData.rhythmPatternId || selectedRhythmPatternId,
+        isCustomized: false,
+        customMidiEvents: midiNotes.length > 0
+          ? midiNotes.map(pitch => ({
+              pitch: Number(pitch),
+              startTime: 0,
+              duration: durationInSeconds,
+              velocity: 0.8,
+            }))
+          : [],
+      };
+
+      const response = await addLickToTimeline(projectId, timelineData);
+      if (response.success) {
+        await refreshProject();
+        alert("Chord added to timeline!");
+      }
+    } catch (error) {
+      console.error("Error adding chord to timeline:", error);
+      alert(`Failed to add chord: ${error.response?.data?.message || error.message}`);
+    }
+  };
+
+  // Handle opening MIDI editor
+  const handleOpenMidiEditor = (timelineItem) => {
+    setEditingTimelineItem(timelineItem);
+    setMidiEditorOpen(true);
+  };
+
+  // Handle closing MIDI editor
+  const handleCloseMidiEditor = () => {
+    setMidiEditorOpen(false);
+    setEditingTimelineItem(null);
+  };
+
+  // Handle saving MIDI edits
+  const handleSaveMidiEdit = async (updatedItem) => {
+    try {
+      const response = await updateTimelineItem(projectId, updatedItem._id, {
+        customMidiEvents: updatedItem.customMidiEvents,
+        isCustomized: updatedItem.isCustomized,
+      });
+      
+      if (response.success) {
+        await refreshProject();
+        handleCloseMidiEditor();
+      }
+    } catch (error) {
+      console.error("Error saving MIDI edits:", error);
+      alert("Failed to save MIDI edits");
+    }
+  };
+
+  // Handle generating full backing track
+  const handleGenerateBackingTrack = async (data) => {
+    try {
+      const response = await generateBackingTrackAPI(projectId, data);
+      if (response.success) {
+        await refreshProject();
+        alert(`Backing track generated with ${response.data.items.length} chords`);
+      }
+    } catch (error) {
+      console.error("Error generating backing track:", error);
+      alert("Failed to generate backing track");
+    }
+  };
+
 
   // Fetch licks on initial mount and when search term or filters change
   useEffect(() => {
@@ -1063,11 +1162,8 @@ const ProjectDetailPage = () => {
   // Auto-save when clips are moved/edited (catches all clip position changes)
   const prevTracksRef = useRef(null);
   useEffect(() => {
-    console.log('[DEBUG] Autosave useEffect running! tracks changed:', tracks.length);
-    
     // Skip on initial load
     if (!prevTracksRef.current) {
-      console.log('[DEBUG] First run, skipping autosave check');
       prevTracksRef.current = tracks;
       return;
     }
@@ -1083,8 +1179,6 @@ const ProjectDetailPage = () => {
       (track.items || []).forEach((item) => {
         const prevItem = (prevTrack.items || []).find((i) => i._id === item._id);
         if (!prevItem) {
-          // New item added
-          console.log('[DEBUG] New item detected:', item._id);
           changedItemIds.add(item._id);
           hasChanges = true;
         } else if (
@@ -1092,12 +1186,6 @@ const ProjectDetailPage = () => {
           item.duration !== prevItem.duration ||
           item.offset !== prevItem.offset
         ) {
-          // Item position/size changed
-          console.log('[DEBUG] Item changed:', item._id, {
-            startTime: { old: prevItem.startTime, new: item.startTime },
-            duration: { old: prevItem.duration, new: item.duration },
-            offset: { old: prevItem.offset, new: item.offset }
-          });
           changedItemIds.add(item._id);
           hasChanges = true;
         }
@@ -1105,11 +1193,8 @@ const ProjectDetailPage = () => {
     });
 
     if (hasChanges) {
-      console.log(`[Autosave] Detected ${changedItemIds.size} changed clips via tracks state`);
       changedItemIds.forEach((itemId) => markTimelineItemDirty(itemId));
       scheduleTimelineAutosave();
-    } else {
-      console.log('[DEBUG] No clip changes detected');
     }
 
     prevTracksRef.current = tracks;
@@ -2292,7 +2377,6 @@ const ProjectDetailPage = () => {
 
   // Handle clip move
   const handleClipMove = async (itemId, newStartTime, options = {}) => {
-    console.log('[DEBUG] handleClipMove called!', { itemId, newStartTime, options });
     if (newStartTime < 0) return;
     const chordIndex = getChordIndexFromId(itemId);
     if (chordIndex !== null) {
@@ -2938,6 +3022,13 @@ const ProjectDetailPage = () => {
                                 e.stopPropagation();
                                 setFocusedClipId(item._id);
                               }}
+                              onDoubleClick={(e) => {
+                                e.stopPropagation();
+                                // Open MIDI editor for chord/MIDI items
+                                if (item.type === "chord" || item.type === "midi") {
+                                  handleOpenMidiEditor(item);
+                                }
+                              }}
                             >
                               <div className="absolute inset-0 overflow-hidden">
                                 {showWaveform ? (
@@ -3225,6 +3316,16 @@ const ProjectDetailPage = () => {
             MIDI Editor
           </button>
           <button
+            onClick={() => setActiveTab("backing-track")}
+            className={`px-6 py-3 text-sm font-medium transition-colors ${
+              activeTab === "backing-track"
+                ? "bg-gray-800 text-indigo-500 border-b-2 border-indigo-500"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            Backing Track
+          </button>
+          <button
             onClick={() => setActiveTab("lick-library")}
             className={`px-6 py-3 text-sm font-medium transition-colors ${
               activeTab === "lick-library"
@@ -3235,6 +3336,23 @@ const ProjectDetailPage = () => {
             Lick Library
           </button>
         </div>
+
+        {/* Backing Track Tab Content */}
+        {activeTab === "backing-track" && (
+          <BackingTrackPanel
+            chordLibrary={chordPalette}
+            instruments={instruments}
+            rhythmPatterns={rhythmPatterns}
+            onAddChord={handleAddChordToTimeline}
+            onGenerateBackingTrack={handleGenerateBackingTrack}
+            selectedInstrumentId={selectedInstrumentId}
+            onInstrumentChange={setSelectedInstrumentId}
+            selectedRhythmPatternId={selectedRhythmPatternId}
+            onRhythmPatternChange={setSelectedRhythmPatternId}
+            chordProgression={chordProgression}
+            loading={loadingChords || loadingInstruments || loadingRhythmPatterns}
+          />
+        )}
 
         {/* Instrument Tab Content */}
         {activeTab === "instrument" && (
@@ -3569,6 +3687,15 @@ const ProjectDetailPage = () => {
           </div>
         </div>
       )}
+
+      {/* MIDI Editor Modal */}
+      <MidiEditor
+        isOpen={midiEditorOpen}
+        onClose={handleCloseMidiEditor}
+        onSave={handleSaveMidiEdit}
+        timelineItem={editingTimelineItem}
+        project={project}
+      />
 
       {/* Error Message */}
       {error && (

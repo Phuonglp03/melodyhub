@@ -172,3 +172,51 @@ export const getInstruments = async () => {
     throw new Error(errorMessage);
   }
 };
+
+// Get rhythm patterns
+export const getRhythmPatterns = async () => {
+  try {
+    const res = await http.get("/projects/rhythm-patterns");
+    return res.data;
+  } catch (error) {
+    console.error("Error fetching rhythm patterns:", error);
+    throw error;
+  }
+};
+
+// Apply rhythm pattern to timeline item
+export const applyRhythmPattern = async (projectId, itemId, rhythmPatternId) => {
+  try {
+    const res = await http.put(
+      `/projects/${projectId}/timeline/items/${itemId}/apply-pattern`,
+      { rhythmPatternId }
+    );
+    return res.data;
+  } catch (error) {
+    console.error("Error applying rhythm pattern:", error);
+    throw error;
+  }
+};
+
+// Generate backing track from chord progression
+export const generateBackingTrack = async (projectId, data) => {
+  try {
+    const res = await http.post(`/projects/${projectId}/generate-backing`, data);
+    return res.data;
+  } catch (error) {
+    console.error("Error generating backing track:", error);
+    throw error;
+  }
+};
+
+// Generate AI backing track with Suno
+export const generateAIBackingTrack = async (projectId, data) => {
+  try {
+    const res = await http.post(`/projects/${projectId}/generate-ai-backing`, data);
+    return res.data;
+  } catch (error) {
+    console.error("Error generating AI backing track:", error);
+    throw error;
+  }
+};
+

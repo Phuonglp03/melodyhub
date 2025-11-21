@@ -1330,3 +1330,222 @@ export const deleteTrack = async (req, res) => {
     });
   }
 };
+
+// Get all rhythm patterns
+export const getRhythmPatterns = async (req, res) => {
+  try {
+    const PlayingPattern = (await import("../models/PlayingPattern.js")).default;
+    
+    const patterns = await PlayingPattern.find({}).sort({ name: 1 });
+    
+    res.json({
+      success: true,
+      data: patterns,
+    });
+  } catch (error) {
+    console.error("Error fetching rhythm patterns:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch rhythm patterns",
+      error: error.message,
+    });
+  }
+};
+
+// Apply rhythm pattern to a timeline item
+export const applyRhythmPattern = async (req, res) => {
+  try {
+    const { projectId, itemId } = req.params;
+    const { rhythmPatternId } = req.body;
+    const userId = req.userId;
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const isOwner = project.creatorId.toString() === userId;
+    const collaborator = await ProjectCollaborator.findOne({
+      projectId: project._id,
+      userId: new mongoose.Types.ObjectId(userId),
+    });
+
+    if (!isOwner && (!collaborator || collaborator.role === "viewer")) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to edit this project",
+      });
+    }
+
+    const timelineItem = await ProjectTimelineItem.findById(itemId);
+    if (!timelineItem) {
+      return res.status(404).json({
+        success: false,
+        message: "Timeline item not found",
+      });
+    }
+
+    const track = await ProjectTrack.findById(timelineItem.trackId);
+    if (!track || track.projectId.toString() !== projectId) {
+      return res.status(404).json({
+        success: false,
+        message: "Timeline item does not belong to this project",
+      });
+    }
+
+    // Update the rhythm pattern
+    timelineItem.rhythmPatternId = rhythmPatternId || undefined;
+    await timelineItem.save();
+
+    // Populate for response
+    if (timelineItem.lickId) {
+      await timelineItem.populate("lickId", "title audioUrl duration waveformData");
+    }
+    await timelineItem.populate("userId", "username displayName avatarUrl");
+
+    res.json({
+      success: true,
+      message: "Rhythm pattern applied successfully",
+      data: timelineItem,
+    });
+  } catch (error) {
+    console.error("Error applying rhythm pattern:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to apply rhythm pattern",
+      error: error.message,
+    });
+  }
+};
+
+// Generate backing track from chord progression
+export const generateBackingTrack = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { 
+      chords, 
+      instrumentId, 
+      rhythmPatternId,
+      chordDuration = 4, // duration in beats
+    } = req.body;
+    const userId = req.userId;
+
+    if (!Array.isArray(chords) || chords.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "chords array is required and cannot be empty",
+      });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const isOwner = project.creatorId.toString() === userId;
+    const collaborator = await ProjectCollaborator.findOne({
+      projectId: project._id,
+      userId: new mongoose.Types.ObjectId(userId),
+    });
+
+    if (!isOwner && !collaborator) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this project",
+      });
+    }
+
+    // Find or create backing track
+    let backingTrack = await ProjectTrack.findOne({
+      projectId: project._id,
+      trackType: "backing",
+    });
+
+    if (!backingTrack) {
+      backingTrack = new ProjectTrack({
+        projectId: project._id,
+        trackName: "Backing Track",
+        trackType: "backing",
+        trackOrder: 0,
+        volume: 1.0,
+        pan: 0.0,
+        muted: false,
+        solo: false,
+        instrument: instrumentId ? { instrumentId } : undefined,
+        defaultRhythmPatternId: rhythmPatternId || undefined,
+      });
+      await backingTrack.save();
+    } else if (instrumentId || rhythmPatternId) {
+      // Update backing track instrument and pattern if provided
+      if (instrumentId) {
+        backingTrack.instrument = { instrumentId };
+      }
+      if (rhythmPatternId) {
+        backingTrack.defaultRhythmPatternId = rhythmPatternId;
+      }
+      await backingTrack.save();
+    }
+
+    // Calculate time per chord based on BPM
+    const bpm = project.tempo || 120;
+    const secondsPerBeat = 60 / bpm;
+    const durationInSeconds = chordDuration * secondsPerBeat;
+
+    // Create timeline items for each chord
+    const timelineItems = [];
+    for (let i = 0; i < chords.length; i++) {
+      const chord = chords[i];
+      const chordName = typeof chord === "string" ? chord : chord.chordName || chord.name;
+      const midiNotes = Array.isArray(chord.midiNotes) ? chord.midiNotes : [];
+
+      if (!chordName) continue;
+
+      const timelineItem = new ProjectTimelineItem({
+        trackId: backingTrack._id,
+        userId,
+        startTime: i * durationInSeconds,
+        duration: durationInSeconds,
+        offset: 0,
+        loopEnabled: false,
+        playbackRate: 1,
+        type: "chord",
+        chordName,
+        rhythmPatternId: rhythmPatternId || backingTrack.defaultRhythmPatternId || undefined,
+        isCustomized: false,
+        customMidiEvents: midiNotes.length > 0 ? 
+          midiNotes.map((pitch, idx) => ({
+            pitch,
+            startTime: 0,
+            duration: durationInSeconds,
+            velocity: 0.8,
+          })) : [],
+      });
+
+      await timelineItem.save();
+      timelineItems.push(timelineItem);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Backing track generated with ${timelineItems.length} chords`,
+      data: {
+        track: backingTrack,
+        items: timelineItems,
+      },
+    });
+  } catch (error) {
+    console.error("Error generating backing track:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate backing track",
+      error: error.message,
+    });
+  }
+};
+
