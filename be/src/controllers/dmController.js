@@ -104,7 +104,35 @@ export const acceptRequest = async (req, res) => {
     convo.acceptedBy = me;
     await convo.save();
 
-    return res.json({ success: true, data: convo });
+    // Populate conversation before emitting
+    const populatedConvo = await Conversation.findById(id)
+      .populate('participants', 'displayName username avatarUrl')
+      .lean();
+
+    // Emit socket event to notify both participants about the status change
+    try {
+      const io = getSocketIo();
+      const peer = getPeerId(convo, me);
+      
+      // Emit to conversation room
+      io.to(String(id)).emit('dm:conversation:updated', { 
+        conversationId: String(id), 
+        conversation: populatedConvo 
+      });
+      
+      // Emit to both participants to refresh their conversation lists
+      if (peer) {
+        io.to(String(peer)).emit('dm:badge', { conversationId: String(id) });
+      }
+      io.to(String(me)).emit('dm:badge', { conversationId: String(id) });
+      
+      console.log(`[Socket.IO] Conversation ${id} accepted, notified participants ${me} and ${peer}`);
+    } catch (socketErr) {
+      console.error('[Socket.IO] Error emitting accept event:', socketErr);
+      // Continue even if socket fails
+    }
+
+    return res.json({ success: true, data: populatedConvo || convo });
   } catch (err) {
     console.error('acceptRequest error:', err);
     return res.status(500).json({ success: false, message: 'Internal server error' });
@@ -315,5 +343,8 @@ export default {
   sendMessage,
   markSeen
 };
+
+
+
 
 

@@ -6,9 +6,13 @@ import {
   getPostById,
   updatePost,
   deletePost,
+  restorePost,
+  permanentlyDeletePost,
+  getArchivedPosts,
   likePost,
   unlikePost,
-  getPostStats
+  getPostStats,
+  getPostLikes,
 } from '../controllers/postController.js';
 import middlewareController from '../middleware/auth.js';
 import { 
@@ -19,7 +23,7 @@ import {
 import { handlePostMediaUpload, handleUploadError } from '../middleware/file.js';
 
 const router = express.Router();
-const { verifyToken } = middlewareController;
+const { verifyToken, optionalVerifyToken } = middlewareController;
 
 // POST /api/posts - Create a new post with media upload (requires authentication)
 router.post('/', verifyToken, (req, res, next) => {
@@ -35,8 +39,12 @@ router.post('/', verifyToken, (req, res, next) => {
   next();
 }, handleUploadError, createPost);
 
-// GET /api/posts - Get all posts with pagination
-router.get('/', getPosts);
+// GET /api/posts - Get all posts with pagination (optional auth to include isLiked)
+router.get('/', optionalVerifyToken, getPosts);
+
+// GET /api/posts/archived - Get archived posts for current user (requires authentication)
+// MUST be before /:postId route to avoid matching "archived" as postId
+router.get('/archived', verifyToken, getArchivedPosts);
 
 // GET /api/posts/user/:userId - Get posts by user ID
 router.get('/user/:userId', getPostsByUser);
@@ -47,11 +55,20 @@ router.get('/:postId', getPostById);
 // GET /api/posts/:postId/stats - likesCount & commentsCount
 router.get('/:postId/stats', getPostStats);
 
+// GET /api/posts/:postId/likes - Get list of users who liked the post
+router.get('/:postId/likes', getPostLikes);
+
 // PUT /api/posts/:postId - Update post with media upload
 router.put('/:postId', handlePostMediaUpload, handleUploadError, updatePost);
 
-// DELETE /api/posts/:postId - Delete post
-router.delete('/:postId', deletePost);
+// DELETE /api/posts/:postId - Archive post (requires authentication)
+router.delete('/:postId', verifyToken, deletePost);
+
+// POST /api/posts/:postId/restore - Restore archived post (requires authentication)
+router.post('/:postId/restore', verifyToken, restorePost);
+
+// DELETE /api/posts/:postId/permanent - Permanently delete archived post (requires authentication)
+router.delete('/:postId/permanent', verifyToken, permanentlyDeletePost);
 
 // POST /api/posts/:postId/like - like a post
 router.post('/:postId/like', verifyToken, likePost);

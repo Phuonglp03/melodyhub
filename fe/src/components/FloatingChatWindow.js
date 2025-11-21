@@ -1,24 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Avatar, Input, Button, Badge, Spin } from 'antd';
-import { 
+import { Avatar, Input, Button, Badge, Spin, message } from 'antd';
+import {
   UserOutlined,
   PhoneOutlined,
   VideoCameraOutlined,
   MinusOutlined,
   CloseOutlined,
   SmileOutlined,
-  LikeOutlined
+  LikeOutlined,
+  CheckOutlined
 } from '@ant-design/icons';
 import useDMConversationMessages from '../hooks/useDMConversationMessages';
+import { acceptConversation, declineConversation } from '../services/dmService';
+import { getProfileById } from '../services/user/profile';
 import './FloatingChatWindow.css';
 
 const { TextArea } = Input;
 
-const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, isMinimized, onMaximize, position }) => {
+const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, isMinimized, onMaximize, position, onConversationUpdate }) => {
   const [inputText, setInputText] = useState('');
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const windowRef = useRef(null);
+  const [peerInfo, setPeerInfo] = useState(null);
 
   // Get peer info
   const getPeer = (conv) => {
@@ -32,16 +36,57 @@ const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, 
   };
 
   const peer = getPeer(conversation);
-  const peerName = peer?.displayName || peer?.username || 'Người dùng';
-  const peerAvatar = peer?.avatarUrl;
+  
+  // Fetch peer info if missing avatar
+  useEffect(() => {
+    const fetchPeerInfo = async () => {
+      if (!peer || !conversation) return;
+      
+      const peerId = typeof peer === 'object' ? (peer._id || peer.id) : peer;
+      if (!peerId) return;
+      
+      // If already has avatarUrl, use it
+      if (typeof peer === 'object' && peer.avatarUrl) {
+        setPeerInfo({
+          displayName: peer.displayName,
+          username: peer.username,
+          avatarUrl: peer.avatarUrl,
+        });
+        return;
+      }
+      
+      // Fetch from API
+      try {
+        const profile = await getProfileById(peerId);
+        const user = profile?.data?.user || profile?.user || profile?.data;
+        if (user) {
+          setPeerInfo({
+            displayName: user.displayName,
+            username: user.username,
+            avatarUrl: user.avatarUrl,
+          });
+        }
+      } catch (e) {
+        console.error('Error fetching peer info:', e);
+      }
+    };
+    
+    fetchPeerInfo();
+  }, [peer, conversation]);
+
+  const peerName = peerInfo?.displayName || peer?.displayName || peerInfo?.username || peer?.username || 'Người dùng';
+  const peerAvatar = peerInfo?.avatarUrl || peer?.avatarUrl;
+
+  // Check if current user is requester
+  const isRequester = conversation?.requestedBy && String(conversation.requestedBy) === String(currentUserId);
 
   // Messages hook
-  const { 
-    messages, 
-    loading: messagesLoading, 
-    send, 
-    typing, 
-    peerTyping 
+  const {
+    messages,
+    loading: messagesLoading,
+    send,
+    typing,
+    peerTyping
   } = useDMConversationMessages(conversation?._id);
 
   // Auto scroll to bottom
@@ -142,16 +187,16 @@ const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, 
     const online = isOnline();
 
     return (
-      <div 
+      <div
         className="floating-chat-avatar-bubble"
         style={bubbleStyle}
       >
-        <div 
+        <div
           className="floating-chat-avatar-wrapper"
           onClick={onMaximize}
         >
-          <Avatar 
-            src={peerAvatar} 
+          <Avatar
+            src={peerAvatar}
             icon={<UserOutlined />}
             size={56}
             className="floating-chat-minimized-avatar"
@@ -189,8 +234,8 @@ const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, 
       {/* Header */}
       <div className="floating-chat-header">
         <div className="floating-chat-header-left">
-          <Avatar 
-            src={peerAvatar} 
+          <Avatar
+            src={peerAvatar}
             icon={<UserOutlined />}
             size={40}
           />
@@ -202,30 +247,97 @@ const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, 
           </div>
         </div>
         <div className="floating-chat-header-right">
-          <Button 
-            type="text" 
-            icon={<PhoneOutlined />} 
+          <Button
+            type="text"
+            icon={<PhoneOutlined />}
             className="floating-chat-header-icon"
           />
-          <Button 
-            type="text" 
-            icon={<VideoCameraOutlined />} 
+          <Button
+            type="text"
+            icon={<VideoCameraOutlined />}
             className="floating-chat-header-icon"
           />
-          <Button 
-            type="text" 
-            icon={<MinusOutlined />} 
+          <Button
+            type="text"
+            icon={<MinusOutlined />}
             onClick={onMinimize}
             className="floating-chat-header-icon"
           />
-          <Button 
-            type="text" 
-            icon={<CloseOutlined />} 
+          <Button
+            type="text"
+            icon={<CloseOutlined />}
             onClick={onClose}
             className="floating-chat-header-icon"
           />
         </div>
       </div>
+
+      {/* Pending banner for receiver */}
+      {(conversation?.status === 'pending' && !isRequester) && (
+        <div className="floating-chat-pending-banner">
+          <div className="floating-chat-pending-banner-content">
+            <div className="floating-chat-pending-banner-text">
+              <div className="floating-chat-pending-banner-title">Yêu cầu tin nhắn</div>
+              <div className="floating-chat-pending-banner-subtitle">Bạn có muốn chấp nhận yêu cầu này không?</div>
+            </div>
+            <div className="floating-chat-pending-banner-actions">
+              {/* <Button
+                type="primary"
+                icon={<CheckOutlined />}
+                onClick={async () => {
+                  try {
+                    await acceptConversation(conversation._id);
+                    message.success('Đã chấp nhận');
+                    if (onConversationUpdate) {
+                      onConversationUpdate();
+                    }
+                  } catch (e) {
+                    message.error(e.message || 'Lỗi');
+                  }
+                }}
+                className="floating-chat-accept-button"
+              >
+                Chấp nhận
+              </Button> */}
+              <Button                 
+                icon={<CheckOutlined />}
+                onClick={async () => {
+                  try {
+                    await acceptConversation(conversation._id);
+                    message.success('Đã chấp nhận');
+                    if (onConversationUpdate) {
+                      onConversationUpdate();
+                    }
+                  } catch (e) {
+                    message.error(e.message || 'Lỗi');
+                  }
+                }}
+                className="floating-chat-accept-button"
+              >
+                Chấp nhận 
+              </Button>
+              <Button
+                danger
+                icon={<CloseOutlined />}
+                onClick={async () => {
+                  try {
+                    await declineConversation(conversation._id);
+                    message.success('Đã từ chối');
+                    if (onClose) {
+                      onClose();
+                    }
+                  } catch (e) {
+                    message.error(e.message || 'Lỗi');
+                  }
+                }}
+                className="floating-chat-decline-button"
+              >
+                Từ chối
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Messages Area */}
       <div className="floating-chat-messages">
@@ -242,11 +354,11 @@ const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, 
             const isMe = String(msg.senderId?._id || msg.senderId) === String(currentUserId);
             const msgTime = formatTime(msg.createdAt);
             const prevMsg = index > 0 ? groupedMessages[index - 1] : null;
-            const showTime = !prevMsg || 
+            const showTime = !prevMsg ||
               Math.abs(new Date(msg.createdAt) - new Date(prevMsg.createdAt)) > 300000; // 5 minutes
-            const isLastInGroup = index === groupedMessages.length - 1 || 
+            const isLastInGroup = index === groupedMessages.length - 1 ||
               (groupedMessages[index + 1] && String(groupedMessages[index + 1].senderId?._id || groupedMessages[index + 1].senderId) !== String(msg.senderId?._id || msg.senderId));
-            
+
             return (
               <React.Fragment key={msg._id}>
                 {showTime && index > 0 && (
@@ -258,8 +370,8 @@ const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, 
                   className={`floating-chat-message ${isMe ? 'sent' : 'received'}`}
                 >
                   {!isMe && (
-                    <Avatar 
-                      src={msg.senderId?.avatarUrl} 
+                    <Avatar
+                      src={msg.senderId?.avatarUrl}
                       icon={<UserOutlined />}
                       size={32}
                       className="floating-chat-message-avatar"
@@ -274,8 +386,8 @@ const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, 
                     )}
                   </div>
                   {isMe && isLastInGroup && (
-                    <Avatar 
-                      src={msg.senderId?.avatarUrl} 
+                    <Avatar
+                      src={msg.senderId?.avatarUrl}
                       icon={<UserOutlined />}
                       size={16}
                       className="floating-chat-message-read-avatar"
@@ -307,16 +419,16 @@ const FloatingChatWindow = ({ conversation, currentUserId, onClose, onMinimize, 
           disabled={conversation?.status === 'pending' && String(conversation.requestedBy) !== String(currentUserId)}
         />
         <div className="floating-chat-input-right">
-          <Button 
-            type="text" 
-            icon={<SmileOutlined />} 
+          <Button
+            type="text"
+            icon={<SmileOutlined />}
             className="floating-chat-input-icon"
             title="Emoji"
             style={{ fontSize: 20 }}
           />
-          <Button 
-            type="text" 
-            icon={<LikeOutlined />} 
+          <Button
+            type="text"
+            icon={<LikeOutlined />}
             className="floating-chat-input-icon"
             onClick={() => {
               send('👍');

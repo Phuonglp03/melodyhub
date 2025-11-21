@@ -1,7 +1,11 @@
 import User from '../models/User.js';
 import Post from '../models/Post.js';
+import PostLike from '../models/PostLike.js';
+import PostComment from '../models/PostComment.js';
 import UserFollow from '../models/UserFollow.js';
 import cloudinary, { uploadImage } from '../config/cloudinary.js';
+import { notifyUserFollowed } from '../utils/notificationHelper.js';
+import { normalizeAvatarUrl } from '../constants/userConstants.js';
 
 // Get current user profile (authenticated user)
 export const getCurrentUserProfile = async (req, res) => {
@@ -9,7 +13,7 @@ export const getCurrentUserProfile = async (req, res) => {
     const userId = req.userId; // From auth middleware
 
     const user = await User.findById(userId).select('-passwordHash');
-
+    
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -18,7 +22,7 @@ export const getCurrentUserProfile = async (req, res) => {
     }
 
     // Get user's post count
-    const postCount = await Post.countDocuments({
+    const postCount = await Post.countDocuments({ 
       userId,
       $or: [
         { moderationStatus: 'approved' },
@@ -38,7 +42,9 @@ export const getCurrentUserProfile = async (req, res) => {
           gender: user.gender,
           location: user.location,
           bio: user.bio,
-          avatarUrl: user.avatarUrl,
+          links: user.links || [],
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl),
+          coverPhotoUrl: user.coverPhotoUrl,
           roleId: user.roleId,
           isActive: user.isActive,
           verifiedEmail: user.verifiedEmail,
@@ -71,11 +77,24 @@ export const getCurrentUserProfile = async (req, res) => {
 // Get other user profile by user ID
 export const getUserProfileById = async (req, res) => {
   try {
-    const { userId } = req.params;
+    let { userId } = req.params;
     const currentUserId = req.userId; // From auth middleware (optional)
 
-    const user = await User.findById(userId).select('-passwordHash -email');
+    // Ensure userId is a string, not an object
+    if (typeof userId !== 'string') {
+      userId = String(userId);
+    }
+    
+    // Validate userId format (MongoDB ObjectId is 24 hex characters)
+    if (!userId || userId.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID format'
+      });
+    }
 
+    const user = await User.findById(userId).select('-passwordHash -email');
+    
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -118,7 +137,7 @@ export const getUserProfileById = async (req, res) => {
     }
 
     // Get user's post count
-    const postCount = await Post.countDocuments({
+    const postCount = await Post.countDocuments({ 
       userId,
       $or: [
         { moderationStatus: 'approved' },
@@ -144,7 +163,9 @@ export const getUserProfileById = async (req, res) => {
           displayName: user.displayName,
           birthday: user.birthday,
           bio: user.bio,
-          avatarUrl: user.avatarUrl,
+          links: user.links || [],
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl),
+          coverPhotoUrl: user.coverPhotoUrl,
           verifiedEmail: user.verifiedEmail,
           totalLikesReceived: user.totalLikesReceived,
           totalCommentsReceived: user.totalCommentsReceived,
@@ -175,7 +196,7 @@ export const getUserProfileByUsername = async (req, res) => {
     const currentUserId = req.userId; // From auth middleware (optional)
 
     const user = await User.findOne({ username }).select('-passwordHash -email');
-
+    
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -218,7 +239,7 @@ export const getUserProfileByUsername = async (req, res) => {
     }
 
     // Get user's post count
-    const postCount = await Post.countDocuments({
+    const postCount = await Post.countDocuments({ 
       userId: user._id,
       $or: [
         { moderationStatus: 'approved' },
@@ -244,7 +265,9 @@ export const getUserProfileByUsername = async (req, res) => {
           displayName: user.displayName,
           birthday: user.birthday,
           bio: user.bio,
-          avatarUrl: user.avatarUrl,
+          links: user.links || [],
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl),
+          coverPhotoUrl: user.coverPhotoUrl,
           verifiedEmail: user.verifiedEmail,
           totalLikesReceived: user.totalLikesReceived,
           totalCommentsReceived: user.totalCommentsReceived,
@@ -272,16 +295,16 @@ export const getUserProfileByUsername = async (req, res) => {
 export const updateUserProfile = async (req, res) => {
   try {
     const userId = req.userId; // From auth middleware
-
+    
     console.log('📝 Update profile - Content-Type:', req.headers['content-type']);
     console.log('📝 Update profile - req.file:', req.file ? 'File exists' : 'No file');
     console.log('📝 Update profile - req.body keys:', Object.keys(req.body || {}));
 
     // Parse body fields (có thể từ JSON hoặc multipart)
-    const { displayName, bio, birthday, avatarUrl, privacyProfile, theme, language, gender, location } = req.body;
+    const { displayName, bio, birthday, avatarUrl, coverPhotoUrl, privacyProfile, theme, language, gender, location, links } = req.body;
 
     const user = await User.findById(userId);
-
+    
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -293,34 +316,64 @@ export const updateUserProfile = async (req, res) => {
     if (displayName !== undefined) user.displayName = displayName;
     if (bio !== undefined) user.bio = bio;
     if (birthday !== undefined) user.birthday = birthday ? new Date(birthday) : undefined;
-
-    // Xử lý avatar: ưu tiên file upload (Cloudinary), sau đó mới đến URL string
+    
+    // Xử lý avatar: CHỈ cho phép upload file, KHÔNG cho phép URL string từ JSON
     if (req.file) {
       // File đã được upload lên Cloudinary bởi multer-storage-cloudinary
       // CloudinaryStorage trả về file object với path (URL) hoặc secure_url
       const uploadedUrl = req.file.path || req.file.secure_url || req.file.url;
       console.log('📸 Uploaded file URL:', uploadedUrl);
       console.log('📸 Full file object keys:', Object.keys(req.file || {}));
-
+      
       if (uploadedUrl) {
         user.avatarUrl = uploadedUrl;
         console.log('✅ Avatar URL updated from uploaded file:', uploadedUrl);
       } else {
         console.error('❌ No URL found in uploaded file object:', req.file);
       }
-    } else if (avatarUrl !== undefined) {
-      // Nếu là JSON và có avatarUrl string
-      if (typeof avatarUrl === 'string' && avatarUrl.trim() !== '') {
-        user.avatarUrl = avatarUrl.trim();
-        console.log('✅ Avatar URL updated from body:', avatarUrl.trim());
-      }
-      // If empty string is sent, ignore to prevent accidental clearing
+    } else if (avatarUrl !== undefined && avatarUrl !== null && avatarUrl !== '') {
+      // Reject nếu có avatarUrl trong JSON body (chỉ cho phép upload file)
+      return res.status(400).json({
+        success: false,
+        message: 'Avatar can only be updated via file upload. Please use POST /api/users/profile/avatar endpoint.'
+      });
     }
+    
+    // Xử lý cover photo: CHỈ cho phép upload file, KHÔNG cho phép URL string từ JSON
+    if (req.files && req.files.coverPhoto) {
+      // File đã được upload lên Cloudinary bởi multer-storage-cloudinary
+      const uploadedUrl = req.files.coverPhoto.path || req.files.coverPhoto.secure_url || req.files.coverPhoto.url;
+      console.log('📸 Uploaded cover photo URL:', uploadedUrl);
+      
+      if (uploadedUrl) {
+        user.coverPhotoUrl = uploadedUrl;
+        console.log('✅ Cover photo URL updated from uploaded file:', uploadedUrl);
+      } else {
+        console.error('❌ No URL found in uploaded cover photo file object:', req.files.coverPhoto);
+      }
+    } else if (coverPhotoUrl !== undefined && coverPhotoUrl !== null && coverPhotoUrl !== '') {
+      // Reject nếu có coverPhotoUrl trong JSON body (chỉ cho phép upload file)
+      return res.status(400).json({
+        success: false,
+        message: 'Cover photo can only be updated via file upload. Please use POST /api/users/profile/cover-photo endpoint.'
+      });
+    }
+    
     if (privacyProfile !== undefined) user.privacyProfile = privacyProfile;
     if (theme !== undefined) user.theme = theme;
     if (language !== undefined) user.language = language;
     if (gender !== undefined) user.gender = gender;
     if (location !== undefined) user.location = location;
+    if (links !== undefined) {
+      // Validate links là array và filter bỏ các link rỗng
+      if (Array.isArray(links)) {
+        user.links = links
+          .map(link => typeof link === 'string' ? link.trim() : '')
+          .filter(link => link !== '');
+      } else {
+        user.links = [];
+      }
+    }
 
     await user.save();
 
@@ -337,7 +390,9 @@ export const updateUserProfile = async (req, res) => {
           gender: user.gender,
           location: user.location,
           bio: user.bio,
-          avatarUrl: user.avatarUrl,
+          links: user.links || [],
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl),
+          coverPhotoUrl: user.coverPhotoUrl,
           roleId: user.roleId,
           verifiedEmail: user.verifiedEmail,
           totalLikesReceived: user.totalLikesReceived,
@@ -369,9 +424,9 @@ export const uploadAvatar = async (req, res) => {
   try {
     const userId = req.userId;
     const file = req.file;
-
+    
     console.log('📸 Upload avatar - file object:', JSON.stringify(file, null, 2));
-
+    
     if (!file) {
       return res.status(400).json({ success: false, message: 'Missing avatar file' });
     }
@@ -379,13 +434,13 @@ export const uploadAvatar = async (req, res) => {
     // With CloudinaryStorage, the file object should have path or secure_url
     // Try multiple possible properties from Cloudinary response
     const imageUrl = file.path || file.secure_url || file.url || (file.filename ? `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}` : null);
-
+    
     console.log('📸 Extracted imageUrl:', imageUrl);
-
+    
     if (!imageUrl) {
       console.error('❌ No imageUrl found in file object:', file);
-      return res.status(500).json({
-        success: false,
+      return res.status(500).json({ 
+        success: false, 
         message: 'Upload failed - no URL returned from Cloudinary',
         debug: { fileKeys: Object.keys(file || {}) }
       });
@@ -406,17 +461,80 @@ export const uploadAvatar = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: 'Avatar updated',
-      data: {
-        avatarUrl: user.avatarUrl,
-        user
+      data: { 
+        avatarUrl: normalizeAvatarUrl(user.avatarUrl), 
+        user: {
+          ...user.toObject(),
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl)
+        }
       }
     });
   } catch (error) {
     console.error('❌ Error uploading avatar:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-      error: error.message
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error', 
+      error: error.message 
+    });
+  }
+};
+
+// Upload cover photo image and update user's coverPhotoUrl
+export const uploadCoverPhoto = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const file = req.file;
+    
+    console.log('📸 Upload cover photo - file object:', JSON.stringify(file, null, 2));
+    
+    if (!file) {
+      return res.status(400).json({ success: false, message: 'Missing cover photo file' });
+    }
+
+    // With CloudinaryStorage, the file object should have path or secure_url
+    // Try multiple possible properties from Cloudinary response
+    const imageUrl = file.path || file.secure_url || file.url || (file.filename ? `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/image/upload/${file.filename}` : null);
+    
+    console.log('📸 Extracted cover photo imageUrl:', imageUrl);
+    
+    if (!imageUrl) {
+      console.error('❌ No imageUrl found in file object:', file);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'Upload failed - no URL returned from Cloudinary',
+        debug: { fileKeys: Object.keys(file || {}) }
+      });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { coverPhotoUrl: imageUrl },
+      { new: true }
+    ).select('-passwordHash');
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    console.log('✅ Cover photo updated successfully:', imageUrl);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Cover photo updated',
+      data: { 
+        coverPhotoUrl: user.coverPhotoUrl || '', 
+        user: {
+          ...user.toObject(),
+          coverPhotoUrl: user.coverPhotoUrl || ''
+        }
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error uploading cover photo:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error', 
+      error: error.message 
     });
   }
 };
@@ -424,10 +542,9 @@ export const uploadAvatar = async (req, res) => {
 // Follow a user
 export const followUser = async (req, res) => {
   try {
-    const followerId = req.userId; // Current user (follower)
-    const { userId } = req.params; // User to follow (following)
+    const followerId = req.userId;
+    const { userId } = req.params;
 
-    // Check if trying to follow yourself
     if (followerId === userId) {
       return res.status(400).json({
         success: false,
@@ -435,9 +552,9 @@ export const followUser = async (req, res) => {
       });
     }
 
-    // Check if target user exists
-    const targetUser = await User.findById(userId);
-    if (!targetUser) {
+    // Check if user exists
+    const userToFollow = await User.findById(userId);
+    if (!userToFollow || !userToFollow.isActive) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
@@ -458,45 +575,33 @@ export const followUser = async (req, res) => {
     }
 
     // Create follow relationship
-    const follow = await UserFollow.create({
+    const follow = new UserFollow({
       followerId,
       followingId: userId
     });
+    await follow.save();
 
-    // Update follower's followingCount
-    await User.findByIdAndUpdate(followerId, {
-      $inc: { followingCount: 1 }
-    });
-
-    // Update target user's followersCount
+    // Update followers count
     await User.findByIdAndUpdate(userId, {
       $inc: { followersCount: 1 }
     });
 
-    res.status(201).json({
-      success: true,
-      message: 'Successfully followed user',
-      data: {
-        follow: {
-          id: follow._id,
-          followerId: follow.followerId,
-          followingId: follow.followingId,
-          createdAt: follow.createdAt
-        }
-      }
+    // Update following count
+    await User.findByIdAndUpdate(followerId, {
+      $inc: { followingCount: 1 }
     });
 
+    // Tạo thông báo cho người được follow
+    notifyUserFollowed(userId, followerId).catch(err => {
+      console.error('Lỗi khi tạo thông báo follow:', err);
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Successfully followed user'
+    });
   } catch (error) {
     console.error('Error following user:', error);
-
-    // Handle duplicate key error
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Already following this user'
-      });
-    }
-
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -508,27 +613,10 @@ export const followUser = async (req, res) => {
 // Unfollow a user
 export const unfollowUser = async (req, res) => {
   try {
-    const followerId = req.userId; // Current user (follower)
-    const { userId } = req.params; // User to unfollow (following)
+    const followerId = req.userId;
+    const { userId } = req.params;
 
-    // Check if trying to unfollow yourself
-    if (followerId === userId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot unfollow yourself'
-      });
-    }
-
-    // Check if target user exists
-    const targetUser = await User.findById(userId);
-    if (!targetUser) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
-    // Check if follow relationship exists
+    // Find and delete follow relationship
     const follow = await UserFollow.findOneAndDelete({
       followerId,
       followingId: userId
@@ -541,26 +629,20 @@ export const unfollowUser = async (req, res) => {
       });
     }
 
-    // Update follower's followingCount
-    await User.findByIdAndUpdate(followerId, { $inc: { followingCount: -1 } });
-    // Prevent negative values in case counts were out-of-sync
-    await User.updateOne({ _id: followerId, followingCount: { $lt: 0 } }, { $set: { followingCount: 0 } });
+    // Update followers count
+    await User.findByIdAndUpdate(userId, {
+      $inc: { followersCount: -1 }
+    });
 
-    // Update target user's followersCount
-    await User.findByIdAndUpdate(userId, { $inc: { followersCount: -1 } });
-    await User.updateOne({ _id: userId, followersCount: { $lt: 0 } }, { $set: { followersCount: 0 } });
+    // Update following count
+    await User.findByIdAndUpdate(followerId, {
+      $inc: { followingCount: -1 }
+    });
 
     res.status(200).json({
       success: true,
-      message: 'Successfully unfollowed user',
-      data: {
-        unfollowed: {
-          followerId,
-          followingId: userId
-        }
-      }
+      message: 'Successfully unfollowed user'
     });
-
   } catch (error) {
     console.error('Error unfollowing user:', error);
     res.status(500).json({
@@ -571,37 +653,295 @@ export const unfollowUser = async (req, res) => {
   }
 };
 
-// Get follow suggestions for current user
+// Get follow suggestions - users to follow
 export const getFollowSuggestions = async (req, res) => {
   try {
-    const currentUserId = req.userId; // requires auth
-    const limit = Math.min(parseInt(req.query.limit, 10) || 5, 50);
+    const userId = req.userId;
+    const userIdStr = userId?.toString();
+    const limit = parseInt(req.query.limit, 10) || 10;
 
-    // Users the current user already follows
-    const following = await UserFollow.find({ followerId: currentUserId }).select('followingId');
-    const followingIds = following.map((f) => f.followingId);
+    const MUTUAL_WEIGHT = 3;
+    const SHARED_FOLLOWER_WEIGHT = 2;
+    const LIKE_INTERACTION_WEIGHT = 5; // Tăng trọng số để ưu tiên tương tác trực tiếp
+    const COMMENT_INTERACTION_WEIGHT = 6; // Comment có trọng số cao hơn like
+    const POPULARITY_WEIGHT = 1;
+    const POOL_MULTIPLIER = 2; // build a slightly larger pool before slicing
 
-    // Exclude current user and already-following users
+    const [followingRelations, followerRelations, likedPosts, commentedPosts] = await Promise.all([
+      UserFollow.find({ followerId: userId }).select('followingId').lean(),
+      UserFollow.find({ followingId: userId }).select('followerId').lean(),
+      PostLike.find({ userId }).select('postId').lean(),
+      PostComment.find({ userId }).select('postId').lean(),
+    ]);
+
+    const followingIds = followingRelations.map((rel) => rel.followingId);
+    const followedIdSet = new Set(followingRelations.map((rel) => rel.followingId.toString()));
+    // Prevent recommending the current user
+    followedIdSet.add(userIdStr);
+
+    const followerIds = followerRelations.map((rel) => rel.followerId);
+
+    const candidateScores = new Map();
+
+    const defaultMeta = () => ({
+      mutualFollowing: 0,
+      sharedFollowers: 0,
+      popularity: false,
+      interactions: {
+        likes: 0,
+        comments: 0,
+      },
+    });
+
+    const bumpCandidate = (candidateId, amount, metaKey) => {
+      if (!candidateId || !amount) return;
+      const candidateIdStr = candidateId.toString();
+      if (followedIdSet.has(candidateIdStr) || candidateIdStr === userIdStr) return;
+
+      const existing = candidateScores.get(candidateIdStr) || {
+        score: 0,
+        meta: defaultMeta(),
+      };
+      existing.score += amount;
+      if (metaKey === 'mutualFollowing') {
+        existing.meta.mutualFollowing = (existing.meta.mutualFollowing || 0) + 1;
+      } else if (metaKey === 'sharedFollowers') {
+        existing.meta.sharedFollowers = (existing.meta.sharedFollowers || 0) + 1;
+      } else if (metaKey === 'popularity') {
+        existing.meta.popularity = true;
+      } else if (metaKey === 'contentLike') {
+        existing.meta.interactions.likes = (existing.meta.interactions.likes || 0) + 1;
+      } else if (metaKey === 'contentComment') {
+        existing.meta.interactions.comments = (existing.meta.interactions.comments || 0) + 1;
+      }
+
+      candidateScores.set(candidateIdStr, existing);
+    };
+
+    // Heuristic 1: friends of friends (who people I follow are following)
+    if (followingIds.length) {
+      const secondDegreeFollows = await UserFollow.find({
+        followerId: { $in: followingIds },
+      })
+        .select('followingId')
+        .lean();
+
+      secondDegreeFollows.forEach(({ followingId }) => {
+        bumpCandidate(followingId, MUTUAL_WEIGHT, 'mutualFollowing');
+      });
+    }
+
+    // Heuristic 2: shared followers (who people that follow me are also following)
+    if (followerIds.length) {
+      const sharedFollowerEdges = await UserFollow.find({
+        followerId: { $in: followerIds },
+      })
+        .select('followingId')
+        .lean();
+
+      sharedFollowerEdges.forEach(({ followingId }) => {
+        bumpCandidate(followingId, SHARED_FOLLOWER_WEIGHT, 'sharedFollowers');
+      });
+    }
+
+    // Heuristic 3: content interactions (liked or commented posts)
+    const interactionPostIds = Array.from(
+      new Set(
+        [...likedPosts, ...commentedPosts]
+          .map((doc) => doc?.postId?.toString())
+          .filter(Boolean)
+      )
+    );
+
+    if (interactionPostIds.length) {
+      const posts = await Post.find({ _id: { $in: interactionPostIds } })
+        .select('_id userId')
+        .lean();
+      const postAuthorMap = new Map(posts.map((post) => [post._id.toString(), post.userId]));
+
+      likedPosts.forEach(({ postId }) => {
+        const authorId = postAuthorMap.get(postId?.toString());
+        if (!authorId) return;
+        bumpCandidate(authorId, LIKE_INTERACTION_WEIGHT, 'contentLike');
+      });
+
+      commentedPosts.forEach(({ postId }) => {
+        const authorId = postAuthorMap.get(postId?.toString());
+        if (!authorId) return;
+        bumpCandidate(authorId, COMMENT_INTERACTION_WEIGHT, 'contentComment');
+      });
+    }
+
+    // Fallback: add popular active users if pool is too small
+    if (candidateScores.size < limit * POOL_MULTIPLIER) {
+      const fallbackUsers = await User.find({ isActive: true })
+        .sort({ followersCount: -1, createdAt: -1 })
+        .limit(limit * 5)
+        .select('_id');
+
+      for (const user of fallbackUsers) {
+        bumpCandidate(user._id, POPULARITY_WEIGHT, 'popularity');
+        if (candidateScores.size >= limit * POOL_MULTIPLIER) break;
+      }
+    }
+
+    const buildReasons = (meta = {}) => {
+      const reasons = [];
+      // Thứ tự 1: Follow chung (mutualFollowing và sharedFollowers)
+      if (meta.mutualFollowing) {
+        reasons.push(`Được ${meta.mutualFollowing} người bạn của bạn theo dõi`);
+      }
+      if (meta.sharedFollowers) {
+        reasons.push(`${meta.sharedFollowers} người theo dõi bạn cũng theo dõi họ`);
+      }
+      // Thứ tự 2: Tương tác nội dung (interactions)
+      const totalInteractions =
+        (meta.interactions?.likes || 0) + (meta.interactions?.comments || 0);
+      if (totalInteractions) {
+        const likePart = meta.interactions?.likes || 0;
+        const commentPart = meta.interactions?.comments || 0;
+        if (commentPart && likePart) {
+          reasons.push(`Bạn đã thích/bình luận ${totalInteractions} bài viết của họ`);
+        } else if (commentPart) {
+          reasons.push(`Bạn đã bình luận ${commentPart} bài viết của họ`);
+        } else if (likePart) {
+          reasons.push(`Bạn đã thích ${likePart} bài viết của họ`);
+        }
+      }
+      // Thứ tự 3: Tài khoản nổi bật (chỉ hiển thị nếu không có tương tác)
+      if (meta.popularity && !totalInteractions) {
+        reasons.push('Tài khoản nổi bật trong cộng đồng');
+      }
+      if (!reasons.length) {
+        reasons.push('Gợi ý phù hợp với bạn');
+      }
+      return reasons.slice(0, 2);
+    };
+
+    const sortedCandidates = Array.from(candidateScores.entries())
+      .map(([id, value]) => ({ id, ...value }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    if (!sortedCandidates.length) {
+      return res.status(200).json({ success: true, data: [] });
+    }
+
+    const candidateIds = sortedCandidates.map((candidate) => candidate.id);
     const users = await User.find({
-      _id: { $nin: [currentUserId, ...followingIds] },
-      isActive: { $ne: false },
+      _id: { $in: candidateIds },
+      isActive: true,
     })
-      .sort({ followersCount: -1, createdAt: -1 })
-      .limit(limit)
-      .select('username displayName avatarUrl followersCount');
+      .select('username displayName avatarUrl followersCount')
+      .lean();
+
+    const userMap = new Map(users.map((u) => [u._id.toString(), u]));
+
+    const data = sortedCandidates
+      .map((candidate) => {
+        const user = userMap.get(candidate.id);
+        if (!user) return null;
+        return {
+          id: user._id,
+          username: user.username,
+          displayName: user.displayName,
+          avatarUrl: normalizeAvatarUrl(user.avatarUrl),
+          followersCount: user.followersCount,
+          score: Number(candidate.score.toFixed(2)),
+          reasons: buildReasons(candidate.meta),
+        };
+      })
+      .filter(Boolean);
 
     res.status(200).json({
       success: true,
-      data: users.map((u) => ({
-        id: u._id,
-        username: u.username,
-        displayName: u.displayName,
-        avatarUrl: u.avatarUrl,
-        followersCount: u.followersCount,
-      }))
+      data,
     });
   } catch (error) {
     console.error('Error getting follow suggestions:', error);
-    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
+// Get list of users that current user is following
+export const getFollowingList = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const search = req.query.search || '';
+    const limit = parseInt(req.query.limit) || 50;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+      });
+    }
+
+    // Get list of user IDs that current user is following
+    const followingRelations = await UserFollow.find({ followerId: userId })
+      .select('followingId')
+      .lean();
+    
+    const followingIds = followingRelations.map(f => f.followingId);
+
+    console.log('[getFollowingList] userId:', userId);
+    console.log('[getFollowingList] followingIds count:', followingIds.length);
+    console.log('[getFollowingList] search term:', search);
+
+    if (followingIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+      });
+    }
+
+    // Build query for users
+    let userQuery = {
+      _id: { $in: followingIds },
+      isActive: true,
+    };
+
+    // Apply search filter in query if provided
+    if (search) {
+      const searchRegex = new RegExp(search, 'i');
+      userQuery.$or = [
+        { displayName: searchRegex },
+        { username: searchRegex },
+      ];
+    }
+
+    // Fetch users directly
+    const users = await User.find(userQuery)
+      .select('username displayName avatarUrl isActive')
+      .limit(limit)
+      .lean();
+
+    console.log('[getFollowingList] users found:', users.length);
+
+    // Map to response format
+    let followingUsers = users.map((user) => ({
+      id: user._id,
+      username: user.username,
+      displayName: user.displayName,
+      avatarUrl: normalizeAvatarUrl(user.avatarUrl),
+    }));
+
+    console.log('[getFollowingList] followingUsers after mapping:', followingUsers.length);
+
+    res.status(200).json({
+      success: true,
+      data: followingUsers,
+    });
+  } catch (error) {
+    console.error('Error getting following list:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
   }
 };

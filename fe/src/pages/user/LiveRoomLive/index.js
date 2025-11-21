@@ -160,6 +160,18 @@ const LiveStreamLive = () => {
       message.error(errorMsg);
     });
 
+    onViewerCountUpdate((data) => {
+      console.log('[Socket] Cập nhật viewer count:', data);
+      if (data.roomId === roomId) {
+        setCurrentViewers(data.currentViewers || 0);
+      }
+    });
+
+    onChatError((errorMsg) => {
+      console.error('[Socket] Chat error:', errorMsg);
+      alert(errorMsg || 'Không thể gửi tin nhắn.');
+    });
+
     return () => {
       offSocketEvents();
       disconnectSocket();
@@ -565,6 +577,7 @@ const LiveStreamLive = () => {
       </Modal>
 
     </div>
+    </>
   );
 };
 

@@ -5,6 +5,9 @@ import {
   FaPause,
   FaComment,
   FaDownload,
+  FaMusic,
+  FaWaveSquare,
+  FaFolderPlus,
 } from "react-icons/fa";
 import { playLickAudio, getLickById } from "../services/user/lickService";
 import { toggleLickLike } from "../services/user/lickService";
@@ -12,6 +15,7 @@ import { toggleLickLike } from "../services/user/lickService";
 import { useDispatch, useSelector } from "react-redux";
 import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
 import { getProfileById } from "../services/user/profile";
+import AddToPlaylistModal from "./AddToPlaylistModal";
 
 const LickCard = ({ lick, onClick }) => {
   const {
@@ -24,6 +28,8 @@ const LickCard = ({ lick, onClick }) => {
     waveformData,
     duration,
     difficulty,
+    tempo,
+    key,
   } = lick;
 
   // Resolve userId from payload shapes (DB uses userId)
@@ -131,6 +137,7 @@ const LickCard = ({ lick, onClick }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [progress, setProgress] = useState(0); // Track playback progress (0-1)
   const audioRef = useRef(null);
+  const [showPlaylistModal, setShowPlaylistModal] = useState(false);
   const dispatch = useDispatch();
   const authUser = useSelector((s) => s.auth.user);
   const likeState = useSelector((s) => s.likes.byId[lick_id]);
@@ -298,7 +305,7 @@ const LickCard = ({ lick, onClick }) => {
       <div className="p-4">
         <h3
           onClick={() => onClick(effectiveId)}
-          className="text-base font-semibold text-white mb-1 hover:text-cyan-300 cursor-pointer"
+          className="text-base font-semibold text-slate-100 mb-2 hover:text-cyan-300 cursor-pointer"
         >
           {title}
         </h3>
@@ -336,18 +343,29 @@ const LickCard = ({ lick, onClick }) => {
         </div>
 
         {tags && tags.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-3">
-            {tags.slice(0, 6).map((tag) => (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-4">
+            {tags.slice(0, 8).map((tag) => (
               <span
                 key={tag.tag_id}
                 onClick={(e) => e.stopPropagation()}
-                className="text-[11px] px-2 py-1 rounded-full bg-gray-800 text-gray-300 hover:bg-gray-700"
+                className="text-[11px] text-slate-300 underline underline-offset-4 decoration-slate-600/50 hover:text-slate-100 transition-colors"
               >
-                #{tag.tag_name}
+                {tag.tag_name}
               </span>
             ))}
           </div>
         )}
+
+        <div className="flex items-center text-xs text-slate-300 mb-4">
+          <span className="flex items-center gap-1 mr-4">
+            <FaWaveSquare className="text-slate-400" size={12} />
+            {tempo ? `${Math.round(tempo)} BPM` : "—"}
+          </span>
+          <span className="flex items-center gap-1">
+            <FaMusic className="text-slate-400" size={12} />
+            {key || "Key N/A"}
+          </span>
+        </div>
 
         <div className="flex items-center justify-between text-sm text-gray-300">
           <div className="flex items-center gap-4">
@@ -365,8 +383,26 @@ const LickCard = ({ lick, onClick }) => {
               <span>{commentsCount}</span>
             </span>
           </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowPlaylistModal(true);
+            }}
+            className="flex items-center gap-1 text-gray-300 hover:text-orange-400 transition-colors"
+            title="Add to playlist"
+          >
+            <FaFolderPlus size={16} />
+          </button>
         </div>
       </div>
+
+      {/* Add to Playlist Modal */}
+      <AddToPlaylistModal
+        isOpen={showPlaylistModal}
+        onClose={() => setShowPlaylistModal(false)}
+        lickId={effectiveId}
+        lickTitle={title}
+      />
     </div>
   );
 };

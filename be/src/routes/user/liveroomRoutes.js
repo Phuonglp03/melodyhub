@@ -2,6 +2,7 @@ import { Router } from 'express';
 import middlewareController from '../../middleware/auth.js';
 import {
     createLiveStream,
+    getActiveLiveStreams,
     getLiveStreamById,
     goLive,
     endLiveStream,
@@ -10,6 +11,7 @@ import {
     getChatHistory,
     banUser,
     unbanUser,
+    getRoomViewers
   } from '../../controllers/user/liveroomController.js';
 
 const router = Router();
@@ -34,6 +36,9 @@ router.patch( '/:id/end', verifyToken,endLiveStream);
 // Update privacy type (Public -> Follow Only)
 router.patch('/:id/privacy', verifyToken, updatePrivacy);
 
+// Get active live streams
+router.get('/', verifyToken, getActiveLiveStreams);
+
 // Get chat history
 router.get('/:roomId/chat',verifyToken, getChatHistory);
 
@@ -42,5 +47,8 @@ router.post('/:roomId/ban/:userId', verifyToken, banUser);
 
 // Unban user 
 router.post('/:roomId/unban/:userId', verifyToken, unbanUser);
+
+// Get room viewers
+router.get('/:roomId/viewers', verifyToken, getRoomViewers);
 
 export default router;

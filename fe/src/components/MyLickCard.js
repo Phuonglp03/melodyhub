@@ -6,6 +6,9 @@ import {
   FaPause,
   FaEdit,
   FaTrash,
+  FaMusic,
+  FaWaveSquare,
+  FaShareAlt,
 } from "react-icons/fa";
 import {
   playLickAudio,
@@ -17,7 +20,14 @@ import { setLikeState, toggleLikeLocal } from "../redux/likesSlice";
 import { getStoredUserId } from "../services/user/post";
 import { getProfileById } from "../services/user/profile";
 
-const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
+const MyLickCard = ({
+  lick,
+  onEdit,
+  onDelete,
+  onClick,
+  onShare,
+  shareLoading,
+}) => {
   const {
     lick_id,
     title,
@@ -31,6 +41,8 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
     status,
     is_public,
     creator,
+    tempo,
+    key,
   } = lick;
 
   // Resolve userId from payload (DB uses userId)
@@ -333,7 +345,7 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
       <div className="p-4">
         <h3
           onClick={() => onClick(lick_id)}
-          className="text-base font-semibold text-white mb-1 hover:text-cyan-300 cursor-pointer"
+          className="text-base font-semibold text-slate-100 mb-2 hover:text-cyan-300 cursor-pointer"
         >
           {title}
         </h3>
@@ -387,18 +399,29 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
         </div>
 
         {tags && tags.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-3">
-            {tags.slice(0, 6).map((tag) => (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-4">
+            {tags.slice(0, 8).map((tag) => (
               <span
                 key={tag.tag_id}
                 onClick={(e) => e.stopPropagation()}
-                className="text-[11px] px-2 py-1 rounded-full bg-gray-800 text-gray-300 hover:bg-gray-700"
+                className="text-[11px] text-slate-300 underline underline-offset-4 decoration-slate-600/50 hover:text-slate-100 transition-colors"
               >
-                #{tag.tag_name}
+                {tag.tag_name}
               </span>
             ))}
           </div>
         )}
+
+        <div className="flex items-center text-xs text-slate-300 mb-4">
+          <span className="flex items-center gap-1 mr-4">
+            <FaWaveSquare className="text-slate-400" size={12} />
+            {tempo ? `${Math.round(tempo)} BPM` : "—"}
+          </span>
+          <span className="flex items-center gap-1">
+            <FaMusic className="text-slate-400" size={12} />
+            {key || "Key N/A"}
+          </span>
+        </div>
 
         <div className="flex items-center justify-between text-sm text-gray-300">
           <div className="flex items-center gap-4">
@@ -417,6 +440,21 @@ const MyLickCard = ({ lick, onEdit, onDelete, onClick }) => {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShare?.(lick_id);
+              }}
+              disabled={shareLoading || !is_public}
+              className={`px-3 py-1 rounded-md text-xs flex items-center gap-1 ${
+                shareLoading || !is_public
+                  ? "bg-gray-700 text-gray-400 cursor-not-allowed"
+                  : "bg-purple-600 hover:bg-purple-700 text-white"
+              }`}
+            >
+              <FaShareAlt />
+              Share
+            </button>
             <button
               onClick={(e) => {
                 e.stopPropagation();

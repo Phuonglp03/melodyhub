@@ -30,6 +30,7 @@ import {
 } from "../../../services/user/post";
 import { getMyProfile } from "../../../services/user/profile";
 import { useNavigate } from "react-router-dom";
+import PostLickEmbed from "../../../components/PostLickEmbed";
 
 const { Title, Text } = Typography;
 
@@ -351,6 +352,26 @@ const PersonalFeed = () => {
     return "";
   };
 
+  const parseSharedLickId = (urlString) => {
+    if (!urlString) return null;
+    try {
+      const base =
+        typeof window !== "undefined" && window.location
+          ? window.location.origin
+          : "https://melodyhub.app";
+      const normalised = urlString.startsWith("http")
+        ? new URL(urlString)
+        : new URL(urlString, base);
+      const segments = normalised.pathname.split("/").filter(Boolean);
+      if (segments.length >= 2 && segments[0] === "licks") {
+        return segments[1];
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
   const fetchProviderOEmbed = async (url) => {
     const tryFetch = async (endpoint) => {
       const res = await fetch(`${endpoint}${encodeURIComponent(url)}`);
@@ -528,14 +549,23 @@ const PersonalFeed = () => {
               style={{
                 height: 180,
                 borderRadius: "8px 8px 0 0",
-                backgroundImage: profile?.avatarUrl
-                  ? `url(${profile.avatarUrl})`
-                  : undefined,
                 backgroundColor: "#131313",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
               }}
-            />
+            >
+              <Avatar
+                size={120}
+                src={profile?.avatarUrl}
+                style={{
+                  backgroundColor: "#722ed1",
+                  border: "4px solid #0f0f10",
+                }}
+              >
+                {(profile?.displayName || profile?.username || "U")[0]}
+              </Avatar>
+            </div>
             <div
               style={{
                 display: "flex",
@@ -887,7 +917,10 @@ const PersonalFeed = () => {
             !error &&
             items.map((post) => {
               const firstUrl = extractFirstUrl(post?.textContent || "");
-              const previewUrl = post?.linkPreview?.url || firstUrl;
+              const sharedLickId = parseSharedLickId(firstUrl);
+              const previewUrl = sharedLickId
+                ? null
+                : post?.linkPreview?.url || firstUrl;
               const previewData =
                 post?.linkPreview ||
                 (previewUrl ? previewCache[previewUrl] : null);
@@ -909,7 +942,6 @@ const PersonalFeed = () => {
                     }}
                   >
                     <Space align="start" size={14}>
-
                       <Avatar
                         size={40}
                         src={post?.userId?.avatarUrl}
@@ -948,6 +980,11 @@ const PersonalFeed = () => {
                       }}
                     >
                       {post.textContent}
+                    </div>
+                  )}
+                  {sharedLickId && (
+                    <div style={{ marginBottom: 12 }}>
+                      <PostLickEmbed lickId={sharedLickId} url={firstUrl} />
                     </div>
                   )}
                   {post?.media?.length > 0 && (
@@ -1172,82 +1209,98 @@ const PersonalFeed = () => {
                   {modalPost.textContent}
                 </div>
               )}
+              {(() => {
+                const firstUrl = extractFirstUrl(modalPost?.textContent || "");
+                const sharedLickId = parseSharedLickId(firstUrl);
+                return sharedLickId ? (
+                  <div style={{ marginBottom: 12 }}>
+                    <PostLickEmbed lickId={sharedLickId} url={firstUrl} />
+                  </div>
+                ) : null;
+              })()}
               {modalPost?.media?.length > 0 && (
                 <div style={{ marginBottom: 8 }}>
                   <WavePlaceholder />
                 </div>
               )}
-              {modalPost?.linkPreview && (
-                <a
-                  href={modalPost.linkPreview?.url || "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ textDecoration: "none" }}
-                >
-                  <div
-                    style={{
-                      border: "1px solid #303030",
-                      borderRadius: 8,
-                      padding: 12,
-                      background: "#111",
-                      color: "#e5e7eb",
-                      marginTop: 8,
-                    }}
+              {!parseSharedLickId(
+                extractFirstUrl(modalPost?.textContent || "")
+              ) &&
+                modalPost?.linkPreview && (
+                  <a
+                    href={modalPost.linkPreview?.url || "#"}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ textDecoration: "none" }}
                   >
                     <div
-                      style={{ display: "flex", gap: 12, alignItems: "center" }}
+                      style={{
+                        border: "1px solid #303030",
+                        borderRadius: 8,
+                        padding: 12,
+                        background: "#111",
+                        color: "#e5e7eb",
+                        marginTop: 8,
+                      }}
                     >
-                      {modalPost.linkPreview?.thumbnailUrl ? (
-                        <img
-                          src={modalPost.linkPreview.thumbnailUrl}
-                          alt="preview"
-                          style={{
-                            width: 64,
-                            height: 64,
-                            objectFit: "cover",
-                            borderRadius: 6,
-                          }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: 64,
-                            height: 64,
-                            borderRadius: 6,
-                            background: "#1f1f1f",
-                          }}
-                        />
-                      )}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontWeight: 600,
-                            color: "#fff",
-                            marginBottom: 4,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {modalPost.linkPreview?.title ||
-                            modalPost.linkPreview?.url}
-                        </div>
-                        <div
-                          style={{
-                            color: "#9ca3af",
-                            fontSize: 12,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {modalPost.linkPreview?.url}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 12,
+                          alignItems: "center",
+                        }}
+                      >
+                        {modalPost.linkPreview?.thumbnailUrl ? (
+                          <img
+                            src={modalPost.linkPreview.thumbnailUrl}
+                            alt="preview"
+                            style={{
+                              width: 64,
+                              height: 64,
+                              objectFit: "cover",
+                              borderRadius: 6,
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: 64,
+                              height: 64,
+                              borderRadius: 6,
+                              background: "#1f1f1f",
+                            }}
+                          />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              color: "#fff",
+                              marginBottom: 4,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {modalPost.linkPreview?.title ||
+                              modalPost.linkPreview?.url}
+                          </div>
+                          <div
+                            style={{
+                              color: "#9ca3af",
+                              fontSize: 12,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {modalPost.linkPreview?.url}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                </a>
-              )}
+                  </a>
+                )}
 
               <div style={{ marginTop: 8, color: "#9ca3af" }}>
                 {Number(postIdToStats[commentPostId]?.likesCount ?? 0)} lượt

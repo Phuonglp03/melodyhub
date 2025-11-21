@@ -3,6 +3,7 @@ import LiveRoom from '../../models/LiveRoom.js';
 import UserFollow from '../../models/UserFollow.js';
 import { getSocketIo } from '../../config/socket.js';
 import RoomChat from '../../models/RoomChat.js';
+import User from '../../models/User.js';
 
 export const createLiveStream = async (req, res) => {
   const { title, description, privacyType } = req.body;
@@ -39,24 +40,25 @@ export const createLiveStream = async (req, res) => {
 export const getLiveStreamById = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.userId;
+    const currentUserId = req.query.userId;
     const stream = await LiveRoom.findById(id)
-      .populate('hostId', 'displayName username avatarUrl');
+      .populate('hostId', 'displayName username avatarUrl')
+      .populate('bannedUsers', 'displayName username avatarUrl');
 
     if (!stream || stream.status === 'ended') {
       return res.status(404).json({ message: 'Không tìm thấy phòng live hoặc phòng đã kết thúc.' });
     }
     
     const hostId = stream.hostId._id.toString();
-    const isHost = userId && userId === hostId;
+    const isHost = currentUserId && currentUserId === hostId;
     if (!isHost) {
       if (stream.privacyType === 'follow_only') {
-        if (!userId) {
+        if (!currentUserId) {
           return res.status(401).json({ message: 'Vui lòng đăng nhập để xem stream này.' });
         }
 
         const isFollowing = await UserFollow.findOne({ 
-          followerId: userId, 
+          followerId: currentUserId, 
           followingId: hostId 
         });
         
@@ -71,9 +73,10 @@ export const getLiveStreamById = async (req, res) => {
     }
 
     const playbackBaseUrl = process.env.MEDIA_SERVER_HTTP_URL || 'http://localhost:8000';
-
+    const currentVmIp = process.env.CURRENT_VM_PUBLIC_IP || 'localhost';
     res.status(200).json({
       ...stream.toObject(),
+      rtmpUrl: `rtmp://${currentVmIp}:1935/live`,
       playbackUrls: {
         hls: `${playbackBaseUrl}/live/${stream.streamKey}/index.m3u8`,
         flv: `${playbackBaseUrl}/live/${stream.streamKey}.flv`
@@ -232,6 +235,22 @@ export const updateLiveStreamDetails = async (req, res) => {
     res.status(500).json({ message: 'Lỗi server.' });
   }
 };
+export const getActiveLiveStreams = async (req, res) => {
+  try {
+    // 1. Tìm tất cả các phòng có status là 'live'
+    const streams = await LiveRoom.find({ status: 'live' })
+      // 2. Lấy thông tin host (giống như hàm getLiveStreamById)
+      .populate('hostId', 'displayName username avatarUrl') 
+      // 3. Sắp xếp stream mới nhất lên đầu
+      .sort({ startedAt: -1 }); 
+
+    res.status(200).json(streams);
+
+  } catch (err) {
+    console.error('Lỗi khi lấy active streams:', err);
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
 
 export const getChatHistory = async (req, res) => {
   const { roomId } = req.params;
@@ -295,6 +314,56 @@ export const unbanUser = async (req, res) => {
 
     res.status(200).json({ message: 'Đã unban user.' });
   } catch (err) {
+    res.status(500).json({ message: 'Lỗi server.' });
+  }
+};
+
+export const getRoomViewers = async (req, res) => {
+  const { roomId } = req.params;
+  const hostId = req.userId;
+
+  try {
+    const room = await LiveRoom.findOne({ _id: roomId, hostId });
+    if (!room) return res.status(404).json({ message: 'Không tìm thấy phòng hoặc bạn không phải host.' });
+
+    // Get viewer IDs from socket tracking
+    const io = getSocketIo();
+    const roomSockets = await io.in(roomId).fetchSockets();
+    
+    // Extract unique user IDs
+    const userIds = new Set();
+    roomSockets.forEach(socket => {
+      const userId = socket.handshake.query.userId;
+      if (userId && userId !== hostId) {
+        userIds.add(userId);
+      }
+    });
+
+    // Get user details
+    const viewers = await User.find({ _id: { $in: Array.from(userIds) } })
+      .select('displayName username avatarUrl')
+      .lean();
+
+    // Get message counts for each viewer in this room
+    const viewersWithStats = await Promise.all(
+      viewers.map(async (viewer) => {
+        const messageCount = await RoomChat.countDocuments({
+          roomId,
+          userId: viewer._id
+        });
+        return {
+          ...viewer,
+          messageCount
+        };
+      })
+    );
+
+    res.status(200).json({
+      viewers: viewersWithStats,
+      totalCount: viewersWithStats.length
+    });
+  } catch (err) {
+    console.error('Lỗi khi lấy viewers:', err);
     res.status(500).json({ message: 'Lỗi server.' });
   }
 };

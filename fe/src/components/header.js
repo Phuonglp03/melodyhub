@@ -1,205 +1,204 @@
-import React, { useState, useEffect } from 'react';
-import { Layout, Input, Button, Space, Typography, Modal, Avatar, Tooltip, Popover, Badge, Spin, Empty } from 'antd'; 
-import { FireOutlined, BellOutlined, MessageOutlined, SearchOutlined, UserOutlined, EditOutlined, MoreOutlined, ExpandOutlined } from '@ant-design/icons';
-import { useNavigate, useLocation } from 'react-router-dom'; 
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Layout, Input, Button, Space, Typography, Modal, Avatar,
+  Popover, Badge, Spin, Empty, Dropdown
+} from 'antd';
+import {
+  FireOutlined, BellOutlined, MessageOutlined, SearchOutlined,
+  UserOutlined, EditOutlined, MoreOutlined, ExpandOutlined,
+  LogoutOutlined, FolderOutlined
+} from '@ant-design/icons';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useSelector, useDispatch } from 'react-redux';
+import { logout } from '../redux/authSlice';
 import { livestreamService } from '../services/user/livestreamService';
 import useDMConversations from '../hooks/useDMConversations';
 import FloatingChatWindow from './FloatingChatWindow';
+import NotificationBell from './NotificationBell'; 
+import { onDmNew, offDmNew } from '../services/user/socketService';
+import './header.css';
+
 const { Header } = Layout;
 const { Text } = Typography;
 
 const AppHeader = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const dispatch = useDispatch();
   const isChatPage = location.pathname === '/chat';
+
+  // Dùng Redux – quan trọng nhất (không dùng localStorage như header1.js)
+  const { user } = useSelector((state) => state.auth);
+  const currentUserId = user?.user?.id || user?.id;
+  const userInfo = user?.user || user;
+
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [chatPopoverVisible, setChatPopoverVisible] = useState(false);
   const [chatFilter, setChatFilter] = useState('all'); // 'all', 'unread', 'groups'
   const [chatSearchText, setChatSearchText] = useState('');
-  const [activeChatWindows, setActiveChatWindows] = useState([]); // Array of { conversation, isMinimized, id, position }
-  
+  const [activeChatWindows, setActiveChatWindows] = useState([]); // { id, conversation, isMinimized, position }
+
   const { conversations, loading, refresh } = useDMConversations();
-  
-  // Update active chat windows conversations when conversations list updates
-  useEffect(() => {
-    setActiveChatWindows(prev => prev.map(window => {
-      const updatedConv = conversations.find(c => c._id === window.conversation._id);
-      if (updatedConv) {
-        return { ...window, conversation: updatedConv };
-      }
-      return window;
-    }));
-  }, [conversations]);
-  
-  // Calculate position for new window
-  const getNewWindowPosition = (isMinimized = false, windowsArray = null, targetIndex = null) => {
+
+  // Tính toán vị trí cửa sổ chat
+  const getNewWindowPosition = useCallback((isMinimized = false, windowsArray = null, targetIndex = null) => {
     const windowWidth = 340;
-    const windowHeight = 520;
+    const avatarSize = 56;
+    const avatarSpacing = 12;
     const spacing = 10;
     const rightOffset = 20;
-    const bottomOffset = 20; // Start from bottom
-    const avatarSize = 56; // Size of minimized avatar
-    const avatarSpacing = 12; // Spacing between minimized avatars
-    
-    // Use provided array or fallback to activeChatWindows
+    const bottomOffset = 20;
+
     const windows = windowsArray || activeChatWindows;
-    
+
     if (isMinimized) {
-      // For minimized: stack vertically from bottom right
-      const minimizedWindows = windows.filter(w => w.isMinimized);
-      const stackIndex = targetIndex !== null ? targetIndex : minimizedWindows.length;
-      const right = rightOffset;
-      const bottom = bottomOffset + (stackIndex * (avatarSize + avatarSpacing));
-      return { right, bottom };
+      const minimized = windows.filter((w) => w.isMinimized);
+      const index = targetIndex !== null ? targetIndex : minimized.length;
+      return { right: rightOffset, bottom: bottomOffset + index * (avatarSize + avatarSpacing) };
     } else {
-      // For open windows: stack horizontally
-      const openWindows = windows.filter(w => !w.isMinimized);
-      const stackIndex = targetIndex !== null ? targetIndex : openWindows.length;
-      const right = rightOffset + (stackIndex * (windowWidth + spacing));
-      const bottom = 20;
-      return { right, bottom };
+      const open = windows.filter((w) => !w.isMinimized);
+      const index = targetIndex !== null ? targetIndex : open.length;
+      return { right: rightOffset + index * (windowWidth + spacing), bottom: 20 };
     }
-  };
-  
-  // Open new chat window
-  const openChatWindow = (conversation) => {
-    // Check if window already exists
-    const existingWindow = activeChatWindows.find(w => w.conversation._id === conversation._id);
-    if (existingWindow) {
-      // If exists and minimized, maximize it
-      if (existingWindow.isMinimized) {
-        setActiveChatWindows(prev => prev.map(w => 
-          w.id === existingWindow.id 
-            ? { ...w, isMinimized: false }
-            : w
-        ));
+  }, [activeChatWindows]);
+
+  const recalculatePositions = useCallback((windows) => {
+    return windows.map((window) => {
+      const minimized = windows.filter((w) => w.isMinimized);
+      const open = windows.filter((w) => !w.isMinimized);
+
+      if (window.isMinimized) {
+        const index = minimized.findIndex((w) => w.id === window.id);
+        return { ...window, position: getNewWindowPosition(true, windows, index) };
+      } else {
+        const index = open.findIndex((w) => w.id === window.id);
+        return { ...window, position: getNewWindowPosition(false, windows, index) };
       }
-      return;
-    }
-    
-    // Create new window
-    const position = getNewWindowPosition();
-    const newWindow = {
-      id: `chat-${conversation._id}-${Date.now()}`,
-      conversation,
-      isMinimized: false,
-      position
-    };
-    
-    setActiveChatWindows(prev => [...prev, newWindow]);
-  };
-  
-  // Close chat window and recalculate positions
+    });
+  }, [getNewWindowPosition]);
+
+  const openChatWindow = useCallback((conversation) => {
+    if (!conversation?._id) return;
+
+    setActiveChatWindows((prev) => {
+      const existing = prev.find((w) => w.conversation?._id === conversation._id);
+      if (existing) {
+        if (existing.isMinimized) {
+          const updated = prev.map((w) =>
+            w.id === existing.id ? { ...w, isMinimized: false } : w
+          );
+          return recalculatePositions(updated);
+        }
+        return prev;
+      }
+
+      const position = getNewWindowPosition(false, prev);
+      const newWindow = {
+        id: `chat-${conversation._id}-${Date.now()}`,
+        conversation,
+        isMinimized: false,
+        position,
+      };
+      return [...prev, newWindow];
+    });
+  }, [getNewWindowPosition, recalculatePositions]);
+
   const closeChatWindow = (windowId) => {
-    setActiveChatWindows(prev => {
-      const remaining = prev.filter(w => w.id !== windowId);
-      // Recalculate positions for all remaining windows
-      return remaining.map((window) => {
-        const minimizedWindows = remaining.filter(w => w.isMinimized);
-        const openWindows = remaining.filter(w => !w.isMinimized);
-        
-        if (window.isMinimized) {
-          const minimizedIndex = minimizedWindows.findIndex(w => w.id === window.id);
-          const newPosition = getNewWindowPosition(true, remaining, minimizedIndex);
-          return { ...window, position: newPosition };
-        } else {
-          const openIndex = openWindows.findIndex(w => w.id === window.id);
-          const newPosition = getNewWindowPosition(false, remaining, openIndex);
-          return { ...window, position: newPosition };
-        }
-      });
+    setActiveChatWindows((prev) => {
+      const remaining = prev.filter((w) => w.id !== windowId);
+      return recalculatePositions(remaining);
     });
   };
-  
-  // Minimize chat window and recalculate all positions
+
   const minimizeChatWindow = (windowId) => {
-    setActiveChatWindows(prev => {
-      const updated = prev.map(w => {
-        if (w.id === windowId) {
-          return { ...w, isMinimized: true };
-        }
-        return w;
-      });
-      // Recalculate positions for all windows
-      return updated.map((window) => {
-        const minimizedWindows = updated.filter(w => w.isMinimized);
-        const openWindows = updated.filter(w => !w.isMinimized);
-        
-        if (window.isMinimized) {
-          const minimizedIndex = minimizedWindows.findIndex(w => w.id === window.id);
-          const newPosition = getNewWindowPosition(true, updated, minimizedIndex);
-          return { ...window, position: newPosition };
-        } else {
-          const openIndex = openWindows.findIndex(w => w.id === window.id);
-          const newPosition = getNewWindowPosition(false, updated, openIndex);
-          return { ...window, position: newPosition };
-        }
-      });
+    setActiveChatWindows((prev) => {
+      const updated = prev.map((w) => (w.id === windowId ? { ...w, isMinimized: true } : w));
+      return recalculatePositions(updated);
     });
   };
-  
-  // Maximize chat window and recalculate all positions
+
   const maximizeChatWindow = (windowId) => {
-    setActiveChatWindows(prev => {
-      const updated = prev.map(w => {
-        if (w.id === windowId) {
-          return { ...w, isMinimized: false };
-        }
-        return w;
-      });
-      // Recalculate positions for all windows
-      return updated.map((window) => {
-        const minimizedWindows = updated.filter(w => w.isMinimized);
-        const openWindows = updated.filter(w => !w.isMinimized);
-        
-        if (window.isMinimized) {
-          const minimizedIndex = minimizedWindows.findIndex(w => w.id === window.id);
-          const newPosition = getNewWindowPosition(true, updated, minimizedIndex);
-          return { ...window, position: newPosition };
-        } else {
-          const openIndex = openWindows.findIndex(w => w.id === window.id);
-          const newPosition = getNewWindowPosition(false, updated, openIndex);
-          return { ...window, position: newPosition };
-        }
-      });
+    setActiveChatWindows((prev) => {
+      const updated = prev.map((w) => (w.id === windowId ? { ...w, isMinimized: false } : w));
+      return recalculatePositions(updated);
     });
   };
-  
-  // Get current user ID
-  const getCurrentUserId = () => {
-    try {
-      const raw = localStorage.getItem('user');
-      if (raw) {
-        const obj = JSON.parse(raw);
-        const u = obj?.user || obj;
-        return u?.id || u?.userId || u?._id;
-      }
-    } catch {}
-    return null;
-  };
-  
-  const currentUserId = getCurrentUserId();
-  
-  // Get peer info from conversation
+
+  // Cập nhật conversation trong cửa sổ chat khi có tin mới
+  useEffect(() => {
+    setActiveChatWindows((prev) =>
+      prev.map((window) => {
+        const updated = conversations.find((c) => c._id === window.conversation._id);
+        return updated ? { ...window, conversation: updated } : window;
+      })
+    );
+  }, [conversations]);
+
+  // Cho phép mở chat từ component khác (rất tiện)
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.conversation) openChatWindow(e.detail.conversation);
+    };
+    window.addEventListener('openChatWindow', handler);
+    return () => window.removeEventListener('openChatWindow', handler);
+  }, [openChatWindow]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    const handleIncomingMessage = ({ conversationId, message }) => {
+      if (!conversationId || !message) return;
+      const senderInfo = typeof message.senderId === 'object' ? message.senderId : null;
+      const senderId = senderInfo?._id || senderInfo?.id || message.senderId;
+      if (!senderId || String(senderId) === String(currentUserId)) return;
+      if (isChatPage) return;
+
+      const matchedConversation = conversations.find((conv) => conv._id === conversationId);
+      const fallbackConversation = matchedConversation || {
+        _id: conversationId,
+        participants: [
+          senderInfo
+            ? {
+                _id: senderId,
+                displayName: senderInfo.displayName,
+                username: senderInfo.username,
+                avatarUrl: senderInfo.avatarUrl,
+              }
+            : null,
+          { _id: currentUserId },
+        ].filter(Boolean),
+        lastMessage: message.textPreview || message.text || '',
+        lastMessageAt: message.createdAt,
+        status: 'active',
+        unreadCounts: {
+          [currentUserId]: 1,
+        },
+      };
+
+      setChatPopoverVisible(false);
+      openChatWindow(fallbackConversation);
+    };
+
+    onDmNew(handleIncomingMessage);
+    return () => offDmNew(handleIncomingMessage);
+  }, [conversations, currentUserId, isChatPage, openChatWindow]);
+
+  // Helper functions
   const getPeer = (conv) => {
     if (!conv?.participants || !currentUserId) return null;
-    const peer = conv.participants.find((p) => {
+    return conv.participants.find((p) => {
       const pid = typeof p === 'object' ? (p._id || p.id) : p;
-      const cid = typeof currentUserId === 'object' ? (currentUserId._id || currentUserId.id) : currentUserId;
-      return String(pid) !== String(cid);
+      return String(pid) !== String(currentUserId);
     });
-    return peer;
   };
-  
-  // Get unread count
+
   const getUnreadCount = (conv) => {
     if (!conv?.unreadCounts || !currentUserId) return 0;
     const uid = String(currentUserId);
     return Number(conv.unreadCounts.get?.(uid) || conv.unreadCounts[uid] || 0);
   };
-  
-  // Format time
+
   const formatTime = (dateString) => {
     if (!dateString) return '';
     const date = new Date(dateString);
@@ -214,407 +213,341 @@ const AppHeader = () => {
     if (days < 7) return `${days} ngày trước`;
     return date.toLocaleDateString('vi-VN');
   };
-  
-  // Filter conversations
+
+  // Lọc cuộc trò chuyện
   const filteredConversations = conversations.filter((conv) => {
-    // Search filter
     if (chatSearchText) {
       const peer = getPeer(conv);
-      const peerName = peer?.displayName || peer?.username || '';
-      if (!peerName.toLowerCase().includes(chatSearchText.toLowerCase())) {
-        return false;
-      }
+      const name = (peer?.displayName || peer?.username || '').toLowerCase();
+      if (!name.includes(chatSearchText.toLowerCase())) return false;
     }
-    
-    // Status filter
-    if (chatFilter === 'unread') {
-      return getUnreadCount(conv) > 0;
-    }
-    if (chatFilter === 'groups') {
-      // For now, we'll treat all as individual chats. Can be extended later
-      return false;
-    }
+    if (chatFilter === 'unread') return getUnreadCount(conv) > 0;
+    if (chatFilter === 'groups') return false;
     return true;
   });
-  
-  // Get total unread count
+
+  // UX tốt hơn: nếu search không ra gì → vẫn hiện danh sách (không để trống)
+  const displayConversations =
+    chatSearchText && filteredConversations.length === 0 && conversations.length > 0
+      ? conversations.filter((conv) => (chatFilter === 'unread' ? getUnreadCount(conv) > 0 : true))
+      : filteredConversations;
+
   const totalUnreadCount = conversations.reduce((sum, conv) => sum + getUnreadCount(conv), 0);
 
-  const handleLiveStreamClick = () => {
-    setIsModalVisible(true);
-  };
-
+  // Livestream
+  const handleLiveStreamClick = () => setIsModalVisible(true);
   const handleConfirm = async () => {
     if (isCreating) return;
     setIsCreating(true);
-
     try {
       const { room } = await livestreamService.createLiveStream();
       setIsModalVisible(false);
       navigate(`/livestream/setup/${room._id}`);
-
     } catch (err) {
-      console.error("Lỗi khi tạo phòng:", err);
-      Modal.error({
-        title: 'Lỗi',
-        content: 'Không thể tạo phòng, vui lòng thử lại.',
-      });
+      console.error('Lỗi khi tạo phòng:', err);
+      Modal.error({ title: 'Lỗi', content: 'Không thể tạo phòng, vui lòng thử lại.' });
     } finally {
       setIsCreating(false);
     }
   };
+  const handleCancel = () => !isCreating && setIsModalVisible(false);
 
+  const handleLogout = useCallback(() => {
+    dispatch(logout());
+    navigate('/login');
+  }, [dispatch, navigate]);
 
-  const handleCancel = () => {
-    if (isCreating) return;
-    setIsModalVisible(false);
-  };
+  // Dropdown avatar
+  const avatarMenuItems = [
+    {
+      key: 'profile',
+      label: 'Hồ sơ của tôi',
+      icon: <UserOutlined />,
+      onClick: () => navigate(currentUserId ? `/users/${currentUserId}/newfeeds` : '/profile'),
+    },
+    {
+      key: 'archived',
+      label: 'Xem kho lưu trữ',
+      icon: <FolderOutlined />,
+      onClick: () => navigate('/archived-posts'),
+    },
+    { type: 'divider' },
+    {
+      key: 'logout',
+      label: 'Đăng xuất',
+      icon: <LogoutOutlined />,
+      danger: true,
+      onClick: handleLogout,
+    },
+  ];
+
   return (
     <>
-      <Header style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100, padding: '0 64px', background: '#0b0b0c', borderBottom: '1px solid #1f1f1f', height: 72 }}>
-        <div style={{ display: 'flex', alignItems: 'center', height: '100%', gap: 32, maxWidth: 1680, margin: '0 auto' }}>
-          <Text style={{ color: '#fff', fontWeight: 800, fontSize: 22 }}>MelodyHub</Text>
-          <Space size={28} style={{ color: '#d1d5db' }}>
-            <Text style={{ color: '#d1d5db', fontSize: 16 }}>Join Live</Text>
+      <Header className="app-header">
+        <div className="app-header__content">
+          <Text className="app-header__logo" onClick={() => navigate('/')}>
+            MelodyHub
+          </Text>
+
+          <div className="app-header__nav">
+            <Text className="app-header__nav-item" onClick={() => navigate('/live')}>
+              Join Live
+            </Text>
             <Text
-              style={{ color: '#d1d5db', fontSize: 16, cursor: 'pointer' }}
+              className="app-header__nav-item app-header__nav-link"
               onClick={() => navigate('/library/my-licks')}
             >
               Library
             </Text>
-          </Space>
-          <div style={{ flex: 1 }} />
+          </div>
+
+          <div className="app-header__spacer" />
+
           <Input
+            className="app-header__search"
             placeholder="Tìm kiếm"
             allowClear
-            prefix={<SearchOutlined style={{ color: '#9ca3af' }} />}
-            style={{ maxWidth: 600, background: '#111213', borderColor: '#1f1f1f', color: '#e5e7eb', borderRadius: 999, height: 40 }}
+            prefix={<SearchOutlined />}
           />
-          <Space size={24}>
-            <BellOutlined style={{ color: '#e5e7eb', fontSize: 20, cursor: 'pointer' }} />
+
+          <div className="app-header__actions">
+            <NotificationBell />
+
             {!isChatPage && (
-            <Popover
-              content={
-                <div style={{ width: 400, maxHeight: 600, background: '#1a1a1a', color: '#fff' }}>
-                  {/* Header */}
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'space-between',
-                    padding: '16px',
-                    borderBottom: '1px solid #2a2a2a'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ 
-                        width: 40, 
-                        height: 40, 
-                        borderRadius: '50%', 
-                        background: '#3b82f6',
+              <Popover
+                content={
+                  <div style={{ width: 400, maxHeight: 600, background: '#1a1a1a', color: '#fff' }}>
+                    {/* Header */}
+                    <div
+                      style={{
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#fff'
-                      }}>
-                        <MessageOutlined style={{ fontSize: 20 }} />
+                        justifyContent: 'space-between',
+                        padding: '16px',
+                        borderBottom: '1px solid #2a2a2a',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: '50%',
+                            background: '#3b82f6',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#fff',
+                          }}
+                        >
+                          <MessageOutlined style={{ fontSize: 20 }} />
+                        </div>
+                        <Text style={{ color: '#fff', fontWeight: 600, fontSize: 18 }}>Đoạn chat</Text>
                       </div>
-                      <Text style={{ color: '#fff', fontWeight: 600, fontSize: 18 }}>Đoạn chat</Text>
+                      <Space>
+                        <MoreOutlined style={{ color: '#9ca3af', fontSize: 16, cursor: 'pointer' }} />
+                        <ExpandOutlined style={{ color: '#9ca3af', fontSize: 16, cursor: 'pointer' }} />
+                        <EditOutlined
+                          style={{ color: '#9ca3af', fontSize: 16, cursor: 'pointer' }}
+                          onClick={() => {
+                            setChatPopoverVisible(false);
+                            navigate('/chat');
+                          }}
+                        />
+                      </Space>
                     </div>
-                    <Space>
-                      <MoreOutlined style={{ color: '#9ca3af', fontSize: 16, cursor: 'pointer' }} />
-                      <ExpandOutlined style={{ color: '#9ca3af', fontSize: 16, cursor: 'pointer' }} />
-                      <EditOutlined 
-                        style={{ color: '#9ca3af', fontSize: 16, cursor: 'pointer' }} 
+
+                    {/* Search */}
+                    <div style={{ padding: '12px 16px', borderBottom: '1px solid #2a2a2a' }}>
+                      <Input
+                        placeholder="Tìm kiếm trên Messenger"
+                        prefix={<SearchOutlined style={{ color: '#9ca3af' }} />}
+                        value={chatSearchText}
+                        onChange={(e) => setChatSearchText(e.target.value)}
+                        style={{
+                          background: '#111213',
+                          borderColor: '#2a2a2a',
+                          color: '#e5e7eb',
+                          borderRadius: 8,
+                        }}
+                      />
+                    </div>
+
+                    {/* Tabs */}
+                    <div style={{ display: 'flex', gap: 8, padding: '12px 16px', borderBottom: '1px solid #2a2a2a' }}>
+                      {['all', 'unread', 'groups'].map((f) => (
+                        <Button
+                          key={f}
+                          type={chatFilter === f ? 'primary' : 'text'}
+                          size="small"
+                          onClick={() => setChatFilter(f)}
+                          style={{
+                            color: chatFilter === f ? '#fff' : '#9ca3af',
+                            background: chatFilter === f ? '#3b82f6' : 'transparent',
+                            border: 'none',
+                          }}
+                        >
+                          {f === 'all' ? 'Tất cả' : f === 'unread' ? 'Chưa đọc' : 'Nhóm'}
+                        </Button>
+                      ))}
+                    </div>
+
+                    {/* Danh sách */}
+                    <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                      {loading ? (
+                        <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+                          <Spin size="large" />
+                        </div>
+                      ) : displayConversations.length === 0 ? (
+                        <Empty description="Chưa có cuộc trò chuyện" style={{ color: '#9ca3af', padding: '40px' }} />
+                      ) : (
+                        displayConversations.map((conv) => {
+                          const peer = getPeer(conv);
+                          const unread = getUnreadCount(conv);
+                          const peerName = peer?.displayName || peer?.username || 'Người dùng';
+                          const peerAvatar = peer?.avatarUrl;
+                          const lastMessage = conv.lastMessage || 'Chưa có tin nhắn';
+                          const lastMessageTime = formatTime(conv.lastMessageAt);
+
+                          return (
+                            <div
+                              key={conv._id}
+                              onClick={() => {
+                                setChatPopoverVisible(false);
+                                openChatWindow(conv);
+                              }}
+                              style={{
+                                display: 'flex',
+                                gap: 12,
+                                padding: '12px 16px',
+                                cursor: 'pointer',
+                                borderBottom: '1px solid #2a2a2a',
+                                transition: 'background 0.2s',
+                              }}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = '#252525')}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                            >
+                              <Badge count={unread} offset={[-5, 5]}>
+                                <Avatar src={peerAvatar} icon={<UserOutlined />} size={50} />
+                              </Badge>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                  <Text
+                                    style={{
+                                      color: '#fff',
+                                      fontWeight: 600,
+                                      fontSize: 14,
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {peerName}
+                                  </Text>
+                                  {lastMessageTime && (
+                                    <Text style={{ color: '#9ca3af', fontSize: 12 }}>{lastMessageTime}</Text>
+                                  )}
+                                </div>
+                                <div style={{ color: '#9ca3af', fontSize: 13 }}>
+                                  {conv.status === 'pending' ? (
+                                    <span style={{ color: '#fa8c16', fontWeight: 500 }}>Yêu cầu tin nhắn</span>
+                                  ) : (
+                                    lastMessage
+                                  )}
+                                </div>
+                              </div>
+                              {unread > 0 && (
+                                <div
+                                  style={{
+                                    width: 8,
+                                    height: 8,
+                                    borderRadius: '50%',
+                                    background: '#3b82f6',
+                                    marginTop: 6,
+                                  }}
+                                />
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div style={{ padding: '12px 16px', borderTop: '1px solid #2a2a2a', textAlign: 'center' }}>
+                      <Text
+                        style={{ color: '#3b82f6', cursor: 'pointer', fontSize: 14 }}
                         onClick={() => {
                           setChatPopoverVisible(false);
                           navigate('/chat');
                         }}
-                      />
-                    </Space>
+                      >
+                        Xem tất cả trong Messenger
+                      </Text>
+                    </div>
                   </div>
-                  
-                  {/* Search Bar */}
-                  <div style={{ padding: '12px 16px', borderBottom: '1px solid #2a2a2a' }}>
-                    <Input
-                      placeholder="Tìm kiếm trên Messenger"
-                      prefix={<SearchOutlined style={{ color: '#9ca3af' }} />}
-                      value={chatSearchText}
-                      onChange={(e) => setChatSearchText(e.target.value)}
-                      style={{
-                        background: '#111213',
-                        borderColor: '#2a2a2a',
-                        color: '#e5e7eb',
-                        borderRadius: 8
-                      }}
-                    />
-                  </div>
-                  
-                  {/* Filter Tabs */}
-                  <div style={{ 
-                    display: 'flex', 
-                    gap: 8, 
-                    padding: '12px 16px',
-                    borderBottom: '1px solid #2a2a2a'
-                  }}>
-                    <Button
-                      type={chatFilter === 'all' ? 'primary' : 'text'}
-                      size="small"
-                      onClick={() => setChatFilter('all')}
-                      style={{
-                        color: chatFilter === 'all' ? '#fff' : '#9ca3af',
-                        background: chatFilter === 'all' ? '#3b82f6' : 'transparent',
-                        border: 'none'
-                      }}
-                    >
-                      Tất cả
-                    </Button>
-                    <Button
-                      type={chatFilter === 'unread' ? 'primary' : 'text'}
-                      size="small"
-                      onClick={() => setChatFilter('unread')}
-                      style={{
-                        color: chatFilter === 'unread' ? '#fff' : '#9ca3af',
-                        background: chatFilter === 'unread' ? '#3b82f6' : 'transparent',
-                        border: 'none'
-                      }}
-                    >
-                      Chưa đọc
-                    </Button>
-                    <Button
-                      type={chatFilter === 'groups' ? 'primary' : 'text'}
-                      size="small"
-                      onClick={() => setChatFilter('groups')}
-                      style={{
-                        color: chatFilter === 'groups' ? '#fff' : '#9ca3af',
-                        background: chatFilter === 'groups' ? '#3b82f6' : 'transparent',
-                        border: 'none'
-                      }}
-                    >
-                      Nhóm
-                    </Button>
-                  </div>
-                  
-                  {/* Conversations List */}
-                  <div style={{ 
-                    maxHeight: 400, 
-                    overflowY: 'auto',
-                    background: '#1a1a1a'
-                  }}>
-                    {loading ? (
-                      <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
-                        <Spin size="large" />
-                      </div>
-                    ) : filteredConversations.length === 0 ? (
-                      <Empty 
-                        description="Chưa có cuộc trò chuyện" 
-                        style={{ color: '#9ca3af', padding: '40px' }}
-                        image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      />
-                    ) : (
-                      filteredConversations.map((conv) => {
-                        const peer = getPeer(conv);
-                        const unread = getUnreadCount(conv);
-                        const peerName = peer?.displayName || peer?.username || 'Người dùng';
-                        const peerAvatar = peer?.avatarUrl;
-                        const lastMessage = conv.lastMessage || 'Chưa có tin nhắn';
-                        const lastMessageTime = formatTime(conv.lastMessageAt);
-                        
-                        return (
-                          <div
-                            key={conv._id}
-                            onClick={() => {
-                              setChatPopoverVisible(false);
-                              // Open floating chat window instead of navigating
-                              openChatWindow(conv);
-                            }}
-                            style={{
-                              display: 'flex',
-                              gap: 12,
-                              padding: '12px 16px',
-                              cursor: 'pointer',
-                              borderBottom: '1px solid #2a2a2a',
-                              transition: 'background 0.2s'
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.background = '#252525'}
-                            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                          >
-                            <Badge count={unread > 0 ? unread : 0} offset={[-5, 5]}>
-                              <Avatar 
-                                src={peerAvatar} 
-                                icon={<UserOutlined />}
-                                size={50}
-                              />
-                            </Badge>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ 
-                                display: 'flex', 
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                marginBottom: 4
-                              }}>
-                                <Text style={{ 
-                                  color: '#fff', 
-                                  fontWeight: 600, 
-                                  fontSize: 14,
-                                  display: 'block',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap'
-                                }}>
-                                  {peerName}
-                                </Text>
-                                {lastMessageTime && (
-                                  <Text style={{ 
-                                    color: '#9ca3af', 
-                                    fontSize: 12,
-                                    marginLeft: 8,
-                                    flexShrink: 0
-                                  }}>
-                                    {lastMessageTime}
-                                  </Text>
-                                )}
-                              </div>
-                              <div style={{ 
-                                color: '#9ca3af', 
-                                fontSize: 13,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 4
-                              }}>
-                                {conv.status === 'pending' && (
-                                  <span style={{ color: '#fa8c16', fontWeight: 500 }}>
-                                    Yêu cầu tin nhắn
-                                  </span>
-                                )}
-                                {conv.status === 'active' && (
-                                  <span>{lastMessage}</span>
-                                )}
-                              </div>
-                            </div>
-                            {unread > 0 && (
-                              <div style={{
-                                width: 8,
-                                height: 8,
-                                borderRadius: '50%',
-                                background: '#3b82f6',
-                                flexShrink: 0,
-                                marginTop: 6
-                              }} />
-                            )}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                  
-                  {/* Footer */}
-                  <div style={{ 
-                    padding: '12px 16px',
-                    borderTop: '1px solid #2a2a2a',
-                    textAlign: 'center'
-                  }}>
-                    <Text 
-                      style={{ 
-                        color: '#3b82f6', 
-                        cursor: 'pointer',
-                        fontSize: 14
-                      }}
-                      onClick={() => {
-                        setChatPopoverVisible(false);
-                        navigate('/chat');
-                      }}
-                    >
-                      Xem tất cả trong Messenger
-                    </Text>
-                  </div>
-                </div>
-              }
-              title={null}
-              trigger="click"
-              open={chatPopoverVisible}
-              onOpenChange={setChatPopoverVisible}
-              placement="bottomRight"
-              overlayStyle={{ paddingTop: 0 }}
-              overlayInnerStyle={{ padding: 0, background: '#1a1a1a' }}
-              zIndex={1000}
-            >
-              <Badge count={totalUnreadCount} offset={[-5, 5]}>
-                <MessageOutlined 
-                  style={{ 
-                    color: '#e5e7eb', 
-                    fontSize: 20, 
-                    cursor: 'pointer' 
-                  }} 
-                />
-              </Badge>
-            </Popover>
-            )}
-            {(() => {
-              let avatarUrl; let displayName; let uid;
-              try {
-                const raw = localStorage.getItem('user');
-                if (raw) {
-                  const obj = JSON.parse(raw);
-                  const u = obj?.user || obj; // support both nested and flat shapes
-                  avatarUrl = u?.avatarUrl || u?.avatar_url;
-                  displayName = u?.displayName || u?.username || 'Profile';
-                  uid = u?.id || u?.userId || u?._id;
                 }
-              } catch {}
-              return (
-                <Tooltip title="Hồ sơ của tôi">
-                  {avatarUrl ? (
-                    <Avatar src={avatarUrl} size={28} style={{ cursor: 'pointer' }} onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')} />
-                  ) : (
-                    <UserOutlined style={{ color: '#e5e7eb', fontSize: 20, cursor: 'pointer' }} onClick={() => navigate(uid ? `/users/${uid}/newfeeds` : '/profile')} />
-                  )}
-                </Tooltip>
-              );
-            })()}
+                title={null}
+                trigger="click"
+                open={chatPopoverVisible}
+                onOpenChange={setChatPopoverVisible}
+                placement="bottomRight"
+                overlayStyle={{ paddingTop: 0 }}
+                overlayInnerStyle={{ padding: 0, background: '#1a1a1a' }}
+                zIndex={1000}
+              >
+                <Badge count={totalUnreadCount} offset={[-5, 5]}>
+                  <MessageOutlined className="app-header__icon" />
+                </Badge>
+              </Popover>
+            )}
 
-            <Button
-              style={{ color: '#fff', background: '#ef4444', borderColor: '#ef4444', borderRadius: 999, height: 40, padding: '0 20px', fontSize: 14 }}
-              icon={<FireOutlined />}
-              onClick={handleLiveStreamClick}
-            >
+            <Dropdown menu={{ items: avatarMenuItems }} trigger={['click']} placement="bottomRight">
+              {userInfo?.avatarUrl ? (
+                <Avatar src={userInfo.avatarUrl} size={28} className="app-header__avatar" style={{ cursor: 'pointer' }} />
+              ) : (
+                <UserOutlined className="app-header__icon" style={{ cursor: 'pointer' }} />
+              )}
+            </Dropdown>
+
+            <Button className="app-header__cta" icon={<FireOutlined />} onClick={handleLiveStreamClick}>
               LiveStream
             </Button>
 
-            <Button style={{ color: '#fff', background: '#ef4444', borderColor: '#ef4444', borderRadius: 999, height: 40, padding: '0 20px', fontSize: 14 }}>Creat project</Button>
-          </Space>
+            <Button className="app-header__cta">Creat project</Button>
+          </div>
         </div>
       </Header>
 
+      {/* Modal Livestream */}
       <Modal
         title="Bắt đầu phát trực tiếp?"
-        visible={isModalVisible}
+        open={isModalVisible}
         onOk={handleConfirm}
         onCancel={handleCancel}
         closable={!isCreating}
         maskClosable={!isCreating}
         confirmLoading={isCreating}
-        okText={isCreating ? "Đang tạo..." : "Có"}
+        okText={isCreating ? 'Đang tạo...' : 'Có'}
         cancelText="Không"
       >
         <p>Bạn có chắc chắn muốn bắt đầu một buổi phát trực tiếp mới?</p>
       </Modal>
 
       {/* Floating Chat Windows */}
-      {!isChatPage && activeChatWindows.map((window) => (
-        <FloatingChatWindow
-          key={window.id}
-          conversation={window.conversation}
-          currentUserId={currentUserId}
-          isMinimized={window.isMinimized}
-          position={window.position}
-          onClose={() => closeChatWindow(window.id)}
-          onMinimize={() => minimizeChatWindow(window.id)}
-          onMaximize={() => maximizeChatWindow(window.id)}
-        />
-      ))}
-
+      {!isChatPage &&
+        activeChatWindows.map((window) => (
+          <FloatingChatWindow
+            key={window.id}
+            conversation={window.conversation}
+            currentUserId={currentUserId}
+            isMinimized={window.isMinimized}
+            position={window.position}
+            onClose={() => closeChatWindow(window.id)}
+            onMinimize={() => minimizeChatWindow(window.id)}
+            onMaximize={() => maximizeChatWindow(window.id)}
+            onConversationUpdate={refresh} // Cập nhật lại danh sách khi gửi tin
+          />
+        ))}
     </>
   );
 };
