@@ -105,12 +105,11 @@ const LickDetail = ({
     setIsEditingTab(false);
   }, [lick?.lick_id, lick?.tab_notation, lick?.tabNotation]);
 
-  const displayAvatar = myProfile?.avatarUrl || lick.creator?.avatar_url;
+  const displayAvatar = lick.creator?.avatar_url || myProfile?.avatarUrl;
   const displayName =
-    myProfile?.displayName ||
-    myProfile?.username ||
-    lick.creator?.username ||
     lick.creator?.display_name ||
+    lick.creator?.username ||
+    lick.creator?.displayName ||
     "Unknown User";
 
   const resolvedCurrentUserId =
