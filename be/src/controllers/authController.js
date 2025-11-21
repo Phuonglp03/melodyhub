@@ -391,7 +391,52 @@ export const register = async (req, res) => {
       });
     }
 
-    const { fullName, email, password, birthday } = req.body;
+    const { 
+      fullName, 
+      email, 
+      password, 
+      birthday, 
+      gender, 
+      addressLine,
+      provinceCode,
+      provinceName,
+      districtCode,
+      districtName,
+      wardCode,
+      wardName
+    } = req.body;
+
+    const normalizedGender = gender?.toLowerCase();
+    const allowedGenders = ['male', 'female', 'other'];
+    if (!allowedGenders.includes(normalizedGender)) {
+      return res.status(400).json({
+        message: 'Giới tính không hợp lệ'
+      });
+    }
+
+    const requiredAddressFields = [
+      { value: addressLine, message: 'Địa chỉ chi tiết không được để trống' },
+      { value: provinceCode, message: 'Vui lòng chọn tỉnh/thành phố' },
+      { value: provinceName, message: 'Vui lòng chọn tỉnh/thành phố' },
+      { value: districtCode, message: 'Vui lòng chọn quận/huyện' },
+      { value: districtName, message: 'Vui lòng chọn quận/huyện' },
+      { value: wardCode, message: 'Vui lòng chọn phường/xã' },
+      { value: wardName, message: 'Vui lòng chọn phường/xã' }
+    ];
+
+    for (const field of requiredAddressFields) {
+      if (!field.value || (typeof field.value === 'string' && !field.value.trim())) {
+        return res.status(400).json({ message: field.message });
+      }
+    }
+
+    const normalizedAddressLine = addressLine.trim();
+    const fullLocation = [
+      normalizedAddressLine,
+      wardName.trim(),
+      districtName.trim(),
+      provinceName.trim()
+    ].filter(Boolean).join(', ');
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -426,6 +471,15 @@ export const register = async (req, res) => {
       username,
       displayName: fullName,
       birthday: birthday ? new Date(birthday) : null,
+      gender: normalizedGender,
+      addressLine: normalizedAddressLine,
+      provinceCode: provinceCode.toString(),
+      provinceName: provinceName.trim(),
+      districtCode: districtCode.toString(),
+      districtName: districtName.trim(),
+      wardCode: wardCode.toString(),
+      wardName: wardName.trim(),
+      location: fullLocation,
       otp,
       otpExpires,
       verifiedEmail: false,
@@ -452,7 +506,16 @@ export const register = async (req, res) => {
         displayName: newUser.displayName,
         roleId: newUser.roleId,
         verifiedEmail: newUser.verifiedEmail,
-        avatarUrl: DEFAULT_AVATAR_URL
+        avatarUrl: DEFAULT_AVATAR_URL,
+        gender: newUser.gender,
+        addressLine: newUser.addressLine,
+        provinceCode: newUser.provinceCode,
+        provinceName: newUser.provinceName,
+        districtCode: newUser.districtCode,
+        districtName: newUser.districtName,
+        wardCode: newUser.wardCode,
+        wardName: newUser.wardName,
+        location: newUser.location
       },
       requiresVerification: true
     });
