@@ -1492,51 +1492,67 @@ export const generateBackingTrack = async (req, res) => {
       await backingTrack.save();
     }
 
-    // Calculate time per chord based on BPM
-    const bpm = project.tempo || 120;
-    const secondsPerBeat = 60 / bpm;
-    const durationInSeconds = chordDuration * secondsPerBeat;
-
-    // Create timeline items for each chord
-    const timelineItems = [];
-    for (let i = 0; i < chords.length; i++) {
-      const chord = chords[i];
-      const chordName = typeof chord === "string" ? chord : chord.chordName || chord.name;
-      const midiNotes = Array.isArray(chord.midiNotes) ? chord.midiNotes : [];
-
-      if (!chordName) continue;
-
-      const timelineItem = new ProjectTimelineItem({
-        trackId: backingTrack._id,
-        userId,
-        startTime: i * durationInSeconds,
-        duration: durationInSeconds,
-        offset: 0,
-        loopEnabled: false,
-        playbackRate: 1,
-        type: "chord",
-        chordName,
-        rhythmPatternId: rhythmPatternId || backingTrack.defaultRhythmPatternId || undefined,
-        isCustomized: false,
-        customMidiEvents: midiNotes.length > 0 ? 
-          midiNotes.map((pitch, idx) => ({
-            pitch,
-            startTime: 0,
-            duration: durationInSeconds,
-            velocity: 0.8,
-          })) : [],
-      });
-
-      await timelineItem.save();
-      timelineItems.push(timelineItem);
+    // Get instrument for MIDI program number
+    let instrumentProgram = 0; // Default: Acoustic Grand Piano
+    if (instrumentId) {
+      const instrument = await Instrument.findById(instrumentId);
+      if (instrument && instrument.soundfontKey) {
+        // Map soundfont keys to MIDI program numbers
+        const programMap = {
+          'acoustic_grand_piano': 0,
+          'electric_piano': 4,
+          'electric_guitar_clean': 27,
+          'acoustic_bass': 32,
+          'synth_lead': 80,
+        };
+        instrumentProgram = programMap[instrument.soundfontKey] || 0;
+      }
     }
+
+    // Generate MIDI file
+    const { generateMIDIFile } = await import('../utils/midiGenerator.js');
+    
+    const midiFile = await generateMIDIFile(chords, {
+      tempo: project.tempo || 120,
+      chordDuration,
+      instrumentProgram,
+      projectId: project._id.toString(),
+    });
+
+    if (!midiFile.success) {
+      throw new Error('Failed to generate MIDI file');
+    }
+
+    // Delete existing items on backing track
+    await ProjectTimelineItem.deleteMany({ trackId: backingTrack._id });
+
+    // Create a single timeline item for the MIDI file
+    const timelineItem = new ProjectTimelineItem({
+      trackId: backingTrack._id,
+      userId,
+      startTime: 0,
+      duration: chords.length * chordDuration * (60 / (project.tempo || 120)), // Convert beats to seconds
+      offset: 0,
+      loopEnabled: false,
+      playbackRate: 1,
+      type: "lick", // Use 'lick' type so it loads as audio/MIDI file
+      title: `Backing Track - ${chords.length} chords`,
+      audioUrl: midiFile.url, // Path to MIDI file
+      isCustomized: false,
+    });
+
+    await timelineItem.save();
 
     res.status(201).json({
       success: true,
-      message: `Backing track generated with ${timelineItems.length} chords`,
+      message: `Backing track MIDI file generated with ${chords.length} chords`,
       data: {
         track: backingTrack,
-        items: timelineItems,
+        item: timelineItem,
+        midiFile: {
+          filename: midiFile.filename,
+          url: midiFile.url,
+        },
       },
     });
   } catch (error) {

@@ -1,4 +1,10 @@
-// Helper function to call Suno AI API
+import mongoose from "mongoose";
+import Project from "../models/Project.js";
+import ProjectTrack from "../models/ProjectTrack.js";
+import ProjectTimelineItem from "../models/ProjectTimelineItem.js";
+import ProjectCollaborator from "../models/ProjectCollaborator.js";
+
+// Helper function to call Suno AI API (Official Format)
 const callSunoAPI = async (prompt, duration = 30) => {
   const apiKey = process.env.SUNO_API_KEY;
   
@@ -6,8 +12,8 @@ const callSunoAPI = async (prompt, duration = 30) => {
     throw new Error("SUNO_API_KEY not configured in environment");
   }
 
-  // Call Suno AI to generate audio
-  const response = await fetch('https://api.suno.ai/v1/generate', {
+  // Call Suno AI using official API format
+  const response = await fetch('https://api.sunoapi.org/api/v1/generate', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
@@ -15,35 +21,47 @@ const callSunoAPI = async (prompt, duration = 30) => {
     },
     body: JSON.stringify({
       prompt,
-      duration: Math.min(duration, 30), // Max 30 seconds
-      make_instrumental: true,
-      model: 'chirp-v3'
+      customMode: false,
+      instrumental: true,
+      model: 'V3_5'
     })
   });
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(`Suno API error: ${error.message || 'Unknown error'}`);
+    throw new Error(`Suno API error: ${error.msg || error.message || 'Unknown error'}`);
   }
 
-  return response.json();
+  const result = await response.json();
+  
+  if (result.code !== 200) {
+    throw new Error(`Suno API error: ${result.msg || 'Generation failed'}`);
+  }
+
+  return result.data; // Returns { taskId: "suno_task_abc123" }
 };
 
-// Helper to poll Suno for completion
-const waitForSunoGeneration = async (generationId, maxAttempts = 30) => {
+// Helper to poll Suno for completion (Official Format)
+const waitForSunoGeneration = async (taskId, maxAttempts = 60) => {
   const apiKey = process.env.SUNO_API_KEY;
   
   for (let i = 0; i < maxAttempts; i++) {
-    const response = await fetch(`https://api.suno.ai/v1/generate/${generationId}`, {
+    const response = await fetch(`https://api.sunoapi.org/api/v1/generate/record-info?taskId=${taskId}`, {
       headers: { 'Authorization': `Bearer ${apiKey}` }
     });
     
-    const data = await response.json();
+    const result = await response.json();
     
-    if (data.status === 'complete') {
-      return data;
-    } else if (data.status === 'failed') {
-      throw new Error('Suno generation failed');
+    if (result.code === 200 && result.data) {
+      const { status, response: taskResponse } = result.data;
+      
+      if (status === 'SUCCESS' && taskResponse?.data?.[0]) {
+        // Return first generated audio
+        return taskResponse.data[0];
+      } else if (status === 'FAILED') {
+        throw new Error('Suno generation failed');
+      }
+      // Still processing, continue polling
     }
     
     // Wait 2 seconds before next poll
@@ -117,6 +135,12 @@ export const generateAIBackingTrack = async (req, res) => {
       await backingTrack.save();
     }
 
+    // DELETE ALL EXISTING ITEMS ON BACKING TRACK
+    await ProjectTimelineItem.deleteMany({
+      trackId: backingTrack._id
+    });
+    console.log("Cleared existing backing track items");
+
     // Build intelligent prompt for Suno
     const chordNames = chords.map(c => c.chordName || c).join(', ');
     const instrumentName = instrument || "Piano";
@@ -124,19 +148,29 @@ export const generateAIBackingTrack = async (req, res) => {
     const bpm = tempo || project.tempo || 120;
     const musicalKey = key || project.key || "C Major";
 
-    const prompt = `Backing track: ${instrumentName} playing chord progression ${chordNames} in ${musicalKey} at ${bpm}BPM. ${musicStyle} style. Clean chords only, no melody, no vocals. Professional studio quality. Instrumental only.`;
+    const prompt = `${instrumentName} backing track playing ${chordNames} in ${musicalKey} at ${bpm}BPM. ${musicStyle} style. Clean instrumental chords only, no melody, no vocals. Professional studio quality.`;
 
     console.log("Generating AI backing track with prompt:", prompt);
 
-    // Call Suno AI
+    // Call Suno AI API (using official format)
     const generationResponse = await callSunoAPI(prompt, duration || 30);
-    console.log("Suno generation started:", generationResponse.id);
+    
+    if (!generationResponse || !generationResponse.taskId) {
+      throw new Error("Failed to start Suno generation");
+    }
+
+    console.log("Suno generation started. Task ID:", generationResponse.taskId);
 
     // Poll for completion
-    const audioData = await waitForSunoGeneration(generationResponse.id);
+    const audioData = await waitForSunoGeneration(generationResponse.taskId);
+    
+    if (!audioData || !audioData.audio_url ) {
+      throw new Error("No audio URL returned from Suno");
+    }
+
     console.log("Suno generation complete:", audioData.audio_url);
 
-    // Create timeline item with the generated audio
+    // Create NEW timeline item with the generated audio
     const timelineItem = new ProjectTimelineItem({
       trackId: backingTrack._id,
       userId,
@@ -144,30 +178,21 @@ export const generateAIBackingTrack = async (req, res) => {
       duration: audioData.duration || duration || 30,
       offset: 0,
       type: "lick", // Store as audio lick
-      audioUrl: audioData.audio_url,
+      sourceDuration: audioData.duration || duration || 30,
       loopEnabled: false,
       playbackRate: 1,
-      // Store metadata
-      aiGenerated: true,
-      aiMetadata: {
-        chords: chordNames,
-        instrument: instrumentName,
-        style: musicStyle,
-        tempo: bpm,
-        key: musicalKey,
-        provider: "suno"
-      }
     });
 
     await timelineItem.save();
 
     res.status(201).json({
       success: true,
-      message: "AI backing track generated successfully",
+      message: "AI backing track generated successfully! 🎵",
       data: {
         timelineItem,
         audio_url: audioData.audio_url,
-        duration: audioData.duration
+        duration: audioData.duration,
+        replacedItems: true
       }
     });
 
