@@ -120,8 +120,17 @@ const LiveStreamLive = () => {
     });
 
     onStreamPrivacyUpdated((data) => {
-      console.log('[Socket] Cập nhật privacy:', data.privacyType);
-      setPrivacy(data.privacyType);
+      setRoom(prev => ({ ...prev, privacyType: data.privacyType }));
+    });
+
+    onViewerCountUpdate((data) => {
+      if (data.roomId === roomId) {
+        setCurrentViewers(data.currentViewers || 0);
+      }
+    });
+
+    onChatError((errorMsg) => {
+      message.error(errorMsg);
     });
 
     return () => {
