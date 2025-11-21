@@ -60,7 +60,12 @@ const WavePlaceholder = () => (
   </div>
 );
 
-const Suggestion = ({ user, following, loading, onFollow }) => (
+const Suggestion = ({ user, following, loading, onFollow }) => {
+  const primaryReason = Array.isArray(user?.reasons) && user.reasons.length > 0
+    ? user.reasons[0]
+    : null;
+
+  return (
   <div style={{ display: 'flex', alignItems: 'center', padding: '6px 0', width: '100%' }}>
     <Space size={12}>
       <Avatar 
@@ -73,6 +78,9 @@ const Suggestion = ({ user, following, loading, onFollow }) => (
       <div>
         <Text strong style={{ color: '#fff' }}>{user.displayName || user.username}</Text>
         <div style={{ fontSize: 12, color: '#f3f5f7ff' }}>{Number(user.followersCount || 0)} người theo dõi</div>
+        {primaryReason && (
+          <div style={{ fontSize: 12, color: '#9ca3af' }}>{primaryReason}</div>
+        )}
       </div>
     </Space>
     {following ? (
@@ -97,7 +105,8 @@ const Suggestion = ({ user, following, loading, onFollow }) => (
       />
     )}
   </div>
-);
+  );
+};
 
 const LeaderboardItem = ({ name, icon, iconColor = '#111' }) => (
   <Space>
@@ -280,6 +289,8 @@ const NewsFeed = () => {
   const composerInitial = composerDisplayName ? composerDisplayName[0].toUpperCase() : 'U';
   const usedChars = newText?.length || 0;
   const charPercent = maxChars ? Math.min(100, Math.round((usedChars / maxChars) * 100)) : 0;
+  const isInitialLoading = loading && items.length === 0;
+  const isLoadingMore = loading && items.length > 0;
 
   const extractFirstUrl = (text) => {
     if (!text) return null;
@@ -1375,7 +1386,7 @@ const NewsFeed = () => {
             </div>
           </Modal>
 
-          {loading && (
+          {isInitialLoading && (
             <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
               <Spin />
             </div>
@@ -1385,10 +1396,10 @@ const NewsFeed = () => {
               <Text style={{ color: '#fff' }}>{error}</Text>
             </Card>
           )}
-          {!loading && !error && items.length === 0 && (
+          {!isInitialLoading && !error && items.length === 0 && (
             <Empty description={<span style={{ color: '#9ca3af' }}>Chưa có bài đăng</span>} />
           )}
-          {!loading && !error && items.map((post) => (
+          {items.map((post) => (
             <Card key={post._id} style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <Space align="start" size={14}>
@@ -1614,7 +1625,7 @@ const NewsFeed = () => {
           ))}
 
           <div ref={loaderRef} style={{ height: 1 }} />
-          {loading && (
+          {isLoadingMore && (
             <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}>
               <Spin />
             </div>

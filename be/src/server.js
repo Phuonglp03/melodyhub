@@ -50,12 +50,14 @@ import userRoutes from "./routes/userRoutes.js";
 import tagRoutes from "./routes/tagRoutes.js";
 import playlistRoutes from "./routes/playlistRoutes.js";
 import projectRoutes from "./routes/projectRoutes.js";
+import locationRoutes from "./routes/locationRoutes.js";
+
 import userManageRoute from "./routes/admin/userManageRoute.js";
 import createAdminRoute from "./routes/admin/createAdminRoute.js";
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import dmRoutes from "./routes/dmRoutes.js";
-import reportRoutes from "./routes/reportRoutes.js";
+import reportRoutes from "./routes/admin/reportRoutes.js";
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -111,6 +113,8 @@ app.use("/api/tags", tagRoutes);
 app.use("/api/playlists", playlistRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/locations", locationRoutes);
+
 app.use('/api/admin', userManageRoute);
 app.use('/api/admin', createAdminRoute);
 // 404 handler - must be after all routes

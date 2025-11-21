@@ -13,18 +13,14 @@ import {
   Upload,
   List,
   Divider,
-  Dropdown,
 } from "antd";
 import {
   LikeOutlined,
   MessageOutlined,
   PlusOutlined,
   UserOutlined,
-  MoreOutlined,
-  EditOutlined,
-  DeleteOutlined
 } from "@ant-design/icons";
-import { listMyPosts, createPost, updatePost, deletePost } from "../../../services/user/post";
+import { listMyPosts, createPost } from "../../../services/user/post";
 import {
   likePost,
   unlikePost,
@@ -32,7 +28,7 @@ import {
   getPostStats,
   getAllPostComments,
 } from "../../../services/user/post";
-import { getMyProfile, uploadMyCoverPhoto } from "../../../services/user/profile";
+import { getMyProfile } from "../../../services/user/profile";
 import { useNavigate } from "react-router-dom";
 import PostLickEmbed from "../../../components/PostLickEmbed";
 
@@ -156,36 +152,6 @@ const formatTime = (isoString) => {
   }
 };
 
-const getLinkInfo = (url) => {
-  if (!url) return { iconClass: "bi bi-globe", label: "Website", color: "#3b82f6" };
-  try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.toLowerCase();
-    
-    if (hostname.includes("facebook.com")) {
-      return { iconClass: "bi bi-facebook", label: "Facebook", color: "#1877f2" };
-    } else if (hostname.includes("twitter.com") || hostname.includes("x.com")) {
-      return { iconClass: "bi bi-twitter-x", label: "Twitter", color: "#1da1f2" };
-    } else if (hostname.includes("instagram.com")) {
-      return { iconClass: "bi bi-instagram", label: "Instagram", color: "#e4405f" };
-    } else if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) {
-      return { iconClass: "bi bi-youtube", label: "YouTube", color: "#ff0000" };
-    } else if (hostname.includes("linkedin.com")) {
-      return { iconClass: "bi bi-linkedin", label: "LinkedIn", color: "#0077b5" };
-    } else if (hostname.includes("github.com")) {
-      return { iconClass: "bi bi-github", label: "GitHub", color: "#333" };
-    } else if (hostname.includes("tiktok.com")) {
-      return { iconClass: "bi bi-tiktok", label: "TikTok", color: "#000000" };
-    } else if (hostname.includes("spotify.com")) {
-      return { iconClass: "bi bi-spotify", label: "Spotify", color: "#1db954" };
-    } else {
-      return { iconClass: "bi bi-globe", label: "Website", color: "#3b82f6" };
-    }
-  } catch {
-    return { iconClass: "bi bi-globe", label: "Website", color: "#3b82f6" };
-  }
-};
-
 const PersonalFeed = () => {
   const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
@@ -214,13 +180,6 @@ const PersonalFeed = () => {
   const [postIdToLiked, setPostIdToLiked] = useState({});
   const [postIdToCommentInput, setPostIdToCommentInput] = useState({});
   const [modalPost, setModalPost] = useState(null);
-  const [uploadingCoverPhoto, setUploadingCoverPhoto] = useState(false);
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editingPost, setEditingPost] = useState(null);
-  const [editText, setEditText] = useState("");
-  const [editFiles, setEditFiles] = useState([]);
-  const [editing, setEditing] = useState(false);
-  const [deletingPostId, setDeletingPostId] = useState(null);
 
   const fetchProfile = async () => {
     try {
@@ -534,65 +493,6 @@ const PersonalFeed = () => {
     }
   };
 
-  const handleHidePost = (postId) => {
-    Modal.confirm({
-      title: "Xác nhận lưu trữ bài viết",
-      content: "Bạn có chắc chắn muốn lưu trữ bài viết này? Bài viết sẽ được chuyển vào kho lưu trữ và sẽ bị xóa vĩnh viễn sau 30 ngày nếu không khôi phục.",
-      okText: "Lưu trữ",
-      cancelText: "Hủy",
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          setDeletingPostId(postId);
-          await deletePost(postId);
-          message.success("Đã lưu trữ bài viết. Bài viết sẽ bị xóa vĩnh viễn sau 30 ngày nếu không khôi phục.");
-          setItems((prev) => prev.filter((p) => p._id !== postId));
-        } catch (e) {
-          message.error(e.message || "Không thể lưu trữ bài viết");
-        } finally {
-          setDeletingPostId(null);
-        }
-      },
-    });
-  };
-
-  const openEditModal = (post) => {
-    setEditingPost(post);
-    setEditText(post?.textContent || "");
-    setEditFiles([]);
-    setEditModalOpen(true);
-  };
-
-  const handleUpdatePost = async () => {
-    if (!editText.trim()) {
-      message.warning("Vui lòng nhập nội dung");
-      return;
-    }
-    if (!editingPost?._id) {
-      message.error("Không tìm thấy bài viết");
-      return;
-    }
-    try {
-      setEditing(true);
-      const payload = {
-        postType: "status_update",
-        textContent: editText.trim(),
-      };
-      await updatePost(editingPost._id, payload);
-      message.success("Cập nhật bài viết thành công");
-      setEditModalOpen(false);
-      setEditingPost(null);
-      setEditText("");
-      setEditFiles([]);
-      fetchData(1);
-      setPage(1);
-    } catch (e) {
-      message.error(e.message || "Cập nhật bài viết thất bại");
-    } finally {
-      setEditing(false);
-    }
-  };
-
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -623,69 +523,12 @@ const PersonalFeed = () => {
     >
       <div
         style={{
-          position: "relative",
-          height: 300,
-          background: profile?.coverPhotoUrl ? `url(${profile.coverPhotoUrl})` : "#131313",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
+          height: 180,
+          background: "#131313",
           borderRadius: 8,
           marginBottom: 16,
-          overflow: "hidden",
         }}
-      >
-        <Upload
-          showUploadList={false}
-          accept="image/*"
-          beforeUpload={() => {
-            return false;
-          }}
-          onChange={async (info) => {
-            const { file } = info;
-            const fileToUpload = file?.originFileObj || file;
-            
-            if (!fileToUpload) {
-              return;
-            }
-            
-            if (file?.status === 'done' || file?.status === 'uploading') {
-              return;
-            }
-            
-            try {
-              setUploadingCoverPhoto(true);
-              const res = await uploadMyCoverPhoto(fileToUpload);
-              const url = res?.data?.coverPhotoUrl || res?.data?.user?.coverPhotoUrl;
-              if (url) {
-                setProfile((prev) => prev ? { ...prev, coverPhotoUrl: url } : prev);
-                message.success('Cập nhật ảnh bìa thành công');
-                if (file) file.status = 'done';
-              } else {
-                if (file) file.status = 'error';
-              }
-            } catch (e) {
-              message.error(e.message || 'Tải ảnh bìa thất bại');
-              if (file) file.status = 'error';
-            } finally {
-              setUploadingCoverPhoto(false);
-            }
-          }}
-        >
-          <Button
-            loading={uploadingCoverPhoto}
-            type="primary"
-            style={{
-              position: "absolute",
-              bottom: 16,
-              right: 16,
-              background: "rgba(0, 0, 0, 0.6)",
-              borderColor: "#fff",
-              color: "#fff",
-            }}
-          >
-            {profile?.coverPhotoUrl ? "Thay đổi ảnh bìa" : "Thêm ảnh bìa"}
-          </Button>
-        </Upload>
-      </div>
+      />
       <div
         style={{
           display: "grid",
@@ -704,16 +547,25 @@ const PersonalFeed = () => {
           >
             <div
               style={{
-                height: 250,
+                height: 180,
                 borderRadius: "8px 8px 0 0",
-                backgroundImage: profile?.coverPhotoUrl
-                  ? `url(${profile.coverPhotoUrl})`
-                  : undefined,
                 backgroundColor: "#131313",
-                backgroundSize: "cover",
-                backgroundPosition: "center",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
               }}
-            />
+            >
+              <Avatar
+                size={120}
+                src={profile?.avatarUrl}
+                style={{
+                  backgroundColor: "#722ed1",
+                  border: "4px solid #0f0f10",
+                }}
+              >
+                {(profile?.displayName || profile?.username || "U")[0]}
+              </Avatar>
+            </div>
             <div
               style={{
                 display: "flex",
@@ -748,7 +600,7 @@ const PersonalFeed = () => {
               </Button>
             </div>
           </Card>
-          <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f", marginBottom: 12 }}>
+          <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
             <div
               style={{
                 display: "grid",
@@ -774,24 +626,6 @@ const PersonalFeed = () => {
               </div>
             </div>
           </Card>
-          <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
-            <Button
-              type="text"
-              block
-              onClick={() => navigate("/archived-posts")}
-              style={{
-                color: "#e5e7eb",
-                textAlign: "left",
-                height: "auto",
-                padding: "12px 16px",
-              }}
-            >
-              <Space>
-                <DeleteOutlined />
-                <span>Bài viết đã lưu trữ</span>
-              </Space>
-            </Button>
-          </Card>
         </div>
 
         <div>
@@ -808,12 +642,8 @@ const PersonalFeed = () => {
             }}
             onClick={() => setIsModalOpen(true)}
           >
-            <Avatar 
-              size={40} 
-              src={profile?.avatarUrl || profile?.avatar_url} 
-              style={{ backgroundColor: "#722ed1" }}
-            >
-              {(profile?.displayName || profile?.username || "U")[0]?.toUpperCase()}
+            <Avatar size={40} style={{ backgroundColor: "#722ed1" }}>
+              {(profile?.displayName || "U")[0]}
             </Avatar>
             <Input.TextArea
               placeholder="Có gì mới ?"
@@ -1139,34 +969,6 @@ const PersonalFeed = () => {
                         </Space>
                       </div>
                     </Space>
-                    <Dropdown
-                      menu={{
-                        items: [
-                          {
-                            key: "edit",
-                            label: "Chỉnh sửa bài post",
-                            icon: <EditOutlined />,
-                            onClick: () => openEditModal(post),
-                          },
-                          {
-                            key: "hide",
-                            label: "Lưu trữ bài post",
-                            icon: <DeleteOutlined />,
-                            danger: true,
-                            loading: deletingPostId === post._id,
-                            onClick: () => handleHidePost(post._id),
-                          },
-                        ],
-                      }}
-                      trigger={["click"]}
-                    >
-                      <Button
-                        type="text"
-                        icon={<MoreOutlined />}
-                        style={{ color: "#9ca3af" }}
-                        loading={deletingPostId === post._id}
-                      />
-                    </Dropdown>
                   </div>
                   {post?.textContent && (
                     <div
@@ -1578,133 +1380,30 @@ const PersonalFeed = () => {
           )}
         </Modal>
 
-        <Modal
-          open={editModalOpen}
-          title={
-            <span style={{ color: "#fff", fontWeight: 600 }}>
-              Chỉnh sửa bài đăng
-            </span>
-          }
-          onCancel={() => {
-            if (!editing) {
-              setEditModalOpen(false);
-              setEditingPost(null);
-              setEditText("");
-              setEditFiles([]);
-            }
-          }}
-          footer={
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                alignItems: "center",
-                gap: 12,
-              }}
-            >
-              <Button
-                shape="round"
-                onClick={() => {
-                  if (!editing) {
-                    setEditModalOpen(false);
-                    setEditingPost(null);
-                    setEditText("");
-                    setEditFiles([]);
-                  }
-                }}
-                style={{
-                  height: 44,
-                  borderRadius: 22,
-                  padding: 0,
-                  width: 108,
-                  background: "#1f1f1f",
-                  color: "#e5e7eb",
-                  borderColor: "#303030",
-                }}
-              >
-                Hủy
-              </Button>
-              <Button
-                shape="round"
-                type="primary"
-                loading={editing}
-                onClick={handleUpdatePost}
-                style={{
-                  height: 44,
-                  borderRadius: 22,
-                  padding: 0,
-                  width: 108,
-                  background: "#7c3aed",
-                  borderColor: "#7c3aed",
-                }}
-              >
-                Cập nhật
-              </Button>
-            </div>
-          }
-          styles={{
-            content: { background: "#0f0f10" },
-            header: {
-              background: "#0f0f10",
-              borderBottom: "1px solid #1f1f1f",
-            },
-          }}
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Input.TextArea
-              placeholder="Chia sẻ điều gì đó..."
-              autoSize={{ minRows: 3, maxRows: 8 }}
-              value={editText}
-              onChange={(e) => setEditText(e.target.value)}
-              maxLength={maxChars}
-              showCount
-            />
-          </div>
-        </Modal>
-
         <div>
           <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
             <div style={{ color: "#fff", fontWeight: 700, marginBottom: 12 }}>
               Find Me On
             </div>
-            {profile?.links && Array.isArray(profile.links) && profile.links.length > 0 ? (
-              <Space direction="vertical" size={12} style={{ width: "100%" }}>
-                {profile.links.map((link, index) => {
-                  const linkInfo = getLinkInfo(link);
-                  return (
-                    <Space key={index} style={{ width: "100%" }}>
-                      <div
-                        style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: 999,
-                          background: "#111",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: linkInfo.color,
-                          fontSize: 18,
-                        }}
-                      >
-                        <i className={linkInfo.iconClass}></i>
-                      </div>
-                      <a 
-                        href={link} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        style={{ color: "#fff", textDecoration: "none" }}
-                      >
-                        {linkInfo.label}
-                      </a>
-                    </Space>
-                  );
-                })}
-              </Space>
-            ) : (
-              <div style={{ color: "#9ca3af", fontSize: 14 }}>
-                No links available
+            <Space>
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 999,
+                  background: "#111",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#3b82f6",
+                }}
+              >
+                🌐
               </div>
-            )}
+              <a href="#" style={{ color: "#fff" }}>
+                Website
+              </a>
+            </Space>
           </Card>
         </div>
       </div>
