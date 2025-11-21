@@ -1,4 +1,4 @@
-import http from "../http";
+import api from "../api";
 
 export const getStoredUserId = () => {
   if (typeof window === "undefined") return undefined;
@@ -19,36 +19,36 @@ export const getStoredUserId = () => {
 };
 
 export const listPosts = async ({ page = 1, limit = 10 } = {}) => {
-  const { data } = await http.get("/posts", { params: { page, limit } });
-  return data;
+  const res = await api.get("/posts", { params: { page, limit } });
+  return res.data;
 };
 
 export const listMyPosts = async ({ page = 1, limit = 10 } = {}) => {
   const userId = getStoredUserId();
   if (!userId) {
     // Fallback to public posts if no user in localStorage
-    const { data } = await http.get("/posts", { params: { page, limit } });
-    return data;
+    const res = await api.get("/posts", { params: { page, limit } });
+    return res.data;
   }
-  const { data } = await http.get(`/posts/user/${userId}`, {
+  const res = await api.get(`/posts/user/${userId}`, {
     params: { page, limit },
   });
-  return data;
+  return res.data;
 };
 
 export const getPostById = async (postId) => {
-  const { data } = await http.get(`/posts/${postId}`);
-  return data;
+  const res = await api.get(`/posts/${postId}`);
+  return res.data;
 };
 
 export const listPostsByUser = async (
   userId,
   { page = 1, limit = 10 } = {}
 ) => {
-  const { data } = await http.get(`/posts/user/${userId}`, {
+  const res = await api.get(`/posts/user/${userId}`, {
     params: { page, limit },
   });
-  return data;
+  return res.data;
 };
 
 export const createPost = async (payload) => {
@@ -70,45 +70,45 @@ export const createPost = async (payload) => {
     }
   }
   // Do NOT set Content-Type manually for FormData; Axios will add boundary
-  const { data } = await http.post("/posts", finalPayload);
-  return data;
+  const res = await api.post("/posts", finalPayload);
+  return res.data;
 };
 
 export const updatePost = async (postId, payload) => {
   // Let Axios set correct headers when payload is FormData
-  const { data } = await http.put(`/posts/${postId}`, payload);
-  return data;
+  const res = await api.put(`/posts/${postId}`, payload);
+  return res.data;
 };
 
 export const deletePost = async (postId) => {
-  const { data } = await http.delete(`/posts/${postId}`);
-  return data;
+  const res = await api.delete(`/posts/${postId}`);
+  return res.data;
 };
 
 export const restorePost = async (postId) => {
-  const { data } = await http.post(`/posts/${postId}/restore`);
-  return data;
+  const res = await api.post(`/posts/${postId}/restore`);
+  return res.data;
 };
 
 export const listArchivedPosts = async ({ page = 1, limit = 10 } = {}) => {
-  const { data } = await http.get("/posts/archived", { params: { page, limit } });
-  return data;
+  const res = await api.get("/posts/archived", { params: { page, limit } });
+  return res.data;
 };
 
 export const permanentlyDeletePost = async (postId) => {
-  const { data } = await http.delete(`/posts/${postId}/permanent`);
-  return data;
+  const res = await api.delete(`/posts/${postId}/permanent`);
+  return res.data;
 };
 
 // ---- Likes ----
 export const likePost = async (postId) => {
-  const { data } = await http.post(`/posts/${postId}/like`);
-  return data;
+  const res = await api.post(`/posts/${postId}/like`);
+  return res.data;
 };
 
 export const unlikePost = async (postId) => {
-  const { data } = await http.delete(`/posts/${postId}/like`);
-  return data;
+  const res = await api.delete(`/posts/${postId}/like`);
+  return res.data;
 };
 
 // ---- Comments ----
@@ -118,8 +118,8 @@ export const createPostComment = async (
 ) => {
   const payload = { comment };
   if (parentCommentId) payload.parentCommentId = parentCommentId;
-  const { data } = await http.post(`/posts/${postId}/comments`, payload);
-  return data;
+  const res = await api.post(`/posts/${postId}/comments`, payload);
+  return res.data;
 };
 
 export const getPostComments = async (
@@ -128,20 +128,20 @@ export const getPostComments = async (
 ) => {
   const params = { page, limit };
   if (parentCommentId) params.parentCommentId = parentCommentId;
-  const { data } = await http.get(`/posts/${postId}/comments`, { params });
-  return data;
+  const res = await api.get(`/posts/${postId}/comments`, { params });
+  return res.data;
 };
 
 // Stats
 export const getPostStats = async (postId) => {
-  const { data } = await http.get(`/posts/${postId}/stats`);
-  return data;
+  const res = await api.get(`/posts/${postId}/stats`);
+  return res.data;
 };
 
 // Get list of users who liked a post
 export const getPostLikes = async (postId, { page = 1, limit = 50 } = {}) => {
-  const { data } = await http.get(`/posts/${postId}/likes`, { params: { page, limit } });
-  return data;
+  const res = await api.get(`/posts/${postId}/likes`, { params: { page, limit } });
+  return res.data;
 };
 
 // Helper: fetch all comments (paginate until done)

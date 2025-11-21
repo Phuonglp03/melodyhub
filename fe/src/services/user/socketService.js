@@ -5,14 +5,6 @@ const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:9999';
 console.log('[Socket.IO] SOCKET_URL resolved to:', SOCKET_URL);
 
 
-const getUserIdFromStorage = () => {
-  const userString = localStorage.getItem('user'); //
-  if (userString) {
-    const user = JSON.parse(userString);
-    return user._id || user.id || null;
-  }
-  return null;
-};
 
 let socket;
 

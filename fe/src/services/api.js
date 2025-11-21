@@ -2,7 +2,7 @@ import axios from 'axios';
 import { store } from '../redux/store';
 import { logout, updateTokens } from '../redux/authSlice';
 
-const API_BASE_URL= 'http://localhost:9999/api';
+const API_BASE_URL= 'https://api.melodyhub.website/api'; // 'http://localhost:9999/api'
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -41,10 +41,25 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     
+    // List of auth endpoints that should NOT trigger token refresh
+    const authEndpoints = [
+      '/auth/login',
+      '/auth/register',
+      '/auth/verify-email',
+      '/auth/resend-otp',
+      '/auth/forgot-password',
+      '/auth/reset-password',
+      '/auth/refresh-token',
+      '/auth/google'
+    ];
+    const isAuthEndpoint = authEndpoints.some(endpoint => 
+      originalRequest.url?.includes(endpoint)
+    );
+    
     // If 401 (Unauthorized) or 403 (Forbidden - token expired) and haven't retried yet
     const shouldRefreshToken = (error.response?.status === 401 || error.response?.status === 403) 
       && !originalRequest._retry
-      && originalRequest.url !== '/auth/refresh-token'; // Don't retry refresh token endpoint
+      && !isAuthEndpoint; // Don't retry for auth endpoints
     
     if (shouldRefreshToken) {
       originalRequest._retry = true;

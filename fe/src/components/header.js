@@ -15,6 +15,7 @@ import { livestreamService } from '../services/user/livestreamService';
 import useDMConversations from '../hooks/useDMConversations';
 import FloatingChatWindow from './FloatingChatWindow';
 import NotificationBell from './NotificationBell'; 
+import { onDmNew, offDmNew } from '../services/user/socketService';
 import './header.css';
 
 const { Header } = Layout;
@@ -40,27 +41,8 @@ const AppHeader = () => {
 
   const { conversations, loading, refresh } = useDMConversations();
 
-  // Cập nhật conversation trong cửa sổ chat khi có tin mới
-  useEffect(() => {
-    setActiveChatWindows((prev) =>
-      prev.map((window) => {
-        const updated = conversations.find((c) => c._id === window.conversation._id);
-        return updated ? { ...window, conversation: updated } : window;
-      })
-    );
-  }, [conversations]);
-
-  // Cho phép mở chat từ component khác (rất tiện)
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.detail?.conversation) openChatWindow(e.detail.conversation);
-    };
-    window.addEventListener('openChatWindow', handler);
-    return () => window.removeEventListener('openChatWindow', handler);
-  }, []);
-
   // Tính toán vị trí cửa sổ chat
-  const getNewWindowPosition = (isMinimized = false, windowsArray = null, targetIndex = null) => {
+  const getNewWindowPosition = useCallback((isMinimized = false, windowsArray = null, targetIndex = null) => {
     const windowWidth = 340;
     const avatarSize = 56;
     const avatarSpacing = 12;
@@ -79,28 +61,48 @@ const AppHeader = () => {
       const index = targetIndex !== null ? targetIndex : open.length;
       return { right: rightOffset + index * (windowWidth + spacing), bottom: 20 };
     }
-  };
+  }, [activeChatWindows]);
 
-  const openChatWindow = (conversation) => {
-    const existing = activeChatWindows.find((w) => w.conversation._id === conversation._id);
-    if (existing) {
-      if (existing.isMinimized) {
-        setActiveChatWindows((prev) =>
-          prev.map((w) => (w.id === existing.id ? { ...w, isMinimized: false } : w))
-        );
+  const recalculatePositions = useCallback((windows) => {
+    return windows.map((window) => {
+      const minimized = windows.filter((w) => w.isMinimized);
+      const open = windows.filter((w) => !w.isMinimized);
+
+      if (window.isMinimized) {
+        const index = minimized.findIndex((w) => w.id === window.id);
+        return { ...window, position: getNewWindowPosition(true, windows, index) };
+      } else {
+        const index = open.findIndex((w) => w.id === window.id);
+        return { ...window, position: getNewWindowPosition(false, windows, index) };
       }
-      return;
-    }
+    });
+  }, [getNewWindowPosition]);
 
-    const position = getNewWindowPosition();
-    const newWindow = {
-      id: `chat-${conversation._id}-${Date.now()}`,
-      conversation,
-      isMinimized: false,
-      position,
-    };
-    setActiveChatWindows((prev) => [...prev, newWindow]);
-  };
+  const openChatWindow = useCallback((conversation) => {
+    if (!conversation?._id) return;
+
+    setActiveChatWindows((prev) => {
+      const existing = prev.find((w) => w.conversation?._id === conversation._id);
+      if (existing) {
+        if (existing.isMinimized) {
+          const updated = prev.map((w) =>
+            w.id === existing.id ? { ...w, isMinimized: false } : w
+          );
+          return recalculatePositions(updated);
+        }
+        return prev;
+      }
+
+      const position = getNewWindowPosition(false, prev);
+      const newWindow = {
+        id: `chat-${conversation._id}-${Date.now()}`,
+        conversation,
+        isMinimized: false,
+        position,
+      };
+      return [...prev, newWindow];
+    });
+  }, [getNewWindowPosition, recalculatePositions]);
 
   const closeChatWindow = (windowId) => {
     setActiveChatWindows((prev) => {
@@ -123,20 +125,64 @@ const AppHeader = () => {
     });
   };
 
-  const recalculatePositions = (windows) => {
-    return windows.map((window) => {
-      const minimized = windows.filter((w) => w.isMinimized);
-      const open = windows.filter((w) => !w.isMinimized);
+  // Cập nhật conversation trong cửa sổ chat khi có tin mới
+  useEffect(() => {
+    setActiveChatWindows((prev) =>
+      prev.map((window) => {
+        const updated = conversations.find((c) => c._id === window.conversation._id);
+        return updated ? { ...window, conversation: updated } : window;
+      })
+    );
+  }, [conversations]);
 
-      if (window.isMinimized) {
-        const index = minimized.findIndex((w) => w.id === window.id);
-        return { ...window, position: getNewWindowPosition(true, windows, index) };
-      } else {
-        const index = open.findIndex((w) => w.id === window.id);
-        return { ...window, position: getNewWindowPosition(false, windows, index) };
-      }
-    });
-  };
+  // Cho phép mở chat từ component khác (rất tiện)
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.conversation) openChatWindow(e.detail.conversation);
+    };
+    window.addEventListener('openChatWindow', handler);
+    return () => window.removeEventListener('openChatWindow', handler);
+  }, [openChatWindow]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    const handleIncomingMessage = ({ conversationId, message }) => {
+      if (!conversationId || !message) return;
+      const senderInfo = typeof message.senderId === 'object' ? message.senderId : null;
+      const senderId = senderInfo?._id || senderInfo?.id || message.senderId;
+      if (!senderId || String(senderId) === String(currentUserId)) return;
+      if (isChatPage) return;
+
+      const matchedConversation = conversations.find((conv) => conv._id === conversationId);
+      const fallbackConversation = matchedConversation || {
+        _id: conversationId,
+        participants: [
+          senderInfo
+            ? {
+                _id: senderId,
+                displayName: senderInfo.displayName,
+                username: senderInfo.username,
+                avatarUrl: senderInfo.avatarUrl,
+              }
+            : null,
+          { _id: currentUserId },
+        ].filter(Boolean),
+        lastMessage: message.textPreview || message.text || '',
+        lastMessageAt: message.createdAt,
+        status: 'active',
+        unreadCounts: {
+          [currentUserId]: 1,
+        },
+      };
+
+      setChatPopoverVisible(false);
+      openChatWindow(fallbackConversation);
+    };
+
+    onDmNew(handleIncomingMessage);
+    return () => offDmNew(handleIncomingMessage);
+  }, [conversations, currentUserId, isChatPage, openChatWindow]);
 
   // Helper functions
   const getPeer = (conv) => {

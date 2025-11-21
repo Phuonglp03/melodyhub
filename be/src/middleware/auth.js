@@ -8,9 +8,6 @@ export const verifyToken = (req, res, next) => {
   const authHeader = req.headers.authorization || req.headers.Authorization;
   
   // Debug logging
-  console.log('[verifyToken] Auth header:', authHeader ? 'Present' : 'Missing');
-  console.log('[verifyToken] All headers:', Object.keys(req.headers));
-  
   if (!authHeader) {
     console.error('[verifyToken] No Authorization header found');
     return res.status(401).json({ message: 'Không tìm thấy access token' });
@@ -19,10 +16,7 @@ export const verifyToken = (req, res, next) => {
   // Extract Bearer token - trim whitespace and handle edge cases
   const trimmedHeader = authHeader.trim();
   const parts = trimmedHeader.split(/\s+/); // Split by any whitespace (space, tab, etc.)
-  
-  console.log('[verifyToken] Header parts count:', parts.length);
-  console.log('[verifyToken] First part:', parts[0]);
-  console.log('[verifyToken] Header length:', trimmedHeader.length);
+
   console.log('[verifyToken] Header first 100 chars:', trimmedHeader.substring(0, 100));
   
   // Check if starts with Bearer (case-insensitive)

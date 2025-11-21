@@ -1006,14 +1006,23 @@ const UserFeed = () => {
                 style={{
                   height: 250,
                   borderRadius: "8px 8px 0 0",
-                  backgroundImage: profile?.coverPhotoUrl
-                    ? `url(${profile.coverPhotoUrl})`
-                    : undefined,
                   backgroundColor: "#131313",
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
-              />
+              >
+                <Avatar
+                  size={150}
+                  src={profile?.avatarUrl}
+                  style={{
+                    backgroundColor: "#722ed1",
+                    border: "4px solid #0f0f10",
+                  }}
+                >
+                  {(profile?.displayName || profile?.username || "U")[0]}
+                </Avatar>
+              </div>
               <div
                 style={{
                   display: "flex",

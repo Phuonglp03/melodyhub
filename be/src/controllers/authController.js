@@ -6,27 +6,21 @@ import sendMail from './sendMail.js';
 import { validationResult } from 'express-validator';
 import crypto from 'crypto';
 import { DEFAULT_AVATAR_URL, normalizeAvatarUrl } from '../constants/userConstants.js';
+import { createAccessToken, createRefreshToken } from '../utils/jwt.js';
 
 // Generate access and refresh tokens
 export const generateTokens = async (user) => {
-  // Generate access token (15 minutes)
-  const accessToken = jwt.sign(
-    {
-      userId: user._id,
-      email: user.email,
-      roleId: user.roleId
-      // THÊM permissions vào payload JWT nếu cần
-    },
-    process.env.JWT_SECRET || 'your-secret-key',
-    { expiresIn: '1h' }
-  );
 
-  // Generate refresh token (7 days)
-  const refreshToken = jwt.sign(
-    { userId: user._id },
-    process.env.JWT_SECRET || 'your-secret-key',
-    { expiresIn: '7d' }
-  );
+  const accessToken = createAccessToken({
+    userId: user._id,
+    email: user.email,
+    roleId: user.roleId
+  });
+
+
+  const refreshToken = createRefreshToken({
+    userId: user._id
+  });
 
   // Save refresh token to user
   user.refreshToken = refreshToken;
@@ -77,26 +71,26 @@ const sendOTPEmail = async (email, otp) => {
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-    
+
     // Kiểm tra thông tin đăng nhập
     // ⭐ LƯU Ý: User.findOne({ email }).select('+passwordHash')
     // Nếu bạn muốn lấy 'permissions', nó phải được Mongoose trả về.
     const user = await User.findOne({ email }).select('+passwordHash +permissions'); // ⭐ THÊM +permissions
-    
+
     // Kiểm tra xem tài khoản có tồn tại không
     if (!user) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         success: false,
-        message: 'Email hoặc mật khẩu không đúng' 
+        message: 'Email hoặc mật khẩu không đúng'
       });
     }
 
     // Kiểm tra mật khẩu
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         success: false,
-        message: 'Email hoặc mật khẩu không đúng' 
+        message: 'Email hoặc mật khẩu không đúng'
       });
     }
 
@@ -109,7 +103,7 @@ export const login = async (req, res) => {
         email: user.email
       });
     }
-console.log('User Permissions after Mongoose query:', user.permissions);
+    console.log('User Permissions after Mongoose query:', user.permissions);
     const { accessToken, refreshToken } = await generateTokens(user);
 
     // Set refresh token vào httpOnly cookie
@@ -161,22 +155,33 @@ export const refreshToken = async (req, res) => {
     }
 
     // Xác thực refresh token
-    jwt.verify(refreshToken, process.env.JWT_SECRET || 'your-secret-key', (err, decoded) => {
+    jwt.verify(refreshToken, process.env.JWT_SECRET || 'your-secret-key', async (err, decoded) => {
       if (err) {
         return res.status(403).json({ message: 'Refresh token không hợp lệ hoặc đã hết hạn' });
       }
 
-      // Tạo access token mới
-      const accessToken = jwt.sign(
-        {
-          userId: user._id,
-          email: user.email,
-          roleId: user.roleId
-        },
-        process.env.JWT_SECRET || 'your-secret-key',
-        { expiresIn: '7d' }
-      );
 
+      const accessToken = createAccessToken({
+        userId: user._id,
+        email: user.email,
+        roleId: user.roleId
+      });
+
+      const newRefreshToken = createRefreshToken({
+        userId: user._id
+      });
+
+
+      user.refreshToken = newRefreshToken;
+      await user.save();
+
+      // Set refresh token mới vào httpOnly cookie
+      res.cookie('refreshToken', newRefreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'Lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 ngày
+      });
       res.json({
         token: accessToken,
         user: {
@@ -202,14 +207,14 @@ export const logout = async (req, res) => {
   try {
     // Lấy refresh token từ cookie
     const refreshToken = req.cookies.refreshToken;
-    
+
     if (!refreshToken) {
       return res.status(200).json({ message: 'Đăng xuất thành công' });
     }
 
     // Tìm user có refresh token này
     const user = await User.findOne({ refreshToken });
-    
+
     // Nếu tìm thấy user, xóa refresh token
     if (user) {
       user.refreshToken = undefined;
@@ -398,7 +403,52 @@ export const register = async (req, res) => {
       });
     }
 
-    const { fullName, email, password, birthday } = req.body;
+    const {
+      fullName,
+      email,
+      password,
+      birthday,
+      gender,
+      addressLine,
+      provinceCode,
+      provinceName,
+      districtCode,
+      districtName,
+      wardCode,
+      wardName
+    } = req.body;
+
+    const normalizedGender = gender?.toLowerCase();
+    const allowedGenders = ['male', 'female', 'other'];
+    if (!allowedGenders.includes(normalizedGender)) {
+      return res.status(400).json({
+        message: 'Giới tính không hợp lệ'
+      });
+    }
+
+    const requiredAddressFields = [
+      { value: addressLine, message: 'Địa chỉ chi tiết không được để trống' },
+      { value: provinceCode, message: 'Vui lòng chọn tỉnh/thành phố' },
+      { value: provinceName, message: 'Vui lòng chọn tỉnh/thành phố' },
+      { value: districtCode, message: 'Vui lòng chọn quận/huyện' },
+      { value: districtName, message: 'Vui lòng chọn quận/huyện' },
+      { value: wardCode, message: 'Vui lòng chọn phường/xã' },
+      { value: wardName, message: 'Vui lòng chọn phường/xã' }
+    ];
+
+    for (const field of requiredAddressFields) {
+      if (!field.value || (typeof field.value === 'string' && !field.value.trim())) {
+        return res.status(400).json({ message: field.message });
+      }
+    }
+
+    const normalizedAddressLine = addressLine.trim();
+    const fullLocation = [
+      normalizedAddressLine,
+      wardName.trim(),
+      districtName.trim(),
+      provinceName.trim()
+    ].filter(Boolean).join(', ');
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -433,6 +483,15 @@ export const register = async (req, res) => {
       username,
       displayName: fullName,
       birthday: birthday ? new Date(birthday) : null,
+      gender: normalizedGender,
+      addressLine: normalizedAddressLine,
+      provinceCode: provinceCode.toString(),
+      provinceName: provinceName.trim(),
+      districtCode: districtCode.toString(),
+      districtName: districtName.trim(),
+      wardCode: wardCode.toString(),
+      wardName: wardName.trim(),
+      location: fullLocation,
       otp,
       otpExpires,
       verifiedEmail: false,
@@ -459,7 +518,16 @@ export const register = async (req, res) => {
         displayName: newUser.displayName,
         roleId: newUser.roleId,
         verifiedEmail: newUser.verifiedEmail,
-        avatarUrl: DEFAULT_AVATAR_URL
+        avatarUrl: DEFAULT_AVATAR_URL,
+        gender: newUser.gender,
+        addressLine: newUser.addressLine,
+        provinceCode: newUser.provinceCode,
+        provinceName: newUser.provinceName,
+        districtCode: newUser.districtCode,
+        districtName: newUser.districtName,
+        wardCode: newUser.wardCode,
+        wardName: newUser.wardName,
+        location: newUser.location
       },
       requiresVerification: true
     });
@@ -509,7 +577,7 @@ const sendResetPasswordEmail = async (email, resetToken) => {
 
   try {
     // Assume 'sendMail' is an existing function to send the email
-    const result = await sendMail({ email, subject, html }); 
+    const result = await sendMail({ email, subject, html });
     if (result.success) {
       console.log('Reset password email sent successfully');
       return true;
@@ -536,11 +604,11 @@ export const forgotPassword = async (req, res) => {
     // Find user by email
     // Assume 'User' is your Mongoose/database model
     const user = await User.findOne({ email });
-    
+
     // Always return success to prevent email enumeration attack
     if (!user) {
-      return res.status(200).json({ 
-        message: 'If the email exists, we have sent password reset instructions' 
+      return res.status(200).json({
+        message: 'If the email exists, we have sent password reset instructions'
       });
     }
 
@@ -556,8 +624,8 @@ export const forgotPassword = async (req, res) => {
     // Send reset password email
     await sendResetPasswordEmail(user.email, resetToken);
 
-    res.status(200).json({ 
-      message: 'If the email exists, we have sent password reset instructions' 
+    res.status(200).json({
+      message: 'If the email exists, we have sent password reset instructions'
     });
   } catch (error) {
     console.error('Error in forgotPassword:', error);
@@ -573,21 +641,21 @@ export const resetPassword = async (req, res) => {
 
     // Validate input
     if (!token || !email || !newPassword) {
-      return res.status(400).json({ 
-        message: 'Missing required information' 
+      return res.status(400).json({
+        message: 'Missing required information'
       });
     }
 
     // Find user by email, matching token, and checking expiration
-    const user = await User.findOne({ 
+    const user = await User.findOne({
       email,
       resetPasswordToken: token,
       resetPasswordExpires: { $gt: Date.now() } // Check if token is not expired
     });
 
     if (!user) {
-      return res.status(400).json({ 
-        message: 'Invalid or expired password reset link' 
+      return res.status(400).json({
+        message: 'Invalid or expired password reset link'
       });
     }
 
@@ -600,11 +668,11 @@ export const resetPassword = async (req, res) => {
     user.passwordHash = passwordHash; // Assuming your user model uses 'passwordHash'
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
-    
+
     await user.save();
 
-    res.status(200).json({ 
-      message: 'Password reset successful. You can now log in with your new password.' 
+    res.status(200).json({
+      message: 'Password reset successful. You can now log in with your new password.'
     });
   } catch (error) {
     console.error('Error in resetPassword:', error);

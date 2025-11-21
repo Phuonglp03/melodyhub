@@ -1,4 +1,4 @@
-import http from "../http";
+import api from "../api";
 
 /**
  * Report a post
@@ -9,8 +9,8 @@ import http from "../http";
  * @returns {Promise<object>} Response data
  */
 export const reportPost = async (postId, reportData) => {
-  const { data } = await http.post(`/reports/posts/${postId}`, reportData);
-  return data;
+  const res = await api.post(`/reports/posts/${postId}`, reportData);
+  return res.data;
 };
 
 /**
@@ -19,8 +19,8 @@ export const reportPost = async (postId, reportData) => {
  * @returns {Promise<object>} Response data with reports array
  */
 export const getPostReports = async (postId) => {
-  const { data } = await http.get(`/reports/posts/${postId}`);
-  return data;
+  const res = await api.get(`/reports/posts/${postId}`);
+  return res.data;
 };
 
 /**
@@ -29,8 +29,8 @@ export const getPostReports = async (postId) => {
  * @returns {Promise<object>} Response data with hasReported boolean
  */
 export const checkPostReport = async (postId) => {
-  const { data } = await http.get(`/reports/posts/${postId}/check`);
-  return data;
+  const res = await api.get(`/reports/posts/${postId}/check`);
+  return res.data;
 };
 
 /**
@@ -38,8 +38,8 @@ export const checkPostReport = async (postId) => {
  * @returns {Promise<object>} Response data with reports array
  */
 export const getAllReports = async () => {
-  const { data } = await http.get(`/reports/all`);
-  return data;
+  const res = await api.get(`/reports/all`);
+  return res.data;
 };
 
 /**
@@ -48,8 +48,8 @@ export const getAllReports = async () => {
  * @returns {Promise<object>} Response data
  */
 export const adminRestorePost = async (postId) => {
-  const { data } = await http.post(`/reports/posts/${postId}/restore`);
-  return data;
+  const res = await api.post(`/reports/posts/${postId}/restore`);
+  return res.data;
 };
 
 /**
@@ -58,7 +58,7 @@ export const adminRestorePost = async (postId) => {
  * @returns {Promise<object>} Response data
  */
 export const adminDeletePost = async (postId) => {
-  const { data } = await http.delete(`/reports/posts/${postId}`);
-  return data;
+  const res = await api.delete(`/reports/posts/${postId}`);
+  return res.data;
 };
 

@@ -2,9 +2,11 @@ import NodeMediaServer from 'node-media-server';
 import LiveRoom from '../models/LiveRoom.js';
 import { getSocketIo } from './socket.js'; // Import từ file socket.js
 import net from 'net';
+import fs from 'fs';
+import path from 'path';
 
 export const nodeMediaServer = () => {
-  // Cấu hình chi tiết cho Node Media Server
+  // Cấu hình chi tiết cho Node Media Server (Production-optimized)
   const config = {
     logType: 3,
     rtmp: {
@@ -17,7 +19,21 @@ export const nodeMediaServer = () => {
     http: {
       port: 8000, 
       mediaroot: './media', 
-      allow_origin: '*'
+      allow_origin: '*',
+      cors: {
+        allowOrigin: '*',
+        allowMethods: ['GET', 'HEAD', 'OPTIONS'],
+        allowHeaders: ['Range', 'Content-Type', 'Accept']
+      },
+      setHeaders: (res, path, stat) => {
+        // Nếu là file playlist (.m3u8), cấm tuyệt đối việc cache
+        if (path.endsWith('.m3u8')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+          res.setHeader('Expires', '0');
+          res.setHeader('Pragma', 'no-cache');
+        }
+      }
+      
     },
     trans: {
       ffmpeg: process.env.FFMPEG_PATH || 'ffmpeg',
@@ -25,10 +41,25 @@ export const nodeMediaServer = () => {
         {
           app: 'live',
           hls: true,
-          hlsFlags: '[hls_time=6:hls_list_size=0:hls_flags=append_list]',
-          hlsKeep: true,
-          flv: true,
-          flvFlags: '[flv_fragment_duration=10]'
+          hlsFlags: '[hls_time=2:hls_list_size=10:hls_flags=delete_segments+append_list]',
+          hlsKeep: true, 
+          vc: "libx264", 
+          vcParam: [
+            "-preset", "veryfast",       // Xử lý nhanh để không trễ
+            "-tune", "zerolatency",      // Tối ưu cho live
+            "-b:v", "2500k",             // GIỚI HẠN Bitrate video ở mức 2.5Mbps (An toàn cho GCS)
+            "-maxrate", "3000k",         // Không bao giờ vượt quá 3Mbps
+            "-bufsize", "6000k",
+            "-g", "60",                  // Keyframe mỗi 2 giây (nếu fps=30) - Bắt buộc cho HLS mượt
+            "-sc_threshold", "0",        // Không tự ý chèn keyframe linh tinh
+            "-profile:v", "main",        // Profile chuẩn cho mọi thiết bị
+            "-pix_fmt", "yuv420p"        // Màu chuẩn, tránh lỗi đen màn hình trên VLC
+          ],
+          
+          // 2. Ép chuyển mã lại âm thanh
+          ac: "aac",
+          acParam: ["-ab", "128k", "-ac", "2", "-ar", "44100"],
+          dash: false
         }
       ]
     },
@@ -137,6 +168,15 @@ export const nodeMediaServer = () => {
         io.emit('stream-ended', { roomId: room._id, title: room.title });
         io.to(room._id.toString()).emit('stream-status-ended'); 
         console.log(`[NMS] Stream kết thúc (${room.status}), thông báo cho phòng: ${room._id}`);
+        
+        // Cleanup: Xóa HLS segments sau khi stream ended (sau 5 phút)
+        setTimeout(() => {
+          const streamDir = path.join(config.http.mediaroot, 'live', streamKey);
+          if (fs.existsSync(streamDir)) {
+            fs.rmSync(streamDir, { recursive: true, force: true });
+            console.log(`[NMS] Đã xóa stream directory: ${streamDir}`);
+          }
+        }, 5 * 60 * 1000); // 5 phút để viewers có thể xem replay nếu cần
       }
     } catch (err) {
       console.error(`[NMS] Lỗi khi cập nhật trạng thái 'ended': ${err.message}`);
