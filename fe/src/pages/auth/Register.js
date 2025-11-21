@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Form, Input, Button, message, ConfigProvider } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Form, Input, Button, message, ConfigProvider, Select } from 'antd';
 import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
@@ -16,6 +16,52 @@ const Register = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [messageApi, contextHolder] = message.useMessage();
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [provinces, setProvinces] = useState([]);
+  const [districts, setDistricts] = useState([]);
+  const [wards, setWards] = useState([]);
+  const [selectedProvince, setSelectedProvince] = useState(null);
+  const [selectedDistrict, setSelectedDistrict] = useState(null);
+
+  useEffect(() => {
+    const fetchProvinces = async () => {
+      setAddressLoading(true);
+      try {
+        const response = await axios.get('http://localhost:9999/api/locations/provinces', {
+          params: { depth: 3 },
+          withCredentials: true
+        });
+        setProvinces(response.data || []);
+      } catch (error) {
+        console.error('Failed to fetch provinces', error);
+        messageApi.error('Không thể tải danh sách địa chỉ. Vui lòng thử lại sau.');
+      } finally {
+        setAddressLoading(false);
+      }
+    };
+
+    fetchProvinces();
+  }, [messageApi]);
+
+  const handleProvinceChange = (value) => {
+    form.setFieldsValue({ district: undefined, ward: undefined });
+    const province = provinces.find((item) => item.code.toString() === value);
+    setSelectedProvince(province || null);
+    setDistricts(province?.districts || []);
+    setSelectedDistrict(null);
+    setWards([]);
+  };
+
+  const handleDistrictChange = (value) => {
+    form.setFieldsValue({ ward: undefined });
+    const district = (selectedProvince?.districts || []).find((item) => item.code.toString() === value);
+    setSelectedDistrict(district || null);
+    setWards(district?.wards || []);
+  };
+
+  const handleWardChange = () => {
+    // No additional logic needed for now, but function retained for clarity
+  };
 
   const onFinish = async (values) => {
     setLoading(true);
@@ -38,11 +84,23 @@ const Register = () => {
         birthday = `${year}-${month}-${day}`;
       }
       
+      const province = provinces.find((item) => item.code.toString() === values.province);
+      const district = province?.districts?.find((item) => item.code.toString() === values.district);
+      const ward = district?.wards?.find((item) => item.code.toString() === values.ward);
+
       const requestData = {
         fullName: values.name,
         email: values.email,
         password: values.password,
-        birthday: birthday
+        birthday: birthday,
+        gender: values.gender,
+        addressLine: values.addressLine?.trim(),
+        provinceCode: province?.code?.toString(),
+        provinceName: province?.name,
+        districtCode: district?.code?.toString(),
+        districtName: district?.name,
+        wardCode: ward?.code?.toString(),
+        wardName: ward?.name
       };
       
       console.log('Sending registration data:', requestData);
@@ -153,6 +211,22 @@ const Register = () => {
               </Form.Item>
 
               <Form.Item
+                label={<span className="form-label">Gender</span>}
+                name="gender"
+                rules={[{ required: true, message: 'Please select your gender!' }]}
+              >
+                <Select
+                  placeholder="Select your gender"
+                  className="custom-input"
+                  options={[
+                    { value: 'male', label: 'Male' },
+                    { value: 'female', label: 'Female' },
+                    { value: 'other', label: 'Other' }
+                  ]}
+                />
+              </Form.Item>
+
+              <Form.Item
                 label={<span className="form-label">Birthday (Optional)</span>}
               >
                 <div className="birthday-inputs">
@@ -196,6 +270,76 @@ const Register = () => {
                     />
                   </Form.Item>
                 </div>
+              </Form.Item>
+
+              <Form.Item
+                label={<span className="form-label">Address Line</span>}
+                name="addressLine"
+                rules={[{ required: true, message: 'Please enter your street address!' }]}
+              >
+                <Input 
+                  placeholder="House number, street name, etc."
+                  className="custom-input"
+                />
+              </Form.Item>
+
+              <Form.Item
+                label={<span className="form-label">Province / City</span>}
+                name="province"
+                rules={[{ required: true, message: 'Please select your province/city!' }]}
+              >
+                <Select
+                  placeholder="Select province/city"
+                  className="custom-input"
+                  loading={addressLoading && provinces.length === 0}
+                  options={provinces.map((province) => ({
+                    label: province.name,
+                    value: province.code.toString()
+                  }))}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={handleProvinceChange}
+                />
+              </Form.Item>
+
+              <Form.Item
+                label={<span className="form-label">District</span>}
+                name="district"
+                rules={[{ required: true, message: 'Please select your district!' }]}
+              >
+                <Select
+                  placeholder="Select district"
+                  className="custom-input"
+                  disabled={!selectedProvince}
+                  loading={addressLoading && !!selectedProvince && districts.length === 0}
+                  options={districts.map((district) => ({
+                    label: district.name,
+                    value: district.code.toString()
+                  }))}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={handleDistrictChange}
+                />
+              </Form.Item>
+
+              <Form.Item
+                label={<span className="form-label">Ward</span>}
+                name="ward"
+                rules={[{ required: true, message: 'Please select your ward!' }]}
+              >
+                <Select
+                  placeholder="Select ward"
+                  className="custom-input"
+                  disabled={!selectedDistrict}
+                  loading={addressLoading && !!selectedDistrict && wards.length === 0}
+                  options={wards.map((ward) => ({
+                    label: ward.name,
+                    value: ward.code.toString()
+                  }))}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={handleWardChange}
+                />
               </Form.Item>
 
               <Form.Item>
