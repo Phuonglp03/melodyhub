@@ -18,7 +18,7 @@ import {
   onViewerCountUpdate,
   onChatError
 } from '../../../services/user/socketService';
-import { Dropdown, Button, Modal, Input, Form, Select, Badge, Avatar, message, Card } from 'antd';
+import { Dropdown, Button, Modal, Input, Form, Badge, Avatar, message } from 'antd';
 import { 
   MoreOutlined, 
   SendOutlined, 
@@ -36,7 +36,6 @@ import EmojiPicker from 'emoji-picker-react';
 import LiveVideo from '../../../components/LiveVideo';
 
 const { TextArea } = Input;
-const { Option } = Select;
 
 const LiveStreamLive = () => {
   const { roomId } = useParams();
@@ -63,7 +62,6 @@ const LiveStreamLive = () => {
   const [currentViewers, setCurrentViewers] = useState(0);
   const [viewersList, setViewersList] = useState([]);
   
-  // 🛠️ FIX: Khởi tạo là mảng rỗng để tránh lỗi map
   const [bannedUsers, setBannedUsers] = useState([]);
 
   // Stats
@@ -98,11 +96,10 @@ const LiveStreamLive = () => {
         }
 
         setRoom(roomData);
-        // Pre-fill form
+        // Pre-fill form (Chỉ Title và Description)
         editForm.setFieldsValue({
           title: roomData.title,
-          description: roomData.description,
-          privacyType: roomData.privacyType
+          description: roomData.description
         });
 
         const hlsUrl = roomData.playbackUrls?.hls;
@@ -112,7 +109,6 @@ const LiveStreamLive = () => {
         joinRoom(roomId);
         setMessages(history.slice(-50));
         
-        // 🛠️ FIX: Đảm bảo luôn là mảng
         setBannedUsers(roomData.bannedUsers || []);
         
       } catch (err) {
@@ -158,18 +154,6 @@ const LiveStreamLive = () => {
 
     onChatError((errorMsg) => {
       message.error(errorMsg);
-    });
-
-    onViewerCountUpdate((data) => {
-      console.log('[Socket] Cập nhật viewer count:', data);
-      if (data.roomId === roomId) {
-        setCurrentViewers(data.currentViewers || 0);
-      }
-    });
-
-    onChatError((errorMsg) => {
-      console.error('[Socket] Chat error:', errorMsg);
-      alert(errorMsg || 'Không thể gửi tin nhắn.');
     });
 
     return () => {
@@ -253,6 +237,7 @@ const LiveStreamLive = () => {
     });
   };
 
+  // ✅ Cập nhật: Chỉ update Title và Description
   const handleUpdateInfo = async (values) => {
     setIsSubmitting(true);
     try {
@@ -260,9 +245,7 @@ const LiveStreamLive = () => {
         title: values.title, 
         description: values.description 
       });
-      if (values.privacyType !== room.privacyType) {
-        await livestreamService.updatePrivacy(roomId, values.privacyType);
-      }
+      
       message.success("Đã cập nhật thông tin");
       setIsEditModalVisible(false);
     } catch (err) {
@@ -272,7 +255,6 @@ const LiveStreamLive = () => {
     }
   };
 
-  // 🛠️ FIX: Cập nhật danh sách Ban ngay lập tức khi Ban từ chat
   const handleBanAction = async (userTarget, messageId, type) => {
     const userId = userTarget._id || userTarget.id;
     try {
@@ -285,7 +267,6 @@ const LiveStreamLive = () => {
       
       message.success(`Đã chặn ${userTarget.displayName}`);
 
-      // Thêm vào state bannedUsers ngay lập tức để hiện trong Modal
       setBannedUsers(prev => {
         if (prev.find(u => u._id === userId)) return prev;
         return [...prev, userTarget]; 
@@ -305,11 +286,9 @@ const LiveStreamLive = () => {
     } catch (e) { console.error(e); }
   };
 
-  // 🛠️ FIX: Hàm Unban hoạt động chính xác
   const handleUnban = async (userId) => {
     try {
       await livestreamService.unbanUser(roomId, userId);
-      // Xóa khỏi danh sách local
       setBannedUsers(prev => prev.filter(u => u._id !== userId));
       message.success("Đã bỏ chặn");
     } catch (e) { 
@@ -399,7 +378,6 @@ const LiveStreamLive = () => {
               </div>
             </div>
 
-            {/* 🛠️ FIX: Card cho Người bị chặn - Bấm vào để mở Modal */}
             <div 
               onClick={() => setIsBannedModalVisible(true)}
               style={{ background: '#1f1f23', padding: '16px', borderRadius: '8px', cursor: 'pointer', border: '1px solid #2f2f35', transition: '0.2s' }}
@@ -496,27 +474,24 @@ const LiveStreamLive = () => {
 
       {/* --- MODALS --- */}
       
-      {/* Edit Info Modal */}
+      {/* Edit Info Modal - Đã xóa trường Privacy */}
       <Modal
-        title="Chỉnh sửa thông tin luồng"
+        title="Chỉnh sửa thông tin"
         open={isEditModalVisible}
         onCancel={() => setIsEditModalVisible(false)}
         footer={null}
         destroyOnClose
       >
         <Form form={editForm} layout="vertical" onFinish={handleUpdateInfo}>
-          <Form.Item name="title" label="Tiêu đề" rules={[{ required: true }]}>
+          <Form.Item name="title" label="Tiêu đề" rules={[{ required: true, message: 'Vui lòng nhập tiêu đề' }]}>
             <Input placeholder="Nhập tiêu đề livestream" />
           </Form.Item>
           <Form.Item name="description" label="Mô tả">
             <TextArea rows={4} placeholder="Mô tả nội dung..." />
           </Form.Item>
-          <Form.Item name="privacyType" label="Quyền riêng tư">
-            <Select>
-              <Option value="public">Công khai</Option>
-              <Option value="follow_only">Chỉ người theo dõi</Option>
-            </Select>
-          </Form.Item>
+          
+          {/* Đã xóa Form.Item PrivacyType */}
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
             <Button onClick={() => setIsEditModalVisible(false)}>Hủy</Button>
             <Button type="primary" htmlType="submit" loading={isSubmitting}>Lưu thay đổi</Button>
@@ -545,7 +520,7 @@ const LiveStreamLive = () => {
         </div>
       </Modal>
 
-      {/* 🛠️ FIX: Banned Users Modal - Nơi để Bỏ chặn (Unban) */}
+      {/* Banned Users Modal */}
       <Modal
         title={`Danh sách chặn (${bannedUsers.length})`}
         open={isBannedModalVisible}
@@ -577,7 +552,6 @@ const LiveStreamLive = () => {
       </Modal>
 
     </div>
-    </>
   );
 };
 
