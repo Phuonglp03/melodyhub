@@ -17,6 +17,7 @@ export const initSocket = (explicitUserId) => {
     console.log('[Socket.IO] Attempting connection to:', SOCKET_URL);
     socket = io(SOCKET_URL, {
       query: { userId: userId },
+      transports: ['websocket'],
     });
 
     socket.on('connect', () => {
