@@ -6,6 +6,7 @@ import ProjectCollaborator from "../models/ProjectCollaborator.js";
 import User from "../models/User.js";
 import Lick from "../models/Lick.js";
 import Instrument from "../models/Instrument.js";
+import PlayingPattern from "../models/PlayingPattern.js";
 import { getAllInstruments, getInstrumentById } from "../services/instrumentService.js";
 
 const TRACK_TYPES = ["audio", "midi", "backing"];
@@ -1560,6 +1561,42 @@ export const generateBackingTrack = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to generate backing track",
+      error: error.message,
+    });
+  }
+};
+
+// Get available instruments
+export const getInstruments = async (req, res) => {
+  try {
+    const instruments = await Instrument.find().sort({ name: 1 });
+    res.json({
+      success: true,
+      data: instruments,
+    });
+  } catch (error) {
+    console.error("Error fetching instruments:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch instruments",
+      error: error.message,
+    });
+  }
+};
+
+// Get rhythm patterns
+export const getRhythmPatterns = async (req, res) => {
+  try {
+    const patterns = await PlayingPattern.find().sort({ name: 1 });
+    res.json({
+      success: true,
+      data: patterns,
+    });
+  } catch (error) {
+    console.error("Error fetching rhythm patterns:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch rhythm patterns",
       error: error.message,
     });
   }

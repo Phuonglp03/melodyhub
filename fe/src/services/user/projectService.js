@@ -88,7 +88,7 @@ export const updateTimelineItem = async (projectId, itemId, updateData) => {
 // Bulk update timeline items (buffered autosave)
 export const bulkUpdateTimelineItems = async (projectId, items) => {
   try {
-    const res = await http.put(`/projects/${projectId}/timeline/items/bulk`, {
+    const res = await api.put(`/projects/${projectId}/timeline/items/bulk`, {
       items,
     });
     return res.data;
@@ -176,7 +176,7 @@ export const getInstruments = async () => {
 // Get rhythm patterns
 export const getRhythmPatterns = async () => {
   try {
-    const res = await http.get("/projects/rhythm-patterns");
+    const res = await api.get("/projects/rhythm-patterns");
     return res.data;
   } catch (error) {
     console.error("Error fetching rhythm patterns:", error);
@@ -187,7 +187,7 @@ export const getRhythmPatterns = async () => {
 // Apply rhythm pattern to timeline item
 export const applyRhythmPattern = async (projectId, itemId, rhythmPatternId) => {
   try {
-    const res = await http.put(
+    const res = await api.put(
       `/projects/${projectId}/timeline/items/${itemId}/apply-pattern`,
       { rhythmPatternId }
     );
@@ -201,7 +201,7 @@ export const applyRhythmPattern = async (projectId, itemId, rhythmPatternId) => 
 // Generate backing track from chord progression
 export const generateBackingTrack = async (projectId, data) => {
   try {
-    const res = await http.post(`/projects/${projectId}/generate-backing`, data);
+    const res = await api.post(`/projects/${projectId}/generate-backing`, data);
     return res.data;
   } catch (error) {
     console.error("Error generating backing track:", error);
@@ -212,7 +212,7 @@ export const generateBackingTrack = async (projectId, data) => {
 // Generate AI backing track with Suno
 export const generateAIBackingTrack = async (projectId, data) => {
   try {
-    const res = await http.post(`/projects/${projectId}/generate-ai-backing`, data);
+    const res = await api.post(`/projects/${projectId}/generate-ai-backing`, data);
     return res.data;
   } catch (error) {
     console.error("Error generating AI backing track:", error);
