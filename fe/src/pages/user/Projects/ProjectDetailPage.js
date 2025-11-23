@@ -132,10 +132,141 @@ const parseMidiNotes = (value) => {
   return [];
 };
 
+/**
+ * Convert MIDI note number to note name (C, C#, D, etc.)
+ */
+const midiToNoteName = (midiNote) => {
+  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const octave = Math.floor(midiNote / 12) - 1;
+  const note = midiNote % 12;
+  return noteNames[note] + octave;
+};
+
+/**
+ * Convert MIDI note number to note name without octave (C, C#, D, etc.)
+ */
+const midiToNoteNameNoOctave = (midiNote) => {
+  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const note = midiNote % 12;
+  return noteNames[note];
+};
+
+/**
+ * Get chord degree in a key (I, ii, iii, IV, V, vi, vii°, bII, #IV, etc.)
+ */
+const getChordDegree = (chordName, key) => {
+  if (!chordName || !key) return null;
+  
+  // Parse key (e.g., "C Major", "A Minor", "Bb Major")
+  const keyMatch = key.match(/^([A-G][#b]?)\s*(Major|Minor|maj|min)$/i);
+  if (!keyMatch) return null;
+  
+  const keyRoot = keyMatch[1];
+  const isMinor = /minor|min/i.test(keyMatch[2]);
+  
+  // Parse chord root (e.g., "Am" -> "A", "C#maj7" -> "C#", "Bb7" -> "Bb")
+  const chordMatch = chordName.match(/^([A-G][#b]?)/);
+  if (!chordMatch) return null;
+  
+  const chordRoot = chordMatch[1];
+  
+  // Convert all note names to semitone indices (0-11)
+  const noteToIndex = (note) => {
+    const noteMap = {
+      'C': 0, 'C#': 1, 'Db': 1,
+      'D': 2, 'D#': 3, 'Eb': 3,
+      'E': 4,
+      'F': 5, 'F#': 6, 'Gb': 6,
+      'G': 7, 'G#': 8, 'Ab': 8,
+      'A': 9, 'A#': 10, 'Bb': 10,
+      'B': 11
+    };
+    return noteMap[note] !== undefined ? noteMap[note] : null;
+  };
+  
+  const keyIndex = noteToIndex(keyRoot);
+  const chordIndex = noteToIndex(chordRoot);
+  
+  if (keyIndex === null || chordIndex === null) return null;
+  
+  // Calculate semitone difference from key root
+  let semitoneDiff = (chordIndex - keyIndex + 12) % 12;
+  
+  // Diatonic scale degrees (major and minor)
+  const majorScaleDegrees = [0, 2, 4, 5, 7, 9, 11]; // C, D, E, F, G, A, B
+  const minorScaleDegrees = [0, 2, 3, 5, 7, 8, 10]; // C, D, Eb, F, G, Ab, Bb (natural minor)
+  
+  const scaleDegrees = isMinor ? minorScaleDegrees : majorScaleDegrees;
+  
+  // Diatonic degree names
+  const majorDegreeNames = ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°'];
+  const minorDegreeNames = ['i', 'ii°', 'III', 'iv', 'v', 'VI', 'VII'];
+  const degreeNames = isMinor ? minorDegreeNames : majorDegreeNames;
+  
+  // Check if it's a diatonic chord
+  const diatonicIndex = scaleDegrees.indexOf(semitoneDiff);
+  if (diatonicIndex !== -1) {
+    return degreeNames[diatonicIndex];
+  }
+  
+  // Handle chromatic alterations (bII, #IV, etc.)
+  // Find the closest diatonic degree
+  let closestDiatonic = 0;
+  let minDistance = 12;
+  for (let i = 0; i < scaleDegrees.length; i++) {
+    const distance = Math.min(
+      Math.abs(semitoneDiff - scaleDegrees[i]),
+      Math.abs(semitoneDiff - scaleDegrees[i] - 12),
+      Math.abs(semitoneDiff - scaleDegrees[i] + 12)
+    );
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestDiatonic = i;
+    }
+  }
+  
+  // Calculate the alteration (how many semitones away from diatonic)
+  const diatonicSemitone = scaleDegrees[closestDiatonic];
+  let alteration = semitoneDiff - diatonicSemitone;
+  if (alteration > 6) alteration -= 12;
+  if (alteration < -6) alteration += 12;
+  
+  // If it's exactly a diatonic note, return it (shouldn't happen here, but just in case)
+  if (alteration === 0) {
+    return degreeNames[closestDiatonic];
+  }
+  
+  // Build the altered degree name
+  const baseDegree = degreeNames[closestDiatonic];
+  const isUppercase = baseDegree[0] === baseDegree[0].toUpperCase();
+  const degreeNum = baseDegree.replace(/[°b#]/g, ''); // Remove existing symbols
+  
+  // Add flat or sharp prefix
+  let prefix = '';
+  if (alteration === -1) prefix = 'b';
+  else if (alteration === 1) prefix = '#';
+  else if (alteration === -2) prefix = 'bb';
+  else if (alteration === 2) prefix = '##';
+  else return null; // Too far from diatonic
+  
+  // Preserve case and special symbols
+  const preservedSuffix = baseDegree.match(/[°b#]+$/)?.[0] || '';
+  return prefix + degreeNum + preservedSuffix;
+};
+
+/**
+ * Check if a chord belongs to a key
+ */
+const isChordInKey = (chordName, key) => {
+  return getChordDegree(chordName, key) !== null;
+};
+
 const normalizeChordLibraryItem = (chord) => ({
   ...chord,
   chordName: chord.chordName || chord.name || chord.label || "Chord",
   midiNotes: parseMidiNotes(chord.midiNotes),
+  // Add note names for display
+  noteNames: parseMidiNotes(chord.midiNotes).map(midiToNoteNameNoOctave),
 });
 
 const normalizeChordEntry = (entry) => {
@@ -302,6 +433,8 @@ const ProjectDetailPage = () => {
 
   // UI State
   const [activeTab, setActiveTab] = useState("lick-library"); // "lick-library", "midi-editor", "instrument"
+  const [sidePanelOpen, setSidePanelOpen] = useState(true); // Side panel visibility
+  const [sidePanelWidth, setSidePanelWidth] = useState(320); // Side panel width (resizable)
   const [selectedLick, setSelectedLick] = useState(null);
   const [showLickLibrary, setShowLickLibrary] = useState(true);
   const [lickSearchTerm, setLickSearchTerm] = useState("");
@@ -802,13 +935,15 @@ const ProjectDetailPage = () => {
   );
 
   const chordPalette = useMemo(
-    () =>
-      chordLibrary.length
-        ? chordLibrary
-        : DEFAULT_FALLBACK_CHORDS.map((chord) =>
-            normalizeChordLibraryItem(chord)
-          ),
-    [chordLibrary]
+    () => {
+      // Filter chords by project key if available
+      const sourceChords = chordLibrary.length ? chordLibrary : DEFAULT_FALLBACK_CHORDS;
+      const filtered = project?.key
+        ? sourceChords.filter((chord) => isChordInKey(chord.chordName || chord.name, project.key))
+        : sourceChords;
+      return filtered.map((chord) => normalizeChordLibraryItem(chord));
+    },
+    [chordLibrary, project?.key]
   );
 
   const reorderChordProgression = (fromIndex, toIndex) => {
@@ -2995,7 +3130,410 @@ const ProjectDetailPage = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Collapsible Side Panel (Tools/Libraries) */}
+        <div
+          className={`bg-gray-950 border-r border-gray-800 flex flex-col transition-all duration-300 ease-in-out ${
+            sidePanelOpen ? "w-80" : "w-0"
+          } overflow-hidden`}
+          style={{ width: sidePanelOpen ? `${sidePanelWidth}px` : '0px' }}
+        >
+          {sidePanelOpen && (
+            <>
+              {/* Panel Header */}
+              <div className="p-3 border-b border-gray-800 flex items-center justify-between">
+                <h3 className="text-white font-semibold text-sm">Tools & Libraries</h3>
+                <button
+                  onClick={() => setSidePanelOpen(false)}
+                  className="text-gray-400 hover:text-white p-1"
+                  title="Hide panel"
+                >
+                  <FaTimes size={14} />
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex items-center border-b border-gray-800 bg-gray-900">
+                <button
+                  onClick={() => setActiveTab("lick-library")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors flex-1 ${
+                    activeTab === "lick-library"
+                      ? "bg-gray-800 text-red-500 border-b-2 border-red-500"
+                      : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Lick Library
+                </button>
+                <button
+                  onClick={() => setActiveTab("backing-track")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors flex-1 ${
+                    activeTab === "backing-track"
+                      ? "bg-gray-800 text-indigo-500 border-b-2 border-indigo-500"
+                      : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Backing Track
+                </button>
+                <button
+                  onClick={() => setActiveTab("midi-editor")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors flex-1 ${
+                    activeTab === "midi-editor"
+                      ? "bg-gray-800 text-white border-b-2 border-white"
+                      : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  MIDI Editor
+                </button>
+                <button
+                  onClick={() => setActiveTab("instrument")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors flex-1 ${
+                    activeTab === "instrument"
+                      ? "bg-gray-800 text-white border-b-2 border-white"
+                      : "text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Instrument
+                </button>
+              </div>
+
+              {/* Tab Content - Scrollable */}
+              <div className="flex-1 overflow-y-auto">
+                {/* Lick Library Tab */}
+                {activeTab === "lick-library" && (
+                  <div className="p-3 space-y-3">
+                    {/* Search */}
+                    <div className="relative">
+                      <FaSearch
+                        className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                        size={14}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Search licks..."
+                        value={lickSearchTerm}
+                        onChange={(e) => setLickSearchTerm(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-700 rounded px-3 pl-9 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      />
+                    </div>
+
+                    {/* Filters */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={selectedGenre || ""}
+                        onChange={(e) => setSelectedGenre(e.target.value || null)}
+                        className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs focus:outline-none"
+                      >
+                        <option value="">All Genres</option>
+                        {(tagGroups.genre || []).map((g) => (
+                          <option key={g} value={g}>
+                            {g}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={selectedType || ""}
+                        onChange={(e) => setSelectedType(e.target.value || null)}
+                        className="bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs focus:outline-none"
+                      >
+                        <option value="">All Types</option>
+                        {(tagGroups.type || []).map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Lick Grid */}
+                    <div className="grid grid-cols-1 gap-2 max-h-[calc(100vh-300px)] overflow-y-auto">
+                      {availableLicks.map((lick) => (
+                        <div
+                          key={lick._id}
+                          draggable
+                          onDragStart={() => handleDragStart(lick)}
+                          onDragEnd={() => setDraggedLick(null)}
+                          className="bg-gray-800 rounded p-2 cursor-grab active:cursor-grabbing hover:bg-gray-700 transition-colors"
+                        >
+                          <div className="text-white text-sm font-medium truncate">
+                            {lick.title}
+                          </div>
+                          <div className="text-gray-400 text-xs mt-1">
+                            {lick.genre} • {lick.type}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Backing Track Tab */}
+                {activeTab === "backing-track" && (
+                  <BackingTrackPanel
+                    chordLibrary={chordPalette}
+                    instruments={instruments}
+                    rhythmPatterns={rhythmPatterns}
+                    onAddChord={handleAddChordToTimeline}
+                    onGenerateBackingTrack={handleGenerateBackingTrack}
+                    onGenerateAIBackingTrack={handleGenerateAIBackingTrack}
+                    selectedInstrumentId={selectedInstrumentId}
+                    onInstrumentChange={setSelectedInstrumentId}
+                    selectedRhythmPatternId={selectedRhythmPatternId}
+                    onRhythmPatternChange={setSelectedRhythmPatternId}
+                    chordProgression={chordProgression}
+                    onRemoveChord={handleRemoveChord}
+                    loading={
+                      loadingChords || loadingInstruments || loadingRhythmPatterns
+                    }
+                    project={project}
+                  />
+                )}
+
+                {/* Chord Library Tab - Add as separate tab or include in backing track */}
+                {activeTab === "chord-library" && (
+                  <div className="p-3 space-y-3">
+                    <div className="mb-3">
+                      <h3 className="text-white font-semibold text-sm mb-1">
+                        Chord Library
+                      </h3>
+                      <p className="text-gray-400 text-xs">
+                        Chords filtered by project key: {project?.key || "All"}
+                      </p>
+                    </div>
+                    {loadingChords && (
+                      <div className="flex items-center justify-center py-4">
+                        <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-orange-500"></div>
+                      </div>
+                    )}
+                    {chordLibraryError && (
+                      <p className="text-xs text-red-400 mb-2">
+                        {chordLibraryError}. Showing defaults.
+                      </p>
+                    )}
+                    <div className="grid grid-cols-2 gap-1.5 max-h-[calc(100vh-200px)] overflow-y-auto">
+                      {chordPalette.map((chord) => {
+                        const key = chord._id || chord.chordId || chord.chordName;
+                        const isInProgression = chordProgression.some(
+                          (c) =>
+                            c.chordName === chord.chordName ||
+                            c.name === chord.chordName
+                        );
+                        return (
+                          <button
+                            key={key}
+                            draggable
+                            onDragStart={() => handleChordDragStart(chord)}
+                            onDragEnd={() => setDraggedChord(null)}
+                            onClick={() => handleAddChord(chord)}
+                            className={`group relative px-2.5 py-2 rounded-lg text-xs font-medium transition-all cursor-grab active:cursor-grabbing text-left border-2 ${
+                              isInProgression
+                                ? "bg-gradient-to-br from-green-600 to-green-700 border-green-500 text-white shadow-md"
+                                : "bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 border-blue-500 text-white hover:shadow-md"
+                            }`}
+                            title="Click to add to progression or drag to timeline"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <span className="block font-semibold text-sm">
+                                  {chord.chordName || "Chord"}
+                                </span>
+                                {project?.key && (
+                                  <span className="text-[10px] bg-purple-600/50 px-1.5 py-0.5 rounded font-medium">
+                                    {getChordDegree(chord.chordName || chord.name, project.key) || '?'}
+                                  </span>
+                                )}
+                              </div>
+                              {isInProgression && (
+                                <span className="text-[10px] bg-green-800/50 px-1 rounded">
+                                  ✓
+                                </span>
+                              )}
+                            </div>
+                            {chord.noteNames?.length ? (
+                              <span className="text-[10px] opacity-75 mt-0.5 block truncate">
+                                {chord.noteNames.slice(0, 4).join(", ")}
+                              </span>
+                            ) : chord.midiNotes?.length ? (
+                              <span className="text-[10px] opacity-75 mt-0.5 block truncate">
+                                {chord.midiNotes.slice(0, 4).map(midiToNoteNameNoOctave).join(", ")}
+                              </span>
+                            ) : null}
+                            <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 rounded-lg transition-colors"></div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {chordProgression.length > 0 && (
+                      <div className="mt-2 text-xs text-gray-400 text-center">
+                        {chordProgression.length} chord
+                        {chordProgression.length !== 1 ? "s" : ""} in progression
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* MIDI Editor Tab */}
+                {activeTab === "midi-editor" && (
+                  <div className="p-3 space-y-2">
+                    <div className="mb-3">
+                      <h3 className="text-white font-semibold text-sm mb-1">
+                        MIDI Editor
+                      </h3>
+                      <p className="text-gray-400 text-xs">
+                        Edit MIDI notes for timeline items
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 max-h-[calc(100vh-200px)] overflow-y-auto">
+                      {tracks.flatMap((track) =>
+                        (track.items || [])
+                          .filter(
+                            (item) =>
+                              item.type === "chord" ||
+                              item.type === "midi" ||
+                              (item.chordName && !item.lickId)
+                          )
+                          .map((item) => {
+                            const itemName =
+                              item.chordName ||
+                              item.title ||
+                              `Item at ${formatTransportTime(item.startTime || 0)}`;
+                            const isCustomized = item.isCustomized || false;
+                            const noteCount =
+                              item.customMidiEvents?.length ||
+                              item.midiNotes?.length ||
+                              0;
+
+                            return (
+                              <div
+                                key={item._id}
+                                className="bg-gray-800 rounded p-2 border border-gray-700 hover:border-gray-600 transition-colors"
+                              >
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="font-medium text-white text-xs">
+                                    {itemName}
+                                  </span>
+                                  {isCustomized && (
+                                    <span className="text-[10px] bg-purple-600/50 px-1 rounded">
+                                      Custom
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-500 mb-2">
+                                  {noteCount} notes • {formatTransportTime(item.duration || 0)}
+                                </div>
+                                <button
+                                  onClick={() => handleOpenMidiEditor(item)}
+                                  className="w-full px-2 py-1 bg-indigo-600 hover:bg-indigo-700 rounded text-white text-xs font-medium"
+                                >
+                                  Edit MIDI
+                                </button>
+                              </div>
+                            );
+                          })
+                      )}
+
+                      {tracks.every(
+                        (track) =>
+                          !track.items ||
+                          track.items.filter(
+                            (item) =>
+                              item.type === "chord" ||
+                              item.type === "midi" ||
+                              (item.chordName && !item.lickId)
+                          ).length === 0
+                      ) && (
+                        <div className="text-center py-8 text-gray-400 text-xs">
+                          <p>No editable MIDI items</p>
+                          <p className="mt-1">Add chords or generate backing track</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Instrument Tab */}
+                {activeTab === "instrument" && (
+                  <div className="p-3">
+                    <div className="mb-3">
+                      <h3 className="text-white font-semibold text-sm mb-1">
+                        Select Instrument
+                      </h3>
+                      <p className="text-gray-400 text-xs">
+                        Choose instrument for backing track
+                      </p>
+                    </div>
+
+                    {loadingInstruments ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-orange-500"></div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-2 max-h-[calc(100vh-200px)] overflow-y-auto">
+                        {instruments.map((instrument) => (
+                          <button
+                            key={instrument._id}
+                            onClick={() => handleSelectInstrument(instrument._id)}
+                            className={`p-3 rounded border-2 transition-all ${
+                              selectedInstrumentId === instrument._id
+                                ? "bg-orange-600 border-orange-500 text-white"
+                                : "bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600"
+                            }`}
+                          >
+                            <div className="text-center">
+                              <FaMusic className="mx-auto mb-1" size={16} />
+                              <div className="font-medium text-xs">
+                                {instrument.name}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Resize Handle */}
+        {sidePanelOpen && (
+          <div
+            className="w-1 bg-gray-800 hover:bg-gray-700 cursor-col-resize transition-colors"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startX = e.clientX;
+              const startWidth = sidePanelWidth;
+              
+              const handleMouseMove = (moveEvent) => {
+                const diff = startX - moveEvent.clientX;
+                const newWidth = Math.max(200, Math.min(500, startWidth + diff));
+                setSidePanelWidth(newWidth);
+              };
+              
+              const handleMouseUp = () => {
+                document.removeEventListener('mousemove', handleMouseMove);
+                document.removeEventListener('mouseup', handleMouseUp);
+              };
+              
+              document.addEventListener('mousemove', handleMouseMove);
+              document.addEventListener('mouseup', handleMouseUp);
+            }}
+          />
+        )}
+
+        {/* Toggle Side Panel Button */}
+        {!sidePanelOpen && (
+          <button
+            onClick={() => setSidePanelOpen(true)}
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-50 bg-gray-800 hover:bg-gray-700 text-white p-2 rounded-r-lg border-r border-gray-700 shadow-lg"
+            title="Show tools panel"
+          >
+            <FaPalette size={14} />
+          </button>
+        )}
+
+        {/* Timeline Area - Always Visible */}
         <div className="flex-1 flex flex-col bg-gray-900 overflow-hidden">
           <div className="flex border-b border-gray-800">
             <div className="w-64 bg-gray-950 border-r border-gray-800 p-4">
@@ -3579,408 +4117,6 @@ const ProjectDetailPage = () => {
             )}
           </div>
         </div>
-
-        {/* Right Panel - Libraries */}
-        <div className="w-80 bg-gray-950 border-l border-gray-800 flex flex-col">
-          {/* Backing Tracks */}
-          <div className="p-3 border-b border-gray-800">
-              <h3 className="text-white font-medium text-sm mb-2">
-                Backing Tracks
-              </h3>
-            <div className="relative">
-              <FaSearch
-                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-                size={14}
-              />
-              <input
-                type="text"
-                placeholder="Search..."
-                className="w-full bg-gray-800 border border-gray-700 rounded px-3 pl-9 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-              />
-            </div>
-          </div>
-
-          {/* Chord Library */}
-          <div className="p-3 border-b border-gray-800">
-            <div className="flex items-center justify-between mb-2">
-                <h3 className="text-white font-medium text-sm">
-                  Chord Library
-                </h3>
-              {loadingChords && (
-                <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-orange-500" />
-              )}
-            </div>
-            {chordLibraryError && (
-              <p className="text-xs text-red-400 mb-2">
-                {chordLibraryError}. Showing defaults.
-              </p>
-            )}
-              <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto">
-              {chordPalette.map((chord) => {
-                const key = chord._id || chord.chordId || chord.chordName;
-                  const isInProgression = chordProgression.some(
-                    (c) =>
-                      c.chordName === chord.chordName ||
-                      c.name === chord.chordName
-                  );
-                return (
-                  <button
-                    key={key}
-                    draggable
-                    onDragStart={() => handleChordDragStart(chord)}
-                    onDragEnd={() => setDraggedChord(null)}
-                    onClick={() => handleAddChord(chord)}
-                      className={`group relative px-2.5 py-2 rounded-lg text-xs font-medium transition-all cursor-grab active:cursor-grabbing text-left border-2 ${
-                        isInProgression
-                          ? "bg-gradient-to-br from-green-600 to-green-700 border-green-500 text-white shadow-md"
-                          : "bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 border-blue-500 text-white hover:shadow-md"
-                      }`}
-                      title="Click to add to progression or drag to timeline"
-                  >
-                      <div className="flex items-center justify-between">
-                        <span className="block font-semibold text-sm">
-                      {chord.chordName || "Chord"}
-                    </span>
-                        {isInProgression && (
-                          <span className="text-[10px] bg-green-800/50 px-1 rounded">
-                            ✓
-                          </span>
-                        )}
-                      </div>
-                    {chord.midiNotes?.length ? (
-                        <span className="text-[10px] opacity-75 mt-0.5 block truncate">
-                        {chord.midiNotes.slice(0, 4).join(", ")}
-                      </span>
-                    ) : null}
-                      <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 rounded-lg transition-colors"></div>
-                  </button>
-                );
-              })}
-            </div>
-              {chordProgression.length > 0 && (
-                <div className="mt-2 text-xs text-gray-400 text-center">
-                  {chordProgression.length} chord
-                  {chordProgression.length !== 1 ? "s" : ""} in progression
-                </div>
-              )}
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Bar - Lick Library */}
-      <div className="bg-gray-900 border-t border-gray-800">
-        {/* Tabs */}
-        <div className="flex items-center border-b border-gray-800">
-          <button
-            onClick={() => setActiveTab("instrument")}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "instrument"
-                ? "bg-gray-800 text-white border-b-2 border-white"
-                : "text-gray-400 hover:text-white"
-            }`}
-          >
-            Instrument
-          </button>
-          <button
-            onClick={() => setActiveTab("midi-editor")}
-            className={`px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === "midi-editor"
-                ? "bg-gray-800 text-white border-b-2 border-white"
-                : "text-gray-400 hover:text-white"
-            }`}
-          >
-            MIDI Editor
-          </button>
-          <button
-            onClick={() => setActiveTab("backing-track")}
-            className={`px-6 py-3 text-sm font-medium transition-colors ${
-              activeTab === "backing-track"
-                ? "bg-gray-800 text-indigo-500 border-b-2 border-indigo-500"
-                : "text-gray-400 hover:text-white"
-            }`}
-          >
-            Backing Track
-          </button>
-          <button
-            onClick={() => setActiveTab("lick-library")}
-            className={`px-6 py-3 text-sm font-medium transition-colors ${
-              activeTab === "lick-library"
-                ? "bg-gray-800 text-red-500 border-b-2 border-red-500"
-                : "text-gray-400 hover:text-white"
-            }`}
-          >
-            Lick Library
-          </button>
-        </div>
-
-        {/* Backing Track Tab Content */}
-        {activeTab === "backing-track" && (
-          <BackingTrackPanel
-            chordLibrary={chordPalette}
-            instruments={instruments}
-            rhythmPatterns={rhythmPatterns}
-            onAddChord={handleAddChordToTimeline}
-            onGenerateBackingTrack={handleGenerateBackingTrack}
-              onGenerateAIBackingTrack={handleGenerateAIBackingTrack}
-            selectedInstrumentId={selectedInstrumentId}
-            onInstrumentChange={setSelectedInstrumentId}
-            selectedRhythmPatternId={selectedRhythmPatternId}
-            onRhythmPatternChange={setSelectedRhythmPatternId}
-            chordProgression={chordProgression}
-              onRemoveChord={handleRemoveChord}
-              loading={
-                loadingChords || loadingInstruments || loadingRhythmPatterns
-              }
-              project={project}
-          />
-        )}
-
-        {/* Instrument Tab Content */}
-        {activeTab === "instrument" && (
-          <div className="p-4">
-            <div className="mb-4">
-              <h3 className="text-white font-semibold mb-2">
-                Select Backing Instrument
-              </h3>
-              <p className="text-gray-400 text-sm">
-                Choose an instrument to generate backing track from chord
-                progression
-              </p>
-            </div>
-
-            {loadingInstruments ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-orange-500"></div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                {instruments.map((instrument) => (
-                  <button
-                    key={instrument._id}
-                    onClick={() => handleSelectInstrument(instrument._id)}
-                    className={`p-4 rounded-lg border-2 transition-all ${
-                      selectedInstrumentId === instrument._id
-                        ? "bg-orange-600 border-orange-500 text-white"
-                        : "bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600"
-                    }`}
-                  >
-                    <div className="text-center">
-                      <FaMusic className="mx-auto mb-2" size={24} />
-                      <div className="font-medium text-sm">
-                        {instrument.name}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {selectedInstrumentId && (
-              <div className="mt-6 p-4 bg-gray-800 rounded-lg">
-                <div className="flex items-center gap-2 text-white">
-                  <FaMusic className="text-orange-500" />
-                  <span className="font-medium">
-                    Selected:{" "}
-                    {instruments.find((i) => i._id === selectedInstrumentId)
-                      ?.name || "Unknown"}
-                  </span>
-                </div>
-                <p className="text-gray-400 text-sm mt-2">
-                  Backing track chord blocks will play using this instrument's
-                  sound.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Lick Library Content */}
-        {activeTab === "lick-library" && (
-          <div className="p-3 flex flex-col gap-3 h-full">
-            {/* Search and Filters Row */}
-            <div className="flex items-center gap-4">
-              {/* Search */}
-              <div className="relative flex-1 max-w-md">
-                <FaSearch
-                  className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-                  size={14}
-                />
-                <input
-                  type="text"
-                  placeholder="Search Licks..."
-                  value={lickSearchTerm}
-                  onChange={(e) => setLickSearchTerm(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 pl-9 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
-              </div>
-
-              {/* Filters - All 6 Tag Categories */}
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => {
-                    const value = prompt(
-                      "Filter by genre (leave empty to clear):",
-                      selectedGenre || ""
-                    );
-                    if (value === null) return;
-                    setSelectedGenre(value.trim() || null);
-                  }}
-                  className={`px-3 py-2 rounded text-sm transition-colors ${
-                    selectedGenre
-                      ? "bg-orange-600 hover:bg-orange-700 text-white"
-                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
-                  }`}
-                >
-                  🎶 Genre {selectedGenre && `(${selectedGenre})`}
-                </button>
-                <button
-                  onClick={() => {
-                    const value = prompt(
-                      "Filter by type/instrument (leave empty to clear):",
-                      selectedType || ""
-                    );
-                    if (value === null) return;
-                    setSelectedType(value.trim() || null);
-                  }}
-                  className={`px-3 py-2 rounded text-sm transition-colors ${
-                    selectedType
-                      ? "bg-orange-600 hover:bg-orange-700 text-white"
-                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
-                  }`}
-                >
-                  🎸 Type {selectedType && `(${selectedType})`}
-                </button>
-                <button
-                  onClick={() => {
-                    const value = prompt(
-                      "Filter by emotional/mood (leave empty to clear):",
-                      selectedEmotional || ""
-                    );
-                    if (value === null) return;
-                    setSelectedEmotional(value.trim() || null);
-                  }}
-                  className={`px-3 py-2 rounded text-sm transition-colors ${
-                    selectedEmotional
-                      ? "bg-orange-600 hover:bg-orange-700 text-white"
-                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
-                  }`}
-                >
-                  💖 Emotional {selectedEmotional && `(${selectedEmotional})`}
-                </button>
-                <button
-                  onClick={() => {
-                    const value = prompt(
-                      "Filter by timbre (leave empty to clear):",
-                      selectedTimbre || ""
-                    );
-                    if (value === null) return;
-                    setSelectedTimbre(value.trim() || null);
-                  }}
-                  className={`px-3 py-2 rounded text-sm transition-colors ${
-                    selectedTimbre
-                      ? "bg-orange-600 hover:bg-orange-700 text-white"
-                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
-                  }`}
-                >
-                  🌈 Timbre {selectedTimbre && `(${selectedTimbre})`}
-                </button>
-                <button
-                  onClick={() => {
-                    const value = prompt(
-                      "Filter by articulation (leave empty to clear):",
-                      selectedArticulation || ""
-                    );
-                    if (value === null) return;
-                    setSelectedArticulation(value.trim() || null);
-                  }}
-                  className={`px-3 py-2 rounded text-sm transition-colors ${
-                    selectedArticulation
-                      ? "bg-orange-600 hover:bg-orange-700 text-white"
-                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
-                  }`}
-                >
-                    ⚙️ Articulation{" "}
-                    {selectedArticulation && `(${selectedArticulation})`}
-                </button>
-                <button
-                  onClick={() => {
-                    const value = prompt(
-                      "Filter by character (leave empty to clear):",
-                      selectedCharacter || ""
-                    );
-                    if (value === null) return;
-                    setSelectedCharacter(value.trim() || null);
-                  }}
-                  className={`px-3 py-2 rounded text-sm transition-colors ${
-                    selectedCharacter
-                      ? "bg-orange-600 hover:bg-orange-700 text-white"
-                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
-                  }`}
-                >
-                  💫 Character {selectedCharacter && `(${selectedCharacter})`}
-                </button>
-              </div>
-            </div>
-
-            {/* Lick Cards - Scrollable Grid */}
-            <div className="flex-1 overflow-y-auto">
-              {loadingLicks ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-orange-500"></div>
-                </div>
-              ) : availableLicks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 text-gray-400">
-                  <FaMusic size={32} className="mb-2 opacity-50" />
-                  <p className="text-sm">No licks found</p>
-                  {lickSearchTerm && (
-                      <p className="text-xs mt-1">
-                        Try a different search term
-                      </p>
-                  )}
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-2.5">
-                  {availableLicks.map((lick) => (
-                    <div
-                      key={lick._id || lick.lick_id}
-                      draggable
-                      onDragStart={() => handleDragStart(lick)}
-                      className="bg-gray-800 border border-gray-700 rounded-lg p-2.5 cursor-grab active:cursor-grabbing hover:border-orange-500 transition-colors"
-                    >
-                      <div className="font-medium text-white text-xs mb-0.5 truncate">
-                        {lick.title || lick.name}
-                      </div>
-                      <div className="text-[11px] text-gray-400 mb-1 truncate">
-                        by{" "}
-                        {lick.userId?.displayName ||
-                          lick.userId?.username ||
-                          lick.creator?.displayName ||
-                          lick.creator?.username ||
-                          "Unknown"}
-                      </div>
-                      {(lick.tags || lick.tag_names) && (
-                        <div className="flex flex-wrap gap-1">
-                          {(lick.tags || lick.tag_names || [])
-                            .slice(0, 3)
-                            .map((tag, idx) => (
-                              <span
-                                key={idx}
-                                className="text-[10px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded"
-                              >
-                                {typeof tag === "string"
-                                  ? tag
-                                  : tag.tag_name || tag.name}
-                              </span>
-                            ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {trackContextMenu.isOpen && menuTrack && (

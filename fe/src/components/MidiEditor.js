@@ -39,6 +39,7 @@ const MidiEditor = ({
 
     const midiEvents = timelineItem.customMidiEvents || [];
     if (midiEvents.length > 0) {
+      // Use custom MIDI events if they exist
       setNotes(
         midiEvents.map((event, idx) => ({
           ...event,
@@ -47,16 +48,42 @@ const MidiEditor = ({
       );
     } else {
       // Initialize with chord's MIDI notes if available
-      const midiNotes = timelineItem.midiNotes || [];
-      setNotes(
-        midiNotes.map((pitch, idx) => ({
-          id: `note-${idx}`,
-          pitch,
-          startTime: 0,
-          duration: duration,
-          velocity: 0.8,
-        }))
-      );
+      // Try multiple sources for MIDI notes
+      let midiNotes = [];
+      
+      // Check if item has midiNotes directly
+      if (timelineItem.midiNotes && Array.isArray(timelineItem.midiNotes)) {
+        midiNotes = timelineItem.midiNotes;
+      }
+      // Check if item has lickId with midiNotes
+      else if (timelineItem.lickId?.midiNotes && Array.isArray(timelineItem.lickId.midiNotes)) {
+        midiNotes = timelineItem.lickId.midiNotes;
+      }
+      // For chord items, we might need to generate from chord name
+      else if (timelineItem.chordName) {
+        // Try to get notes from chord library or generate them
+        // For now, show empty - user can add notes manually
+        midiNotes = [];
+      }
+      
+      if (midiNotes.length > 0) {
+        // If it's a chord item, spread notes across the duration
+        // Otherwise, play all notes together at start
+        const isChordItem = timelineItem.type === 'chord' || timelineItem.chordName;
+        
+        setNotes(
+          midiNotes.map((pitch, idx) => ({
+            id: `note-${idx}`,
+            pitch,
+            startTime: isChordItem ? (idx * 0.1) : 0, // Slight stagger for chords
+            duration: isChordItem ? (duration - (midiNotes.length - 1) * 0.1) : duration,
+            velocity: 0.8,
+          }))
+        );
+      } else {
+        // Empty - user can add notes manually
+        setNotes([]);
+      }
     }
   }, [isOpen, timelineItem, duration]);
 

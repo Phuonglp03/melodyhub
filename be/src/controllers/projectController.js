@@ -1581,7 +1581,7 @@ export const generateBackingTrack = async (req, res) => {
         console.warn(
           "[Backing Track] Falling back to MIDI file (may not play in browser)"
         );
-      }
+      } 
     }
 
     // Delete ALL existing items on this backing track
