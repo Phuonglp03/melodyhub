@@ -1283,6 +1283,14 @@ const ProjectDetailPage = () => {
               });
               continue;
             }
+            
+            // Check if it's a MIDI file - Tone.js can't play MIDI directly
+            // If conversion failed on backend, skip these items
+            if (audioUrl.endsWith('.mid') || audioUrl.endsWith('.midi')) {
+              console.warn(`[Audio] Chord item ${clipId} has MIDI file (${audioUrl}), which cannot be played directly.`);
+              console.warn(`[Audio] Backend should convert MIDI to audio. Check server logs for conversion errors.`);
+              continue;
+            }
           }
           // Skip items without audio
           else {

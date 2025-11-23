@@ -364,24 +364,24 @@ export const updateProject = async (req, res) => {
 };
 
 // Get all available instruments
-export const getInstruments = async (req, res) => {
-  try {
-    const instruments = await getAllInstruments();
+// export const getInstruments = async (req, res) => {
+//   try {
+//     const instruments = await getAllInstruments();
     
-    res.json({
-      success: true,
-      data: instruments,
-    });
-  } catch (error) {
-    console.error("Error fetching instruments:", error);
-    console.error("Error stack:", error.stack);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch instruments",
-      error: error.message || "Unknown error",
-    });
-  }
-};
+//     res.json({
+//       success: true,
+//       data: instruments,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching instruments:", error);
+//     console.error("Error stack:", error.stack);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch instruments",
+//       error: error.message || "Unknown error",
+//     });
+//   }
+// };
 
 // Delete project
 export const deleteProject = async (req, res) => {
@@ -1431,6 +1431,7 @@ export const generateBackingTrack = async (req, res) => {
       instrumentId, 
       rhythmPatternId,
       chordDuration = 4, // duration in beats
+      generateAudio = false, // Flag to generate audio files
     } = req.body;
     const userId = req.userId;
 
@@ -1524,36 +1525,80 @@ export const generateBackingTrack = async (req, res) => {
       throw new Error('Failed to generate MIDI file');
     }
 
-    // Delete existing items on backing track
+    // Convert MIDI to audio if generateAudio flag is set
+    let audioFile = null;
+    if (generateAudio) {
+      try {
+        const { convertMIDIToAudioAuto } = await import('../utils/midiToAudioConverter.js');
+        audioFile = await convertMIDIToAudioAuto(midiFile.filepath, {
+          outputFormat: 'wav',
+          sampleRate: 44100,
+          soundfontPath: process.env.SOUNDFONT_PATH, // Use environment variable if set
+        });
+        console.log('[Backing Track] MIDI converted to audio:', audioFile.url);
+      } catch (conversionError) {
+        console.error('[Backing Track] MIDI to audio conversion failed:', conversionError.message);
+        // Log helpful message for debugging
+        if (conversionError.message.includes('not installed') || conversionError.message.includes('not found')) {
+          console.error('[Backing Track] Please install FluidSynth or TiMidity++ for audio conversion.');
+          console.error('[Backing Track] See MIDI_TO_AUDIO_SETUP.md for installation instructions.');
+        }
+        // Continue with MIDI file if conversion fails - frontend will handle it
+        console.warn('[Backing Track] Falling back to MIDI file (may not play in browser)');
+      }
+    }
+
+    // Delete ALL existing items on this backing track
     await ProjectTimelineItem.deleteMany({ trackId: backingTrack._id });
 
-    // Create a single timeline item for the MIDI file
-    const timelineItem = new ProjectTimelineItem({
-      trackId: backingTrack._id,
-      userId,
-      startTime: 0,
-      duration: chords.length * chordDuration * (60 / (project.tempo || 120)), // Convert beats to seconds
-      offset: 0,
-      loopEnabled: false,
-      playbackRate: 1,
-      type: "lick", // Use 'lick' type so it loads as audio/MIDI file
-      title: `Backing Track - ${chords.length} chords`,
-      audioUrl: midiFile.url, // Path to MIDI file
-      isCustomized: false,
-    });
+    const tempo = project.tempo || 120;
+    const secondsPerBeat = 60 / tempo;
+    const chordDurationSeconds = chordDuration * secondsPerBeat;
+    const items = [];
 
-    await timelineItem.save();
+    // Use audio URL if conversion succeeded, otherwise use MIDI URL
+    const audioUrl = audioFile ? audioFile.url : midiFile.url;
+
+    // Create individual timeline items for each chord
+    for (let i = 0; i < chords.length; i++) {
+      const chord = chords[i];
+      const startTime = i * chordDurationSeconds;
+      
+      const timelineItem = new ProjectTimelineItem({
+        trackId: backingTrack._id,
+        userId,
+        startTime: startTime,
+        duration: chordDurationSeconds,
+        offset: i * chordDurationSeconds, // Offset into the full audio file
+        loopEnabled: false,
+        playbackRate: 1,
+        type: "chord", // Use 'chord' type for backing track items
+        chordName: chord.chordName || chord.name || `Chord ${i + 1}`,
+        rhythmPatternId: rhythmPatternId || undefined,
+        audioUrl: audioUrl, // Use audio URL if converted, otherwise MIDI
+        isCustomized: false,
+      });
+
+      await timelineItem.save();
+      items.push(timelineItem);
+    }
 
     res.status(201).json({
       success: true,
-      message: `Backing track MIDI file generated with ${chords.length} chords`,
+      message: generateAudio && audioFile
+        ? `Backing track audio generated with ${chords.length} chord clips`
+        : `Backing track ${audioFile ? 'audio' : 'MIDI'} generated with ${chords.length} chord clips`,
       data: {
         track: backingTrack,
-        item: timelineItem,
+        items: items, // Return array of items for frontend
         midiFile: {
           filename: midiFile.filename,
           url: midiFile.url,
         },
+        audioFile: audioFile ? {
+          filename: audioFile.filename,
+          url: audioFile.url,
+        } : null,
       },
     });
   } catch (error) {
@@ -1585,20 +1630,20 @@ export const getInstruments = async (req, res) => {
 };
 
 // Get rhythm patterns
-export const getRhythmPatterns = async (req, res) => {
-  try {
-    const patterns = await PlayingPattern.find().sort({ name: 1 });
-    res.json({
-      success: true,
-      data: patterns,
-    });
-  } catch (error) {
-    console.error("Error fetching rhythm patterns:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch rhythm patterns",
-      error: error.message,
-    });
-  }
-};
+// export const getRhythmPatterns = async (req, res) => {
+//   try {
+//     const patterns = await PlayingPattern.find().sort({ name: 1 });
+//     res.json({
+//       success: true,
+//       data: patterns,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching rhythm patterns:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch rhythm patterns",
+//       error: error.message,
+//     });
+//   }
+// };
 
