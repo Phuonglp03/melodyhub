@@ -7,7 +7,10 @@ import User from "../models/User.js";
 import Lick from "../models/Lick.js";
 import Instrument from "../models/Instrument.js";
 import PlayingPattern from "../models/PlayingPattern.js";
-import { getAllInstruments, getInstrumentById } from "../services/instrumentService.js";
+import {
+  getAllInstruments,
+  getInstrumentById,
+} from "../services/instrumentService.js";
 
 const TRACK_TYPES = ["audio", "midi", "backing"];
 const TIMELINE_ITEM_TYPES = ["lick", "chord", "midi"];
@@ -367,7 +370,7 @@ export const updateProject = async (req, res) => {
 // export const getInstruments = async (req, res) => {
 //   try {
 //     const instruments = await getAllInstruments();
-    
+
 //     res.json({
 //       success: true,
 //       data: instruments,
@@ -797,7 +800,7 @@ export const bulkUpdateTimelineItems = async (req, res) => {
 
     const isOwner = project.creatorId.toString() === userId;
     let collaborator = null;
-    
+
     if (!isOwner) {
       try {
         collaborator = await ProjectCollaborator.findOne({
@@ -805,8 +808,8 @@ export const bulkUpdateTimelineItems = async (req, res) => {
           userId: new mongoose.Types.ObjectId(userId),
         });
       } catch (err) {
-         console.error("Error checking collaborator:", err);
-         // Continue as if not collaborator, will fail permission check below
+        console.error("Error checking collaborator:", err);
+        // Continue as if not collaborator, will fail permission check below
       }
     }
 
@@ -848,16 +851,22 @@ export const bulkUpdateTimelineItems = async (req, res) => {
         try {
           const { _id, itemId, trackId, ...rest } = raw || {};
           const resolvedId = itemId || _id;
-          
+
           if (!resolvedId || !mongoose.Types.ObjectId.isValid(resolvedId)) {
-            return { success: false, id: resolvedId, error: "Invalid or missing item ID" };
+            return {
+              success: false,
+              id: resolvedId,
+              error: "Invalid or missing item ID",
+            };
           }
 
           // We don't need to fetch the item if we just want to update it by ID
           // But we need to verify it belongs to the project.
           // Optimization: Fetch only trackId to verify project ownership
-          const timelineItem = await ProjectTimelineItem.findById(resolvedId).select("trackId");
-          
+          const timelineItem = await ProjectTimelineItem.findById(
+            resolvedId
+          ).select("trackId");
+
           if (!timelineItem) {
             return {
               success: false,
@@ -866,7 +875,9 @@ export const bulkUpdateTimelineItems = async (req, res) => {
             };
           }
 
-          const track = await ProjectTrack.findById(timelineItem.trackId).select("projectId");
+          const track = await ProjectTrack.findById(
+            timelineItem.trackId
+          ).select("projectId");
           if (!track || track.projectId.toString() !== projectId) {
             return {
               success: false,
@@ -1335,10 +1346,11 @@ export const deleteTrack = async (req, res) => {
 // Get all rhythm patterns
 export const getRhythmPatterns = async (req, res) => {
   try {
-    const PlayingPattern = (await import("../models/PlayingPattern.js")).default;
-    
+    const PlayingPattern = (await import("../models/PlayingPattern.js"))
+      .default;
+
     const patterns = await PlayingPattern.find({}).sort({ name: 1 });
-    
+
     res.json({
       success: true,
       data: patterns,
@@ -1403,7 +1415,10 @@ export const applyRhythmPattern = async (req, res) => {
 
     // Populate for response
     if (timelineItem.lickId) {
-      await timelineItem.populate("lickId", "title audioUrl duration waveformData");
+      await timelineItem.populate(
+        "lickId",
+        "title audioUrl duration waveformData"
+      );
     }
     await timelineItem.populate("userId", "username displayName avatarUrl");
 
@@ -1426,9 +1441,9 @@ export const applyRhythmPattern = async (req, res) => {
 export const generateBackingTrack = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { 
-      chords, 
-      instrumentId, 
+    const {
+      chords,
+      instrumentId,
       rhythmPatternId,
       chordDuration = 4, // duration in beats
       generateAudio = false, // Flag to generate audio files
@@ -1501,19 +1516,19 @@ export const generateBackingTrack = async (req, res) => {
       if (instrument && instrument.soundfontKey) {
         // Map soundfont keys to MIDI program numbers
         const programMap = {
-          'acoustic_grand_piano': 0,
-          'electric_piano': 4,
-          'electric_guitar_clean': 27,
-          'acoustic_bass': 32,
-          'synth_lead': 80,
+          acoustic_grand_piano: 0,
+          electric_piano: 4,
+          electric_guitar_clean: 27,
+          acoustic_bass: 32,
+          synth_lead: 80,
         };
         instrumentProgram = programMap[instrument.soundfontKey] || 0;
       }
     }
 
     // Generate MIDI file
-    const { generateMIDIFile } = await import('../utils/midiGenerator.js');
-    
+    const { generateMIDIFile } = await import("../utils/midiGenerator.js");
+
     const midiFile = await generateMIDIFile(chords, {
       tempo: project.tempo || 120,
       chordDuration,
@@ -1522,29 +1537,50 @@ export const generateBackingTrack = async (req, res) => {
     });
 
     if (!midiFile.success) {
-      throw new Error('Failed to generate MIDI file');
+      throw new Error("Failed to generate MIDI file");
     }
 
-    // Convert MIDI to audio if generateAudio flag is set
+    // Generate audio directly from chords if generateAudio flag is set
+    // This is more efficient than converting MIDI to audio
+    // The audio generator will convert chord names to MIDI notes if needed
     let audioFile = null;
     if (generateAudio) {
       try {
-        const { convertMIDIToAudioAuto } = await import('../utils/midiToAudioConverter.js');
-        audioFile = await convertMIDIToAudioAuto(midiFile.filepath, {
-          outputFormat: 'wav',
+        console.log(
+          `[Backing Track] Generating audio from ${chords.length} chords...`
+        );
+        const { convertMIDIToAudioAuto } = await import(
+          "../utils/midiToAudioConverter.js"
+        );
+        // Pass all chords - the converter will handle chord name to MIDI conversion
+        // Also pass rhythmPatternId to apply rhythm patterns
+        audioFile = await convertMIDIToAudioAuto(chords, {
+          tempo: project.tempo || 120,
+          chordDuration,
           sampleRate: 44100,
-          soundfontPath: process.env.SOUNDFONT_PATH, // Use environment variable if set
+          uploadToCloud: true, // Upload to Cloudinary
+          cloudinaryFolder: `projects/${projectId}/backing_tracks`,
+          projectId: project._id.toString(),
+          rhythmPatternId: rhythmPatternId, // Pass rhythm pattern to apply timing
         });
-        console.log('[Backing Track] MIDI converted to audio:', audioFile.url);
+        console.log(
+          "[Backing Track] Audio generated and uploaded to Cloudinary:",
+          audioFile.cloudinaryUrl || audioFile.url
+        );
+        console.log(
+          "[Backing Track] Full audioFile object:",
+          JSON.stringify(audioFile, null, 2)
+        );
       } catch (conversionError) {
-        console.error('[Backing Track] MIDI to audio conversion failed:', conversionError.message);
-        // Log helpful message for debugging
-        if (conversionError.message.includes('not installed') || conversionError.message.includes('not found')) {
-          console.error('[Backing Track] Please install FluidSynth or TiMidity++ for audio conversion.');
-          console.error('[Backing Track] See MIDI_TO_AUDIO_SETUP.md for installation instructions.');
-        }
+        console.error(
+          "[Backing Track] Audio generation failed:",
+          conversionError.message
+        );
+        console.error("[Backing Track] Error details:", conversionError);
         // Continue with MIDI file if conversion fails - frontend will handle it
-        console.warn('[Backing Track] Falling back to MIDI file (may not play in browser)');
+        console.warn(
+          "[Backing Track] Falling back to MIDI file (may not play in browser)"
+        );
       }
     }
 
@@ -1556,14 +1592,41 @@ export const generateBackingTrack = async (req, res) => {
     const chordDurationSeconds = chordDuration * secondsPerBeat;
     const items = [];
 
-    // Use audio URL if conversion succeeded, otherwise use MIDI URL
-    const audioUrl = audioFile ? audioFile.url : midiFile.url;
+    // Use Cloudinary URL if conversion succeeded, otherwise use MIDI URL
+    const audioUrl = audioFile
+      ? audioFile.cloudinaryUrl || audioFile.url
+      : midiFile?.url || null;
+
+    console.log(
+      `[Backing Track] audioFile exists: ${!!audioFile}, midiFile.url: ${
+        midiFile?.url
+      }`
+    );
+    console.log(
+      `[Backing Track] Final audioUrl to use: ${
+        audioUrl || "NONE - THIS IS A PROBLEM!"
+      }`
+    );
+
+    if (!audioUrl) {
+      console.error(
+        "[Backing Track] ERROR: No audioUrl available! Audio generation failed and MIDI URL is missing."
+      );
+      console.error(
+        "[Backing Track] audioFile:",
+        audioFile ? JSON.stringify(audioFile, null, 2) : "null"
+      );
+      console.error(
+        "[Backing Track] midiFile:",
+        midiFile ? JSON.stringify(midiFile, null, 2) : "null"
+      );
+    }
 
     // Create individual timeline items for each chord
     for (let i = 0; i < chords.length; i++) {
       const chord = chords[i];
       const startTime = i * chordDurationSeconds;
-      
+
       const timelineItem = new ProjectTimelineItem({
         trackId: backingTrack._id,
         userId,
@@ -1575,19 +1638,32 @@ export const generateBackingTrack = async (req, res) => {
         type: "chord", // Use 'chord' type for backing track items
         chordName: chord.chordName || chord.name || `Chord ${i + 1}`,
         rhythmPatternId: rhythmPatternId || undefined,
-        audioUrl: audioUrl, // Use audio URL if converted, otherwise MIDI
+        audioUrl: audioUrl || null, // Use audio URL if converted, otherwise MIDI (or null if both failed)
         isCustomized: false,
       });
 
       await timelineItem.save();
+
+      // Log if audioUrl is missing
+      if (!timelineItem.audioUrl) {
+        console.warn(
+          `[Backing Track] Timeline item ${timelineItem._id} (${
+            chord.chordName || chord.name
+          }) has no audioUrl!`
+        );
+      }
+
       items.push(timelineItem);
     }
 
     res.status(201).json({
       success: true,
-      message: generateAudio && audioFile
-        ? `Backing track audio generated with ${chords.length} chord clips`
-        : `Backing track ${audioFile ? 'audio' : 'MIDI'} generated with ${chords.length} chord clips`,
+      message:
+        generateAudio && audioFile
+          ? `Backing track audio generated with ${chords.length} chord clips`
+          : `Backing track ${audioFile ? "audio" : "MIDI"} generated with ${
+              chords.length
+            } chord clips`,
       data: {
         track: backingTrack,
         items: items, // Return array of items for frontend
@@ -1595,10 +1671,12 @@ export const generateBackingTrack = async (req, res) => {
           filename: midiFile.filename,
           url: midiFile.url,
         },
-        audioFile: audioFile ? {
-          filename: audioFile.filename,
-          url: audioFile.url,
-        } : null,
+        audioFile: audioFile
+          ? {
+              filename: audioFile.filename,
+              url: audioFile.url,
+            }
+          : null,
       },
     });
   } catch (error) {
@@ -1646,4 +1724,3 @@ export const getInstruments = async (req, res) => {
 //     });
 //   }
 // };
-

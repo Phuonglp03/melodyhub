@@ -42,6 +42,8 @@ const projectTimelineItemSchema = new mongoose.Schema(
     rhythmPatternId: { type: String },
     isCustomized: { type: Boolean, default: false },
     customMidiEvents: [midiEventSchema],
+    audioUrl: { type: String }, // URL to audio file (Cloudinary or local)
+    waveformData: { type: mongoose.Schema.Types.Mixed }, // Waveform visualization data
   },
   { timestamps: false }
 );
