@@ -638,6 +638,9 @@ const ProjectDetailPage = () => {
   const [lickPage, setLickPage] = useState(1);
   const [lickHasMore, setLickHasMore] = useState(true);
   const LICKS_PER_PAGE = 20;
+  const [playingLickId, setPlayingLickId] = useState(null);
+  const [lickAudioRefs, setLickAudioRefs] = useState({});
+  const [lickProgress, setLickProgress] = useState({});
 
   // Generate all keys (12 major + 12 minor)
   const allKeys = useMemo(() => {
@@ -1015,6 +1018,77 @@ const ProjectDetailPage = () => {
       fetchLicks(nextPage, true);
     }
   };
+
+  // Handle lick audio playback
+  const handleLickPlayPause = async (lick, e) => {
+    e?.stopPropagation();
+    const lickId = lick._id || lick.lick_id || lick.id;
+
+    // If clicking the same lick that's playing, pause it
+    if (playingLickId === lickId) {
+      const audio = lickAudioRefs[lickId];
+      if (audio) {
+        audio.pause();
+        setPlayingLickId(null);
+      }
+      return;
+    }
+
+    // Stop any currently playing lick
+    if (playingLickId && lickAudioRefs[playingLickId]) {
+      lickAudioRefs[playingLickId].pause();
+      lickAudioRefs[playingLickId].currentTime = 0;
+    }
+
+    try {
+      // Get audio URL
+      const response = await playLickAudio(lickId);
+      if (!response.success || !response.data?.audio_url) {
+        console.error("No audio URL available");
+        return;
+      }
+
+      // Create or get audio element
+      let audio = lickAudioRefs[lickId];
+      if (!audio) {
+        audio = new Audio();
+        audio.addEventListener("timeupdate", () => {
+          if (audio.duration) {
+            setLickProgress((prev) => ({
+              ...prev,
+              [lickId]: audio.currentTime / audio.duration,
+            }));
+          }
+        });
+        audio.addEventListener("ended", () => {
+          setPlayingLickId(null);
+          setLickProgress((prev) => ({
+            ...prev,
+            [lickId]: 0,
+          }));
+        });
+        setLickAudioRefs((prev) => ({ ...prev, [lickId]: audio }));
+      }
+
+      audio.src = response.data.audio_url;
+      await audio.play();
+      setPlayingLickId(lickId);
+    } catch (error) {
+      console.error("Error playing lick:", error);
+    }
+  };
+
+  // Cleanup audio refs on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(lickAudioRefs).forEach((audio) => {
+        if (audio) {
+          audio.pause();
+          audio.src = "";
+        }
+      });
+    };
+  }, []);
 
   useEffect(() => {
     fetchProject(true); // Show loading only on initial load
@@ -4385,23 +4459,168 @@ const ProjectDetailPage = () => {
                       </div>
 
                       {/* Lick Grid - Horizontal scroll with lazy loading */}
-                      <div className="flex gap-2 overflow-x-auto pb-2">
-                        {availableLicks.map((lick) => (
-                          <div
-                            key={lick._id}
-                            draggable
-                            onDragStart={() => handleDragStart(lick)}
-                            onDragEnd={() => setDraggedLick(null)}
-                            className="bg-gray-800 rounded p-2 cursor-grab active:cursor-grabbing hover:bg-gray-700 transition-colors min-w-[120px] flex-shrink-0"
-                          >
-                            <div className="text-white text-sm font-medium truncate">
-                              {lick.title}
+                      <div className="flex gap-3 overflow-x-auto pb-2">
+                        {availableLicks.map((lick) => {
+                          const lickId = lick._id || lick.lick_id || lick.id;
+                          const isPlaying = playingLickId === lickId;
+                          const progress = lickProgress[lickId] || 0;
+                          const waveform =
+                            lick.waveformData || lick.waveform_data || [];
+                          const creator = lick.creator || {};
+                          const creatorName =
+                            creator.display_name ||
+                            creator.displayName ||
+                            creator.username ||
+                            "Unknown";
+                          const creatorAvatar =
+                            creator.avatar_url || creator.avatarUrl;
+                          const duration = lick.duration || 0;
+                          const tempo = lick.tempo;
+                          const key = lick.key;
+
+                          // Get genre and type from tags
+                          const tags = lick.tags || [];
+                          const genreTag = tags.find(
+                            (t) => t.tag_type === "genre"
+                          );
+                          const typeTag = tags.find(
+                            (t) => t.tag_type === "type"
+                          );
+                          const genre =
+                            genreTag?.tag_name ||
+                            genreTag?.name ||
+                            lick.genre ||
+                            "—";
+                          const type =
+                            typeTag?.tag_name ||
+                            typeTag?.name ||
+                            lick.type ||
+                            "—";
+
+                          return (
+                            <div
+                              key={lickId}
+                              draggable
+                              onDragStart={() => handleDragStart(lick)}
+                              onDragEnd={() => setDraggedLick(null)}
+                              className="bg-gray-800 rounded-lg border border-gray-700 hover:border-gray-600 transition-all min-w-[200px] max-w-[200px] flex-shrink-0 cursor-grab active:cursor-grabbing overflow-hidden"
+                            >
+                              {/* Waveform Preview */}
+                              <div
+                                className="relative h-20 bg-gray-900 cursor-pointer"
+                                onClick={(e) => handleLickPlayPause(lick, e)}
+                              >
+                                {waveform.length > 0 ? (
+                                  <div className="absolute inset-0 flex items-end justify-center gap-0.5 px-2 pb-2">
+                                    {waveform
+                                      .slice(0, 60)
+                                      .map((amplitude, index) => {
+                                        const barProgress =
+                                          index / waveform.length;
+                                        const isPlayed =
+                                          barProgress <= progress;
+                                        return (
+                                          <div
+                                            key={index}
+                                            className="w-0.5 bg-gray-600 transition-all duration-100"
+                                            style={{
+                                              height: `${Math.max(
+                                                amplitude * 100,
+                                                10
+                                              )}%`,
+                                              backgroundColor:
+                                                isPlaying && isPlayed
+                                                  ? "#f97316"
+                                                  : "#6b7280",
+                                              opacity:
+                                                isPlaying && isPlayed ? 1 : 0.6,
+                                            }}
+                                          />
+                                        );
+                                      })}
+                                  </div>
+                                ) : (
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <FaMusic
+                                      className="text-gray-600"
+                                      size={20}
+                                    />
+                                  </div>
+                                )}
+
+                                {/* Play/Pause Button */}
+                                <button
+                                  onClick={(e) => handleLickPlayPause(lick, e)}
+                                  className="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 text-white rounded-full p-1.5 transition-colors"
+                                >
+                                  {isPlaying ? (
+                                    <FaPause size={10} />
+                                  ) : (
+                                    <FaPlay size={10} className="ml-0.5" />
+                                  )}
+                                </button>
+                              </div>
+
+                              {/* Lick Info */}
+                              <div className="p-2.5 space-y-1.5">
+                                {/* Title */}
+                                <div className="text-white text-sm font-semibold truncate">
+                                  {lick.title}
+                                </div>
+
+                                {/* Creator Info */}
+                                <div className="flex items-center gap-1.5">
+                                  {creatorAvatar ? (
+                                    <img
+                                      src={creatorAvatar}
+                                      alt={creatorName}
+                                      className="w-4 h-4 rounded-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="w-4 h-4 rounded-full bg-gray-600 flex items-center justify-center">
+                                      <span className="text-[8px] text-gray-300">
+                                        {creatorName.charAt(0).toUpperCase()}
+                                      </span>
+                                    </div>
+                                  )}
+                                  <span className="text-gray-400 text-xs truncate">
+                                    {creatorName}
+                                  </span>
+                                </div>
+
+                                {/* Metadata */}
+                                <div className="flex items-center gap-2 text-xs text-gray-500">
+                                  {duration > 0 && (
+                                    <span>{duration.toFixed(1)}s</span>
+                                  )}
+                                  {tempo && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{Math.round(tempo)} BPM</span>
+                                    </>
+                                  )}
+                                  {key && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{key}</span>
+                                    </>
+                                  )}
+                                </div>
+
+                                {/* Tags */}
+                                <div className="flex items-center gap-1 text-xs text-gray-500 truncate">
+                                  <span>{genre}</span>
+                                  {type && (
+                                    <>
+                                      <span>•</span>
+                                      <span>{type}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                            <div className="text-gray-400 text-xs mt-1">
-                              {lick.genre} • {lick.type}
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       {/* Load More button for licks */}
