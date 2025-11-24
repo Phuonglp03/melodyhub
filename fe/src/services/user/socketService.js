@@ -1,7 +1,7 @@
 import { io } from 'socket.io-client';
 import { store } from '../../redux/store';
 // URL của server (cổng Express/Socket.IO)
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:9999';
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'https://api.melodyhub.website';
 console.log('[Socket.IO] SOCKET_URL resolved to:', SOCKET_URL);
 
 
@@ -17,6 +17,7 @@ export const initSocket = (explicitUserId) => {
     console.log('[Socket.IO] Attempting connection to:', SOCKET_URL);
     socket = io(SOCKET_URL, {
       query: { userId: userId },
+      transports: ['websocket'],
     });
 
     socket.on('connect', () => {

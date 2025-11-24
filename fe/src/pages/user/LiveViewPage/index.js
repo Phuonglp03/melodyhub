@@ -15,6 +15,8 @@ import {
   onChatError,
   onMessageRemoved
 } from '../../../services/user/socketService';
+import LiveVideo from '../../../components/LiveVideo';
+import { SendOutlined, UserOutlined, InfoCircleOutlined } from '@ant-design/icons'; // Cần cài antd icons nếu chưa có
 
 const LiveViewPage = () => {
   const { roomId } = useParams();
@@ -27,20 +29,21 @@ const LiveViewPage = () => {
   
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
+  const [showDescription, setShowDescription] = useState(false);
 
   // Video.js refs
   const videoRef = useRef(null);
   const playerRef = useRef(null);
+  const chatEndRef = useRef(null); // Để auto scroll
 
   useEffect(() => {
     initSocket();
 
     const fetchRoom = async () => {
       try {
-        // GỌI HÀM NÀY SẼ TỰ ĐỘNG CHECK AUTH VÀ FOLLOW
         const roomData = await livestreamService.getLiveStreamById(roomId);
         const history = await livestreamService.getChatHistory(roomId);
-        // Nếu stream chưa 'live' hoặc đã 'ended' (Viewer không được xem)
+        
         if (roomData.status !== 'live') {
           setError('Stream không hoạt động hoặc đã kết thúc.');
           setLoading(false);
@@ -49,9 +52,6 @@ const LiveViewPage = () => {
 
         setRoom(roomData);
         const hlsUrl = roomData.playbackUrls?.hls;
-        
-        console.log('[LiveView] Playback URL:', hlsUrl);
-        console.log('[LiveView] Room status:', roomData.status);
         
         if (hlsUrl) {
           setPlaybackUrl(hlsUrl);
@@ -63,7 +63,6 @@ const LiveViewPage = () => {
         joinRoom(roomId);
         setMessages(history);
       } catch (err) {
-        // Lỗi 403 (Follow only) hoặc 404 (Not found) sẽ rơi vào đây
         setError(err.message || 'Không thể tải stream.');
         setLoading(false);
       }
@@ -77,7 +76,7 @@ const LiveViewPage = () => {
     
     onStreamEnded(() => {
       alert("Livestream đã kết thúc.");
-      navigate('/live'); // Quay về trang danh sách
+      navigate('/live'); 
     });
     
     onChatError((errorMsg) => {
@@ -85,18 +84,14 @@ const LiveViewPage = () => {
     });
     
     onMessageRemoved((data) => {
-      // ✅ Cập nhật tin nhắn bị gỡ để hiển thị "Tin nhắn này đã bị gỡ"
       setMessages(prev => prev.map(msg =>
         msg._id === data.messageId ? { ...msg, message: 'Tin nhắn này đã bị gỡ', deleted: true } : msg
       ));
     });
-    
-    // (Không cần onStreamDetailsUpdated hoặc onStreamPrivacyUpdated, trừ khi bạn muốn)
 
     return () => {
       offSocketEvents();
       disconnectSocket();
-      // Cleanup Video.js player
       if (playerRef.current) {
         try {
           playerRef.current.dispose();
@@ -108,7 +103,12 @@ const LiveViewPage = () => {
     };
   }, [roomId, navigate]);
 
-  // Initialize Video.js player when playback URL is available
+  // Auto scroll to bottom chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Initialize Video.js
   useEffect(() => {
     const cleanup = () => {
       if (playerRef.current) {
@@ -122,7 +122,6 @@ const LiveViewPage = () => {
     };
 
     if (playbackUrl && videoRef.current && !playerRef.current) {
-      // Đợi một chút để DOM sẵn sàng
       setTimeout(() => {
         if (!videoRef.current) return;
 
@@ -135,16 +134,16 @@ const LiveViewPage = () => {
             fill: true,
             liveui: true,
             liveTracker: {
-              trackingThreshold: 20,
-              liveTolerance: 15
+              trackingThreshold: 15,
+              liveTolerance: 10,
             },
             controlBar: {
-              progressControl: false, // ✅ Ẩn progress bar như host
+              progressControl: false,
               currentTimeDisplay: false,
               timeDivider: false,
               durationDisplay: false,
               remainingTimeDisplay: false,
-              seekToLive: true // Hiện nút "LIVE"
+              seekToLive: true
             },
             html5: {
               vhs: {
@@ -152,7 +151,12 @@ const LiveViewPage = () => {
                 smoothQualityChange: true,
                 overrideNative: true,
                 bandwidth: 4194304,
-                limitRenditionByPlayerDimensions: false
+                limitRenditionByPlayerDimensions: false,
+                playlistRetryCount: 3,     
+                playlistRetryDelay: 500,
+                bufferBasedBitrateSelection: true,
+                liveSyncDurationCount: 3, 
+                liveMaxLatencyDurationCount: 7, 
               },
               nativeAudioTracks: false,
               nativeVideoTracks: false
@@ -166,65 +170,34 @@ const LiveViewPage = () => {
 
           playerRef.current = player;
 
-          player.on('error', (e) => {
-            const error = player.error();
-            console.error('[Video.js] Error:', error);
-            console.error('[Video.js] Error details:', {
-              code: error?.code,
-              message: error?.message,
-              type: error?.type
-            });
-          });
-
-          player.on('loadedmetadata', () => {
-            console.log('[Video.js] Metadata loaded');
-          });
-
-          player.on('loadeddata', () => {
-            console.log('[Video.js] Data loaded');
-          });
-
-          player.on('canplay', () => {
-            console.log('[Video.js] Can play');
-            player.play().catch(e => {
-              console.error('[Video.js] Play error:', e);
-            });
-          });
-
-          player.on('playing', () => {
-            console.log('[Video.js] Playing');
-          });
-
-          player.on('waiting', () => {
-            console.log('[Video.js] Waiting/Buffering');
-          });
-
-          // ✅ Track pause state để jump to live edge khi resume
-          let wasPaused = false;
-          
-          player.on('pause', () => {
-            wasPaused = true;
-            console.log('[Video.js] User paused video');
-          });
-
-          player.on('play', () => {
-            if (wasPaused) {
-              // User ấn play sau khi pause → jump to live edge
-              console.log('[Video.js] Resuming from pause, jumping to live edge');
-              setTimeout(() => {
-                const liveTracker = player.liveTracker;
-                if (liveTracker && liveTracker.seekToLiveEdge) {
-                  liveTracker.seekToLiveEdge();
-                }
-              }, 100);
-              wasPaused = false;
+          // Auto Reconnect Logic
+          player.on('error', () => {
+            const err = player.error();
+            console.warn('VideoJS Error:', err);
+            if (err && (err.code === 2 || err.code === 3 || err.code === 4)) {
+                console.log('Đang thử khôi phục stream...');
+                setTimeout(() => {
+                    if (player && !player.isDisposed()) {
+                        player.src({
+                            src: playbackUrl,
+                            type: 'application/x-mpegURL'
+                        });
+                        player.play().catch(e => console.log('Auto-play prevented'));
+                    }
+                }, 1500);
             }
           });
 
-          // Log player ready
-          player.ready(() => {
-            console.log('[Video.js] Player ready');
-            console.log('[Video.js] Current source:', player.currentSrc());
+          let wasPaused = false;
+          player.on('pause', () => { wasPaused = true; });
+          player.on('play', () => {
+            if (wasPaused) {
+              setTimeout(() => {
+                const liveTracker = player.liveTracker;
+                if (liveTracker?.seekToLiveEdge) liveTracker.seekToLiveEdge();
+              }, 100);
+              wasPaused = false;
+            }
           });
 
         } catch (error) {
@@ -232,7 +205,6 @@ const LiveViewPage = () => {
         }
       }, 100);
     }
-
     return cleanup;
   }, [playbackUrl]);
 
@@ -244,214 +216,336 @@ const LiveViewPage = () => {
     }
   };
 
-  if (loading) return <div style={{ color: 'white' }}>Đang tải stream...</div>;
-  if (error) return <div style={{ color: 'red', padding: '50px' }}>{error}</div>;
+  if (loading) return (
+    <div style={{ 
+      height: '100vh', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      background: '#0e0e10', 
+      color: '#efeff1' 
+    }}>
+      <div className="loading-spinner"></div>
+      <style>{`
+        .loading-spinner {
+          width: 40px; height: 40px;
+          border: 3px solid rgba(255,255,255,0.3);
+          border-radius: 50%;
+          border-top-color: #bf94ff;
+          animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
+    </div>
+  );
+
+  if (error) return (
+    <div style={{ 
+      height: '100vh', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      background: '#0e0e10', 
+      color: '#ff4d4d',
+      fontSize: '18px',
+      fontWeight: '500'
+    }}>
+      ⚠️ {error}
+    </div>
+  );
+
   if (!room) return null;
 
   return (
     <>
-      {/* ✅ CSS để đẩy volume và fullscreen button sang phải */}
+      {/* Global Styles for Scrollbar & VideoJS Tweaks */}
       <style>{`
-        .video-js .vjs-control-bar {
-          display: flex !important;
+        body { margin: 0; overflow: hidden; background: #0e0e10; }
+        
+        /* VideoJS Customization */
+        .video-js .vjs-control-bar { background: linear-gradient(to top, rgba(0,0,0,0.9), transparent) !important; }
+        .video-js .vjs-big-play-button {
+          background-color: rgba(145, 71, 255, 0.8) !important;
+          border: none !important;
+          border-radius: 50% !important;
+          width: 60px !important; height: 60px !important;
+          line-height: 60px !important;
+          margin-left: -30px !important; margin-top: -30px !important;
         }
-        .video-js .vjs-volume-panel {
-          margin-right: auto !important;
-        }
+        .video-js .vjs-volume-panel { margin-right: auto !important; }
+
+        /* Custom Scrollbar for Chat */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #666; }
       `}</style>
 
       <div style={{ 
         display: 'flex', 
-        padding: '20px', 
-        gap: '20px', 
-        color: 'white',
-        minHeight: '100vh',
-        background: '#18191a'
+        height: '100vh', 
+        background: '#0e0e10',
+        color: '#efeff1',
+        overflow: 'hidden'
       }}>
         
-        {/* Cột trái: Video */}
-      <div style={{ flex: 3 }}>
+        {/* LEFT COLUMN: VIDEO & INFO */}
         <div style={{ 
-          background: 'black', 
-          width: '100%', 
-          aspectRatio: '16/9',
-          position: 'relative',
-          borderRadius: '8px',
-          overflow: 'hidden'
-        }}>
-          {playbackUrl ? (
-            <div data-vjs-player style={{ 
-              width: '100%', 
-              height: '100%',
-              position: 'relative'
-            }}>
-              <video
-                ref={videoRef}
-                className="video-js vjs-big-play-centered vjs-16-9"
-                playsInline
-                preload="auto"
-                style={{ width: '100%', height: '100%' }}
-              />
-            </div>
-          ) : (
-            <div style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexDirection: 'column',
-              gap: '16px',
-              color: '#b0b3b8'
-            }}>
-              <div style={{ 
-                width: '60px', 
-                height: '60px', 
-                border: '4px solid #3a3b3c',
-                borderTop: '4px solid #0084ff',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite'
-              }}></div>
-              <div>Đang tải video...</div>
-              <style>{`
-                @keyframes spin {
-                  0% { transform: rotate(0deg); }
-                  100% { transform: rotate(360deg); }
-                }
-              `}</style>
-            </div>
-          )}
-        </div>
-        
-        <h2 style={{ 
-          marginTop: '20px',
-          fontSize: '24px',
-          fontWeight: '600',
-          color: '#e4e6eb'
-        }}>{room.title}</h2>
-        
-        <p style={{ 
-          fontSize: '15px',
-          color: '#b0b3b8',
-          marginTop: '8px'
-        }}>
-          Host: <span style={{ color: '#e4e6eb', fontWeight: '500' }}>{room.hostId.displayName}</span>
-        </p>
-        
-        {room.description && (
-          <p style={{ 
-            fontSize: '14px',
-            color: '#b0b3b8',
-            marginTop: '12px',
-            lineHeight: '1.5'
-          }}>
-            {room.description}
-          </p>
-        )}
-      </div>
-
-      {/* Cột phải: Chat */}
-      <div style={{ 
-        flex: 1, 
-        background: '#242526', 
-        padding: '20px', 
-        borderRadius: '8px', 
-        display: 'flex', 
-        flexDirection: 'column',
-        maxHeight: 'calc(100vh - 40px)',
-        position: 'sticky',
-        top: '20px'
-      }}>
-        <h3 style={{ 
-          margin: '0 0 16px 0',
-          fontSize: '17px',
-          fontWeight: '600',
-          color: '#e4e6eb',
-          borderBottom: '1px solid #3a3b3c',
-          paddingBottom: '12px'
-        }}>Bình luận</h3>
-        
-        <div className="chat-messages" style={{ 
           flex: 1, 
-          overflowY: 'auto', 
-          marginBottom: '16px', 
-          minHeight: '400px'
-        }}>
-          {messages.length === 0 ? (
-            <div style={{ 
-              textAlign: 'center',
-              color: '#b0b3b8',
-              padding: '40px 20px'
-            }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>💬</div>
-              <div style={{ fontSize: '15px' }}>Chưa có bình luận nào</div>
-              <div style={{ fontSize: '13px', marginTop: '8px' }}>Hãy là người đầu tiên bình luận!</div>
-            </div>
-          ) : (
-            messages.map((msg, index) => (
-              <div key={msg._id || index} style={{ 
-                marginBottom: '16px',
-                display: 'flex',
-                gap: '10px'
+          display: 'flex', 
+          flexDirection: 'column', 
+          overflowY: 'auto',
+          position: 'relative'
+        }} className="custom-scrollbar">
+          
+          {/* Video Player Container */}
+          <div style={{ 
+            width: '100%', 
+            background: '#000', 
+            aspectRatio: '16/9',
+            position: 'relative',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+          }}>
+            {playbackUrl ? (
+              <>
+                <div data-vjs-player style={{ width: '100%', height: '100%' }}>
+                  <video
+                    ref={videoRef}
+                    className="video-js vjs-big-play-centered vjs-16-9"
+                    playsInline
+                    preload="auto"
+                  />
+                </div>
+                {playerRef.current && <LiveVideo player={playerRef.current} style={{ top: '20px', left: '20px' }} />}
+              </>
+            ) : (
+              <div style={{
+                width: '100%', height: '100%', display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+                flexDirection: 'column', gap: '15px', color: '#adadb8'
               }}>
-                <div style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  background: '#3a3b3c',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                  fontSize: '16px'
-                }}>👤</div>
-                <div style={{ flex: 1 }}>
+                <div className="loading-spinner"></div>
+                <div>Đang tải tín hiệu...</div>
+              </div>
+            )}
+          </div>
+
+          {/* Stream Info Section */}
+          <div style={{ padding: '20px 30px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ flex: 1 }}>
+                <h1 style={{ 
+                  fontSize: '22px', 
+                  fontWeight: '700', 
+                  margin: '0 0 8px 0',
+                  lineHeight: '1.2'
+                }}>
+                  {room.title}
+                </h1>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px' }}>
                   <div style={{ 
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    color: '#e4e6eb',
-                    marginBottom: '4px'
+                    width: '48px', height: '48px', 
+                    borderRadius: '50%', 
+                    border: '2px solid #9147ff',
+                    overflow: 'hidden',
+                    background: '#1f1f23'
                   }}>
-                    {msg.userId?.displayName || 'User'}
+                    <img 
+                      src={room.hostId?.avatarUrl || 'https://via.placeholder.com/48'} 
+                      alt="Host" 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => {e.target.src = 'https://via.placeholder.com/48'}}
+                    />
                   </div>
-                  <div style={{ 
-                    fontSize: '13px',
-                    color: msg.deleted ? '#65676b' : '#b0b3b8',
-                    wordBreak: 'break-word',
-                    fontStyle: msg.deleted ? 'italic' : 'normal'
-                  }}>
-                    {msg.deleted ? 'Tin nhắn này đã bị gỡ' : msg.message}
+                  <div>
+                    <div style={{ 
+                      fontSize: '16px', 
+                      fontWeight: '600', 
+                      color: '#9147ff' 
+                    }}>
+                      {room.hostId?.displayName || 'Unknown Host'}
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#adadb8' }}>
+                      Host • {room.privacyType === 'public' ? 'Công khai' : 'Người theo dõi'}
+                    </div>
                   </div>
                 </div>
               </div>
-            ))
-          )}
+
+              {/* Description Toggle */}
+              {room.description && (
+                <button 
+                  onClick={() => setShowDescription(!showDescription)}
+                  style={{
+                    background: '#2f2f35',
+                    border: 'none',
+                    color: '#efeff1',
+                    padding: '8px 12px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontWeight: '600',
+                    fontSize: '13px'
+                  }}
+                >
+                  <InfoCircleOutlined /> {showDescription ? 'Ẩn mô tả' : 'Hiện mô tả'}
+                </button>
+              )}
+            </div>
+
+            {showDescription && (
+              <div style={{
+                marginTop: '20px',
+                background: '#1f1f23',
+                padding: '15px',
+                borderRadius: '8px',
+                fontSize: '14px',
+                lineHeight: '1.5',
+                color: '#dedee3'
+              }}>
+                {room.description}
+              </div>
+            )}
+          </div>
         </div>
-        
-        <form onSubmit={handleSendChat} style={{ 
-          borderTop: '1px solid #3a3b3c',
-          paddingTop: '16px'
+
+        {/* RIGHT COLUMN: CHAT */}
+        <div style={{ 
+          width: '340px', 
+          background: '#18181b', 
+          borderLeft: '1px solid #2f2f35',
+          display: 'flex', 
+          flexDirection: 'column',
+          flexShrink: 0
         }}>
-          <input 
-            type="text" 
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            placeholder="Viết bình luận..."
-            style={{ 
-              width: '100%', 
-              background: '#3a3b3c', 
-              color: '#e4e6eb', 
-              border: '1px solid #4a4b4c', 
-              padding: '10px 12px',
-              borderRadius: '20px',
-              fontSize: '15px',
-              outline: 'none',
-              boxSizing: 'border-box'
-            }}
-          />
-        </form>
+          {/* Chat Header */}
+          <div style={{ 
+            height: '50px', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            borderBottom: '1px solid #2f2f35',
+            fontSize: '12px',
+            fontWeight: '600',
+            letterSpacing: '0.5px',
+            textTransform: 'uppercase',
+            color: '#adadb8'
+          }}>
+            Trò chuyện trực tiếp
+          </div>
+
+          {/* Chat Messages */}
+          <div className="custom-scrollbar" style={{ 
+            flex: 1, 
+            overflowY: 'auto', 
+            padding: '10px 15px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px'
+          }}>
+            {messages.length === 0 ? (
+              <div style={{ 
+                flex: 1, 
+                display: 'flex', 
+                flexDirection: 'column',
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                color: '#adadb8',
+                opacity: 0.7 
+              }}>
+                <div style={{ fontSize: '32px', marginBottom: '8px' }}>💬</div>
+                <div style={{ fontSize: '14px' }}>Chào mừng đến với phòng chat!</div>
+              </div>
+            ) : (
+              messages.map((msg, index) => {
+                const isSystem = !msg.userId;
+                return (
+                  <div key={msg._id || index} style={{ 
+                    fontSize: '13px', 
+                    lineHeight: '20px',
+                    padding: '4px 0',
+                    wordWrap: 'break-word',
+                    color: msg.deleted ? '#666' : '#efeff1',
+                    fontStyle: msg.deleted ? 'italic' : 'normal'
+                  }}>
+                    {!isSystem && (
+                      <span style={{ 
+                        fontWeight: '700', 
+                        color: msg.userId?._id === room.hostId._id ? '#e91916' : '#adadb8', // Host màu đỏ, user thường màu xám
+                        marginRight: '6px',
+                        cursor: 'pointer'
+                      }}>
+                        {msg.userId?.displayName || 'User'}:
+                        {msg.userId?._id === room.hostId._id && <span style={{marginLeft:'4px', fontSize:'10px', background:'#e91916', color:'white', padding:'1px 3px', borderRadius:'2px'}}>HOST</span>}
+                      </span>
+                    )}
+                    <span>{msg.deleted ? 'Tin nhắn đã bị xóa' : msg.message}</span>
+                  </div>
+                );
+              })
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Chat Input */}
+          <div style={{ padding: '20px' }}>
+            <form onSubmit={handleSendChat} style={{ position: 'relative' }}>
+              <input 
+                type="text" 
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Gửi tin nhắn..."
+                maxLength={200}
+                style={{ 
+                  width: '100%', 
+                  background: '#2f2f35', 
+                  color: '#efeff1', 
+                  border: '2px solid transparent', 
+                  padding: '12px 40px 12px 12px',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  transition: 'border-color 0.2s'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#9147ff'}
+                onBlur={(e) => e.target.style.borderColor = 'transparent'}
+              />
+              <button 
+                type="submit"
+                disabled={!chatInput.trim()}
+                style={{
+                  position: 'absolute',
+                  right: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'transparent',
+                  border: 'none',
+                  color: chatInput.trim() ? '#9147ff' : '#53535f',
+                  cursor: chatInput.trim() ? 'pointer' : 'default',
+                  padding: '4px',
+                  fontSize: '18px',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <SendOutlined />
+              </button>
+            </form>
+            <div style={{ 
+              textAlign: 'right', 
+              fontSize: '11px', 
+              color: '#adadb8', 
+              marginTop: '6px' 
+            }}>
+              {chatInput.length}/200
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
     </>
   );
 };
