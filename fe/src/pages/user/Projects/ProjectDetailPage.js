@@ -590,7 +590,7 @@ const ProjectDetailPage = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [zoomLevel, setZoomLevel] = useState(1); // Timeline zoom multiplier
-  const [workspaceScale, setWorkspaceScale] = useState(0.95); // Overall UI scale
+  const [workspaceScale, setWorkspaceScale] = useState(0.9); // Overall UI scale
   const [selectedItem, setSelectedItem] = useState(null);
   const [focusedClipId, setFocusedClipId] = useState(null);
   const [isDraggingItem, setIsDraggingItem] = useState(false);
@@ -604,7 +604,7 @@ const ProjectDetailPage = () => {
   // UI State
   const [activeTab, setActiveTab] = useState("lick-library"); // "lick-library", "midi-editor", "instrument"
   const [sidePanelOpen, setSidePanelOpen] = useState(true); // Bottom panel visibility
-  const [sidePanelWidth, setSidePanelWidth] = useState(320); // Bottom panel height (resizable)
+  const [sidePanelWidth, setSidePanelWidth] = useState(450); // Bottom panel height (resizable)
   const [chordLibraryPanelOpen, setChordLibraryPanelOpen] = useState(true); // Right chord library panel visibility
   const [chordLibraryPanelWidth, setChordLibraryPanelWidth] = useState(280); // Right panel width (resizable)
   const [selectedLick, setSelectedLick] = useState(null);
@@ -641,6 +641,8 @@ const ProjectDetailPage = () => {
   const [playingLickId, setPlayingLickId] = useState(null);
   const [lickAudioRefs, setLickAudioRefs] = useState({});
   const [lickProgress, setLickProgress] = useState({});
+
+
 
   // Generate all keys (12 major + 12 minor)
   const allKeys = useMemo(() => {
@@ -1096,12 +1098,7 @@ const ProjectDetailPage = () => {
     fetchRhythmPatterns();
   }, [projectId, fetchProject]);
 
-  // Set default key filter to project key when project loads
-  useEffect(() => {
-    if (project?.key && !selectedKeyFilter) {
-      setSelectedKeyFilter(project.key);
-    }
-  }, [project?.key]);
+
 
   useEffect(() => {
     const fetchChordLibrary = async () => {
@@ -1264,7 +1261,11 @@ const ProjectDetailPage = () => {
     const sourceChords = chordLibrary.length
       ? chordLibrary
       : DEFAULT_FALLBACK_CHORDS;
-    const filterKey = selectedKeyFilter || project?.key;
+    // Use null check to allow "" (All Keys) to be valid
+    const filterKey =
+      selectedKeyFilter !== null
+        ? selectedKeyFilter
+        : project?.key || "C Major";
 
     let filtered = sourceChords;
 
@@ -3542,7 +3543,7 @@ const ProjectDetailPage = () => {
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Timeline Area - Always Visible */}
           <div className="flex-1 flex flex-col bg-gray-900 overflow-hidden min-h-0">
-            <div className="flex border-b border-gray-800 h-10">
+            <div className="flex border-b border-gray-800 h-6">
               <div className="w-64 bg-gray-950 border-r border-gray-800 px-3 py-1.5 flex items-center">
                 <button
                   onClick={handleAddTrack}
@@ -3569,10 +3570,10 @@ const ProjectDetailPage = () => {
               >
                 {/* Time Ruler with Beat Markers */}
                 <div className="sticky top-0 z-20 flex">
-                  <div className="w-64 bg-gray-950 border-r border-gray-800 h-10 flex items-center px-4 text-xs font-semibold uppercase tracking-wide text-gray-400 sticky left-0 z-20">
+                  <div className="w-64 bg-gray-950 border-r border-gray-800 h-6 flex items-center px-4 text-xs font-semibold uppercase tracking-wide text-gray-400 sticky left-0 z-20">
                     Track
                   </div>
-                  <div className="flex-1 relative bg-gray-800 border-b border-gray-700 h-10 flex items-end">
+                  <div className="flex-1 relative bg-gray-800 border-b border-gray-700 h-6 flex items-end">
                     {/* Measure markers (every 4 beats) */}
                     {Array.from({
                       length:
@@ -4166,25 +4167,27 @@ const ProjectDetailPage = () => {
                     <div className="flex-1 overflow-y-auto p-2.5">
                       <div className="mb-2.5 space-y-1.5">
                         {/* Key Filter Dropdown */}
+                        {/* Key Filter Dropdown */}
                         <select
-                          value={selectedKeyFilter || project?.key || ""}
-                          onChange={(e) =>
-                            setSelectedKeyFilter(e.target.value || null)
+                          value={
+                            selectedKeyFilter !== null
+                              ? selectedKeyFilter
+                              : project?.key || "C Major"
                           }
+                          onChange={(e) => setSelectedKeyFilter(e.target.value)}
                           className="w-full bg-gray-800/80 border border-gray-700/50 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:ring-1 focus:ring-orange-500/50"
                         >
                           <option value="">All Keys</option>
-                          {project?.key && (
-                            <option
-                              value={project.key}
-                              className="bg-orange-600/80"
-                            >
-                              {project.key} (current)
-                            </option>
-                          )}
+                          <option
+                            value={project?.key || "C Major"}
+                            className="bg-orange-600/80"
+                          >
+                            {project?.key || "C Major"} (current)
+                          </option>
                           {allKeys
                             .filter(
-                              (key) => !project?.key || key !== project.key
+                              (key) =>
+                                key !== (project?.key || "C Major")
                             )
                             .map((key) => (
                               <option key={key} value={key}>
