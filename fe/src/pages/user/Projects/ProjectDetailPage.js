@@ -1096,6 +1096,13 @@ const ProjectDetailPage = () => {
     fetchRhythmPatterns();
   }, [projectId, fetchProject]);
 
+  // Set default key filter to project key when project loads
+  useEffect(() => {
+    if (project?.key && !selectedKeyFilter) {
+      setSelectedKeyFilter(project.key);
+    }
+  }, [project?.key]);
+
   useEffect(() => {
     const fetchChordLibrary = async () => {
       try {
@@ -3286,17 +3293,17 @@ const ProjectDetailPage = () => {
   return (
     <div className="h-screen w-full overflow-hidden bg-black">
       <div
-        className="flex flex-col h-screen bg-black text-white overflow-hidden mx-auto"
+        className="flex flex-col h-screen bg-black text-white overflow-hidden"
         style={{
           transform: `scale(${workspaceScale})`,
-          transformOrigin: "top center",
+          transformOrigin: "top left",
           width: `${(1 / workspaceScale) * 100}%`,
           height: `${(1 / workspaceScale) * 100}%`,
         }}
       >
-        {/* Top Bar */}
-        <div className="bg-gray-900 border-b border-gray-800 px-6 py-3 space-y-2">
-          <div className="flex flex-wrap items-center gap-3 justify-between">
+        {/* Top Bar - Minimal, Professional */}
+        <div className="bg-gray-950 border-b border-gray-800/50 px-4 py-2">
+          <div className="flex flex-wrap items-center gap-2.5 justify-between">
             <div className="flex items-center gap-3">
               <button
                 onClick={() => navigate("/projects")}
@@ -3654,11 +3661,11 @@ const ProjectDetailPage = () => {
                       style={{ minHeight: "90px" }}
                     >
                       <div
-                        className={`w-64 border-r border-gray-800 p-2.5 flex flex-col gap-2 sticky left-0 z-10 ${
+                        className={`w-64 border-r border-gray-800/50 p-2 flex flex-col gap-1.5 sticky left-0 z-10 ${
                           isMenuOpen
-                            ? "bg-gray-800"
+                            ? "bg-gray-800/80"
                             : isHoveringTrack
-                            ? "bg-gray-900"
+                            ? "bg-gray-900/80"
                             : "bg-gray-950"
                         }`}
                         style={{
@@ -4141,38 +4148,38 @@ const ProjectDetailPage = () => {
               >
                 {chordLibraryPanelOpen && (
                   <>
-                    {/* Panel Header */}
-                    <div className="p-2 border-b border-gray-800 flex items-center justify-between">
-                      <h3 className="text-white font-semibold text-sm">
+                    {/* Panel Header - Minimal */}
+                    <div className="px-3 py-1.5 border-b border-gray-800/50 flex items-center justify-between bg-gray-950">
+                      <h3 className="text-white font-semibold text-xs uppercase tracking-wide text-gray-300">
                         Chord Library
                       </h3>
                       <button
                         onClick={() => setChordLibraryPanelOpen(false)}
-                        className="text-gray-400 hover:text-white p-1"
+                        className="text-gray-500 hover:text-white p-0.5 transition-colors"
                         title="Hide chord library"
                       >
-                        <FaTimes size={14} />
+                        <FaTimes size={11} />
                       </button>
                     </div>
 
                     {/* Chord Library Content - Compact Layout */}
-                    <div className="flex-1 overflow-y-auto p-2">
-                      <div className="mb-2 space-y-1">
+                    <div className="flex-1 overflow-y-auto p-2.5">
+                      <div className="mb-2.5 space-y-1.5">
                         {/* Key Filter Dropdown */}
                         <select
-                          value={selectedKeyFilter || ""}
+                          value={selectedKeyFilter || project?.key || ""}
                           onChange={(e) =>
                             setSelectedKeyFilter(e.target.value || null)
                           }
-                          className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:ring-2 focus:ring-orange-500"
+                          className="w-full bg-gray-800/80 border border-gray-700/50 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:ring-1 focus:ring-orange-500/50"
                         >
                           <option value="">All Keys</option>
                           {project?.key && (
                             <option
                               value={project.key}
-                              className="bg-orange-600"
+                              className="bg-orange-600/80"
                             >
-                              {project.key} (current key)
+                              {project.key} (current)
                             </option>
                           )}
                           {allKeys
@@ -4185,9 +4192,10 @@ const ProjectDetailPage = () => {
                               </option>
                             ))}
                         </select>
-                        <p className="text-gray-500 text-[10px]">
+                        <p className="text-gray-500 text-[10px] px-0.5">
                           {chordPalette.length} chords
-                          {selectedKeyFilter && ` in ${selectedKeyFilter}`}
+                          {(selectedKeyFilter || project?.key) &&
+                            ` in ${selectedKeyFilter || project?.key}`}
                         </p>
                       </div>
                       {loadingChords && (
@@ -4362,13 +4370,13 @@ const ProjectDetailPage = () => {
                   </button>
                 </div>
 
-                {/* Tabs - Horizontal */}
-                <div className="flex items-center border-b border-gray-800 bg-gray-900">
+                {/* Tabs - Horizontal, Compact */}
+                <div className="flex items-center border-b border-gray-800/50 bg-gray-900/50">
                   <button
                     onClick={() => setActiveTab("lick-library")}
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                       activeTab === "lick-library"
-                        ? "bg-gray-800 text-red-500 border-b-2 border-red-500"
+                        ? "bg-gray-800/80 text-red-400 border-b-2 border-red-400"
                         : "text-gray-400 hover:text-white"
                     }`}
                   >
@@ -4376,9 +4384,9 @@ const ProjectDetailPage = () => {
                   </button>
                   <button
                     onClick={() => setActiveTab("backing-track")}
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                       activeTab === "backing-track"
-                        ? "bg-gray-800 text-indigo-500 border-b-2 border-indigo-500"
+                        ? "bg-gray-800/80 text-indigo-400 border-b-2 border-indigo-400"
                         : "text-gray-400 hover:text-white"
                     }`}
                   >
@@ -4386,9 +4394,9 @@ const ProjectDetailPage = () => {
                   </button>
                   <button
                     onClick={() => setActiveTab("midi-editor")}
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                       activeTab === "midi-editor"
-                        ? "bg-gray-800 text-white border-b-2 border-white"
+                        ? "bg-gray-800/80 text-white border-b-2 border-white"
                         : "text-gray-400 hover:text-white"
                     }`}
                   >
@@ -4396,9 +4404,9 @@ const ProjectDetailPage = () => {
                   </button>
                   <button
                     onClick={() => setActiveTab("instrument")}
-                    className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
                       activeTab === "instrument"
-                        ? "bg-gray-800 text-white border-b-2 border-white"
+                        ? "bg-gray-800/80 text-cyan-400 border-b-2 border-cyan-400"
                         : "text-gray-400 hover:text-white"
                     }`}
                   >
@@ -4410,7 +4418,7 @@ const ProjectDetailPage = () => {
                 <div className="flex-1 overflow-y-auto">
                   {/* Lick Library Tab */}
                   {activeTab === "lick-library" && (
-                    <div className="p-3 space-y-3">
+                    <div className="p-2.5 space-y-2">
                       {/* Search */}
                       <div className="relative">
                         <FaSearch
