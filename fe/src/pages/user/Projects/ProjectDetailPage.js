@@ -590,7 +590,7 @@ const ProjectDetailPage = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [zoomLevel, setZoomLevel] = useState(1); // Timeline zoom multiplier
-  const [workspaceScale, setWorkspaceScale] = useState(0.85); // Overall UI scale
+  const [workspaceScale, setWorkspaceScale] = useState(0.95); // Overall UI scale
   const [selectedItem, setSelectedItem] = useState(null);
   const [focusedClipId, setFocusedClipId] = useState(null);
   const [isDraggingItem, setIsDraggingItem] = useState(false);
@@ -637,7 +637,7 @@ const ProjectDetailPage = () => {
   const [selectedKeyFilter, setSelectedKeyFilter] = useState(null); // null = all keys, or specific key string
   const [lickPage, setLickPage] = useState(1);
   const [lickHasMore, setLickHasMore] = useState(true);
-  const LICKS_PER_PAGE = 20;
+  const LICKS_PER_PAGE = 10; // Reduced initial load to prevent crashes
   const [playingLickId, setPlayingLickId] = useState(null);
   const [lickAudioRefs, setLickAudioRefs] = useState({});
   const [lickProgress, setLickProgress] = useState({});
@@ -3284,9 +3284,9 @@ const ProjectDetailPage = () => {
   const workspaceScalePercentage = Math.round(workspaceScale * 100);
 
   return (
-    <div className="h-screen w-full overflow-auto bg-black">
+    <div className="h-screen w-full overflow-hidden bg-black">
       <div
-        className="flex flex-col h-screen bg-black text-white overflow-hidden"
+        className="flex flex-col h-screen bg-black text-white overflow-hidden mx-auto"
         style={{
           transform: `scale(${workspaceScale})`,
           transformOrigin: "top center",
@@ -3535,17 +3535,17 @@ const ProjectDetailPage = () => {
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Timeline Area - Always Visible */}
           <div className="flex-1 flex flex-col bg-gray-900 overflow-hidden min-h-0">
-            <div className="flex border-b border-gray-800">
-              <div className="w-64 bg-gray-950 border-r border-gray-800 p-4">
+            <div className="flex border-b border-gray-800 h-10">
+              <div className="w-64 bg-gray-950 border-r border-gray-800 px-3 py-1.5 flex items-center">
                 <button
                   onClick={handleAddTrack}
-                  className="w-full bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm font-medium flex items-center justify-center gap-2"
+                  className="w-full bg-gray-800 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs font-medium flex items-center justify-center gap-1.5"
                 >
-                  <FaPlus size={12} />
+                  <FaPlus size={10} />
                   Add a track
                 </button>
               </div>
-              <div className="flex-1 bg-gray-900 px-4 text-xs uppercase tracking-wide text-gray-500 flex items-center">
+              <div className="flex-1 bg-gray-900 px-3 text-[10px] uppercase tracking-wide text-gray-500 flex items-center">
                 Drag licks or chords onto any track to build your arrangement
               </div>
             </div>
@@ -4458,170 +4458,198 @@ const ProjectDetailPage = () => {
                         </select>
                       </div>
 
+                      {/* Loading State */}
+                      {loadingLicks && availableLicks.length === 0 && (
+                        <div className="flex items-center justify-center py-8">
+                          <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-orange-500"></div>
+                          <span className="ml-2 text-gray-400 text-sm">
+                            Loading licks...
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Empty State */}
+                      {!loadingLicks && availableLicks.length === 0 && (
+                        <div className="flex flex-col items-center justify-center py-8 text-gray-400">
+                          <FaMusic size={32} className="mb-2 opacity-50" />
+                          <p className="text-sm">
+                            {lickSearchTerm || selectedGenre || selectedType
+                              ? "No licks found matching your search"
+                              : "No licks available. Try searching or adjusting filters."}
+                          </p>
+                        </div>
+                      )}
+
                       {/* Lick Grid - Horizontal scroll with lazy loading */}
-                      <div className="flex gap-3 overflow-x-auto pb-2">
-                        {availableLicks.map((lick) => {
-                          const lickId = lick._id || lick.lick_id || lick.id;
-                          const isPlaying = playingLickId === lickId;
-                          const progress = lickProgress[lickId] || 0;
-                          const waveform =
-                            lick.waveformData || lick.waveform_data || [];
-                          const creator = lick.creator || {};
-                          const creatorName =
-                            creator.display_name ||
-                            creator.displayName ||
-                            creator.username ||
-                            "Unknown";
-                          const creatorAvatar =
-                            creator.avatar_url || creator.avatarUrl;
-                          const duration = lick.duration || 0;
-                          const tempo = lick.tempo;
-                          const key = lick.key;
+                      {availableLicks.length > 0 && (
+                        <div className="flex gap-3 overflow-x-auto pb-2">
+                          {availableLicks.map((lick) => {
+                            const lickId = lick._id || lick.lick_id || lick.id;
+                            const isPlaying = playingLickId === lickId;
+                            const progress = lickProgress[lickId] || 0;
+                            const waveform =
+                              lick.waveformData || lick.waveform_data || [];
+                            const creator = lick.creator || {};
+                            const creatorName =
+                              creator.display_name ||
+                              creator.displayName ||
+                              creator.username ||
+                              "Unknown";
+                            const creatorAvatar =
+                              creator.avatar_url || creator.avatarUrl;
+                            const duration = lick.duration || 0;
+                            const tempo = lick.tempo;
+                            const key = lick.key;
 
-                          // Get genre and type from tags
-                          const tags = lick.tags || [];
-                          const genreTag = tags.find(
-                            (t) => t.tag_type === "genre"
-                          );
-                          const typeTag = tags.find(
-                            (t) => t.tag_type === "type"
-                          );
-                          const genre =
-                            genreTag?.tag_name ||
-                            genreTag?.name ||
-                            lick.genre ||
-                            "—";
-                          const type =
-                            typeTag?.tag_name ||
-                            typeTag?.name ||
-                            lick.type ||
-                            "—";
+                            // Get genre and type from tags
+                            const tags = lick.tags || [];
+                            const genreTag = tags.find(
+                              (t) => t.tag_type === "genre"
+                            );
+                            const typeTag = tags.find(
+                              (t) => t.tag_type === "type"
+                            );
+                            const genre =
+                              genreTag?.tag_name ||
+                              genreTag?.name ||
+                              lick.genre ||
+                              "—";
+                            const type =
+                              typeTag?.tag_name ||
+                              typeTag?.name ||
+                              lick.type ||
+                              "—";
 
-                          return (
-                            <div
-                              key={lickId}
-                              draggable
-                              onDragStart={() => handleDragStart(lick)}
-                              onDragEnd={() => setDraggedLick(null)}
-                              className="bg-gray-800 rounded-lg border border-gray-700 hover:border-gray-600 transition-all min-w-[200px] max-w-[200px] flex-shrink-0 cursor-grab active:cursor-grabbing overflow-hidden"
-                            >
-                              {/* Waveform Preview */}
+                            return (
                               <div
-                                className="relative h-20 bg-gray-900 cursor-pointer"
-                                onClick={(e) => handleLickPlayPause(lick, e)}
+                                key={lickId}
+                                draggable
+                                onDragStart={() => handleDragStart(lick)}
+                                onDragEnd={() => setDraggedLick(null)}
+                                className="bg-gray-800 rounded-lg border border-gray-700 hover:border-gray-600 transition-all min-w-[200px] max-w-[200px] flex-shrink-0 cursor-grab active:cursor-grabbing overflow-hidden"
                               >
-                                {waveform.length > 0 ? (
-                                  <div className="absolute inset-0 flex items-end justify-center gap-0.5 px-2 pb-2">
-                                    {waveform
-                                      .slice(0, 60)
-                                      .map((amplitude, index) => {
-                                        const barProgress =
-                                          index / waveform.length;
-                                        const isPlayed =
-                                          barProgress <= progress;
-                                        return (
-                                          <div
-                                            key={index}
-                                            className="w-0.5 bg-gray-600 transition-all duration-100"
-                                            style={{
-                                              height: `${Math.max(
-                                                amplitude * 100,
-                                                10
-                                              )}%`,
-                                              backgroundColor:
-                                                isPlaying && isPlayed
-                                                  ? "#f97316"
-                                                  : "#6b7280",
-                                              opacity:
-                                                isPlaying && isPlayed ? 1 : 0.6,
-                                            }}
-                                          />
-                                        );
-                                      })}
-                                  </div>
-                                ) : (
-                                  <div className="absolute inset-0 flex items-center justify-center">
-                                    <FaMusic
-                                      className="text-gray-600"
-                                      size={20}
-                                    />
-                                  </div>
-                                )}
-
-                                {/* Play/Pause Button */}
-                                <button
+                                {/* Waveform Preview */}
+                                <div
+                                  className="relative h-20 bg-gray-900 cursor-pointer"
                                   onClick={(e) => handleLickPlayPause(lick, e)}
-                                  className="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 text-white rounded-full p-1.5 transition-colors"
                                 >
-                                  {isPlaying ? (
-                                    <FaPause size={10} />
+                                  {waveform.length > 0 ? (
+                                    <div className="absolute inset-0 flex items-end justify-center gap-0.5 px-2 pb-2">
+                                      {waveform
+                                        .slice(0, 60)
+                                        .map((amplitude, index) => {
+                                          const barProgress =
+                                            index / waveform.length;
+                                          const isPlayed =
+                                            barProgress <= progress;
+                                          return (
+                                            <div
+                                              key={index}
+                                              className="w-0.5 bg-gray-600 transition-all duration-100"
+                                              style={{
+                                                height: `${Math.max(
+                                                  amplitude * 100,
+                                                  10
+                                                )}%`,
+                                                backgroundColor:
+                                                  isPlaying && isPlayed
+                                                    ? "#f97316"
+                                                    : "#6b7280",
+                                                opacity:
+                                                  isPlaying && isPlayed
+                                                    ? 1
+                                                    : 0.6,
+                                              }}
+                                            />
+                                          );
+                                        })}
+                                    </div>
                                   ) : (
-                                    <FaPlay size={10} className="ml-0.5" />
-                                  )}
-                                </button>
-                              </div>
-
-                              {/* Lick Info */}
-                              <div className="p-2.5 space-y-1.5">
-                                {/* Title */}
-                                <div className="text-white text-sm font-semibold truncate">
-                                  {lick.title}
-                                </div>
-
-                                {/* Creator Info */}
-                                <div className="flex items-center gap-1.5">
-                                  {creatorAvatar ? (
-                                    <img
-                                      src={creatorAvatar}
-                                      alt={creatorName}
-                                      className="w-4 h-4 rounded-full object-cover"
-                                    />
-                                  ) : (
-                                    <div className="w-4 h-4 rounded-full bg-gray-600 flex items-center justify-center">
-                                      <span className="text-[8px] text-gray-300">
-                                        {creatorName.charAt(0).toUpperCase()}
-                                      </span>
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                      <FaMusic
+                                        className="text-gray-600"
+                                        size={20}
+                                      />
                                     </div>
                                   )}
-                                  <span className="text-gray-400 text-xs truncate">
-                                    {creatorName}
-                                  </span>
+
+                                  {/* Play/Pause Button */}
+                                  <button
+                                    onClick={(e) =>
+                                      handleLickPlayPause(lick, e)
+                                    }
+                                    className="absolute bottom-2 right-2 bg-black/70 hover:bg-black/90 text-white rounded-full p-1.5 transition-colors"
+                                  >
+                                    {isPlaying ? (
+                                      <FaPause size={10} />
+                                    ) : (
+                                      <FaPlay size={10} className="ml-0.5" />
+                                    )}
+                                  </button>
                                 </div>
 
-                                {/* Metadata */}
-                                <div className="flex items-center gap-2 text-xs text-gray-500">
-                                  {duration > 0 && (
-                                    <span>{duration.toFixed(1)}s</span>
-                                  )}
-                                  {tempo && (
-                                    <>
-                                      <span>•</span>
-                                      <span>{Math.round(tempo)} BPM</span>
-                                    </>
-                                  )}
-                                  {key && (
-                                    <>
-                                      <span>•</span>
-                                      <span>{key}</span>
-                                    </>
-                                  )}
-                                </div>
+                                {/* Lick Info */}
+                                <div className="p-2.5 space-y-1.5">
+                                  {/* Title */}
+                                  <div className="text-white text-sm font-semibold truncate">
+                                    {lick.title}
+                                  </div>
 
-                                {/* Tags */}
-                                <div className="flex items-center gap-1 text-xs text-gray-500 truncate">
-                                  <span>{genre}</span>
-                                  {type && (
-                                    <>
-                                      <span>•</span>
-                                      <span>{type}</span>
-                                    </>
-                                  )}
+                                  {/* Creator Info */}
+                                  <div className="flex items-center gap-1.5">
+                                    {creatorAvatar ? (
+                                      <img
+                                        src={creatorAvatar}
+                                        alt={creatorName}
+                                        className="w-4 h-4 rounded-full object-cover"
+                                      />
+                                    ) : (
+                                      <div className="w-4 h-4 rounded-full bg-gray-600 flex items-center justify-center">
+                                        <span className="text-[8px] text-gray-300">
+                                          {creatorName.charAt(0).toUpperCase()}
+                                        </span>
+                                      </div>
+                                    )}
+                                    <span className="text-gray-400 text-xs truncate">
+                                      {creatorName}
+                                    </span>
+                                  </div>
+
+                                  {/* Metadata */}
+                                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                                    {duration > 0 && (
+                                      <span>{duration.toFixed(1)}s</span>
+                                    )}
+                                    {tempo && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{Math.round(tempo)} BPM</span>
+                                      </>
+                                    )}
+                                    {key && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{key}</span>
+                                      </>
+                                    )}
+                                  </div>
+
+                                  {/* Tags */}
+                                  <div className="flex items-center gap-1 text-xs text-gray-500 truncate">
+                                    <span>{genre}</span>
+                                    {type && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{type}</span>
+                                      </>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                            );
+                          })}
+                        </div>
+                      )}
 
                       {/* Load More button for licks */}
                       {lickHasMore && (
