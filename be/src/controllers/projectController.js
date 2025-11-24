@@ -101,24 +101,12 @@ export const createProject = async (req, res) => {
 
     await project.save();
 
-    // Create default backing track (if needed)
-    // Create a default track for the project
-    const defaultTrack = new ProjectTrack({
-      projectId: project._id,
-      trackName: "01: Backing Track",
-      trackOrder: 0,
-      volume: 1.0,
-      pan: 0.0,
-      muted: false,
-      solo: false,
-    });
-    await defaultTrack.save();
-
-    // Create melody track
+    // Create default melody track only
+    // Backing track will be created automatically when user generates backing track or adds chords
     const melodyTrack = new ProjectTrack({
       projectId: project._id,
       trackName: "01 Melody",
-      trackOrder: 1,
+      trackOrder: 0,
       volume: 1.0,
       pan: 0.0,
       muted: false,
