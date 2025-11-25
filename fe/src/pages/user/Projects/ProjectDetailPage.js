@@ -2857,8 +2857,17 @@ const ProjectDetailPage = () => {
       });
 
       if (response.success) {
-        // Optimistic update - add item to local state immediately
-        const newItem = normalizeTimelineItem(response.data);
+        // --- FIX BUG 2: Đảm bảo ID luôn tồn tại ---
+        // Nếu API trả về 'id' thay vì '_id', hoặc thiếu id, ta tạo ID tạm thời
+        const rawItem = response.data;
+        const uniqueId =
+          rawItem._id || rawItem.id || `temp-${Date.now()}-${Math.random()}`;
+
+        const newItem = normalizeTimelineItem({
+          ...rawItem,
+          _id: uniqueId, // Ép buộc có _id để React phân biệt
+        });
+
         pushHistory();
         setTracks((prevTracks) =>
           prevTracks.map((track) =>
@@ -2871,7 +2880,11 @@ const ProjectDetailPage = () => {
           )
         );
         setError(null);
-        refreshProject();
+
+        // --- FIX BUG 1: BỎ DÒNG refreshProject() ---
+        // Không gọi refreshProject() ngay lập tức vì server có thể chưa lưu kịp.
+        // State cục bộ (newItem) đã đủ để hiển thị rồi.
+        // refreshProject(); <--- XÓA HOẶC COMMENT DÒNG NÀY
       } else {
         setError(response.message || "Failed to add lick to timeline");
       }
