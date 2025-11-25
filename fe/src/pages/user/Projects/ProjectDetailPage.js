@@ -54,7 +54,14 @@ import {
 import BackingTrackPanel from "../../../components/BackingTrackPanel";
 import MidiEditor from "../../../components/MidiEditor";
 import AIGenerationLoadingModal from "../../../components/AIGenerationLoadingModal";
+import MidiClip from "../../../components/MidiClip";
 import * as Tone from "tone";
+import {
+  parseMidiNotes,
+  getMidiNotesForChord,
+  midiToNoteName,
+  midiToNoteNameNoOctave,
+} from "../../../utils/midi";
 
 const HISTORY_LIMIT = 50;
 const MIN_CLIP_DURATION = 0.1;
@@ -109,6 +116,208 @@ const cloneChordsForHistory = (sourceChords = []) =>
     typeof entry === "string" ? entry : { ...entry }
   );
 
+const formatLabelValue = (value) => {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => formatLabelValue(entry))
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (typeof value === "object") {
+    const candidate =
+      value.displayName ||
+      value.name ||
+      value.title ||
+      value.label ||
+      value.instrument ||
+      value.instrumentName ||
+      value.patternName ||
+      value.description ||
+      value.type;
+    if (candidate) return String(candidate);
+  }
+  return "";
+};
+
+const formatTrackTitle = (title) => {
+  const raw = formatLabelValue(title) || "Track";
+  const trimmed = raw.trim();
+  const cleaned = trimmed.replace(/^[\d\s._-]+/, "").trim();
+  return cleaned || trimmed || "Track";
+};
+
+const createDefaultPatternSteps = (length = 8) => {
+  const clamped = Math.max(4, Math.min(length, 32));
+  return Array.from({ length: clamped }, (_, idx) =>
+    idx % 4 === 0 ? 0.95 : idx % 2 === 0 ? 0.55 : 0.2
+  );
+};
+
+const candidatePatternKeys = [
+  "steps",
+  "sequence",
+  "pattern",
+  "patternData",
+  "grid",
+  "values",
+  "hits",
+  "data",
+  "notes",
+  "timeline",
+];
+
+const coercePatternArray = (raw) => {
+  if (Array.isArray(raw)) return raw.flat(Infinity);
+  if (typeof raw === "number" || typeof raw === "boolean") return [raw];
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      return coercePatternArray(parsed);
+    } catch {
+      if (/^[01]+$/.test(trimmed)) {
+        return trimmed.split("").map((char) => (char === "1" ? 1 : 0));
+      }
+      const tokens = trimmed.split(/[\s,|/-]+/).filter(Boolean);
+      if (tokens.length) {
+        return tokens
+          .map((token) => Number(token))
+          .filter((num) => !Number.isNaN(num));
+      }
+    }
+    return [];
+  }
+  if (raw && typeof raw === "object") {
+    for (const key of candidatePatternKeys) {
+      if (raw[key] !== undefined) {
+        const arr = coercePatternArray(raw[key]);
+        if (arr.length) return arr;
+      }
+    }
+    return [];
+  }
+  return [];
+};
+
+const normalizeRhythmStepValue = (step) => {
+  if (typeof step === "boolean") return step ? 1 : 0;
+  if (typeof step === "number") return step;
+  if (typeof step === "string") {
+    const num = Number(step);
+    if (!Number.isNaN(num)) return num;
+    return step === "x" || step === "X" ? 1 : 0;
+  }
+  if (step && typeof step === "object") {
+    const numericKeys = [
+      "velocity",
+      "value",
+      "intensity",
+      "accent",
+      "gain",
+      "amount",
+    ];
+    for (const key of numericKeys) {
+      if (typeof step[key] === "number") {
+        return step[key];
+      }
+    }
+    if (typeof step.active === "boolean") return step.active ? 1 : 0;
+    if (typeof step.on === "boolean") return step.on ? 1 : 0;
+  }
+  return 0;
+};
+
+const clampStepValue = (value) => {
+  if (!Number.isFinite(value)) return 0;
+  if (value > 1) return Math.min(1, value / 127);
+  if (value < 0) return 0;
+  return value;
+};
+
+const normalizeRhythmSteps = (raw, fallbackLength = 0) => {
+  const arr = coercePatternArray(raw);
+  const normalized = arr
+    .map((step) => normalizeRhythmStepValue(step))
+    .map((value) => clampStepValue(value))
+    .filter((_, idx) => idx < 128);
+
+  if (normalized.length) {
+    return normalized;
+  }
+
+  if (fallbackLength > 0) {
+    return createDefaultPatternSteps(fallbackLength);
+  }
+
+  return [];
+};
+
+const normalizeRhythmPattern = (pattern) => {
+  if (!pattern) return null;
+  const fallbackLength =
+    (Array.isArray(pattern.steps) && pattern.steps.length) ||
+    (Array.isArray(pattern.sequence) && pattern.sequence.length) ||
+    Number(pattern.stepCount) ||
+    Number(pattern.subdivisionCount) ||
+    Number(pattern.length) ||
+    Number(pattern.beatCount) ||
+    8;
+
+  const sourceCandidates = [
+    pattern.steps,
+    pattern.sequence,
+    pattern.patternData,
+    pattern.pattern,
+    pattern.grid,
+    pattern.values,
+    pattern.hits,
+    pattern.timeline,
+    pattern.midiPreview,
+    pattern.midiNotes,
+  ];
+
+  let steps = [];
+  for (const source of sourceCandidates) {
+    const parsed = normalizeRhythmSteps(source);
+    if (parsed.length) {
+      steps = parsed;
+      break;
+    }
+  }
+
+  if (!steps.length) {
+    steps = createDefaultPatternSteps(fallbackLength);
+  }
+
+  return {
+    ...pattern,
+    visualSteps: steps,
+    visualStepCount: steps.length,
+    displayName: pattern.name || pattern.title || pattern.slug || "Rhythm",
+  };
+};
+
+const registerPatternLookupKey = (map, key, pattern) => {
+  if (key === null || key === undefined) return;
+  if (typeof key === "object") return;
+  const strKey = String(key).trim();
+  if (!strKey) return;
+  map[strKey] = pattern;
+  map[strKey.toLowerCase()] = pattern;
+};
+
+const lookupPatternFromMap = (map, key) => {
+  if (key === null || key === undefined) return null;
+  if (typeof key === "object") return null;
+  const strKey = String(key).trim();
+  if (!strKey) return null;
+  return map[strKey] || map[strKey.toLowerCase()] || null;
+};
+
 const formatTransportTime = (seconds = 0) => {
   const totalSeconds = Math.max(0, seconds);
   const minutes = Math.floor(totalSeconds / 60);
@@ -119,62 +328,126 @@ const formatTransportTime = (seconds = 0) => {
   return `${minutes.toString().padStart(2, "0")}:${secs}.${tenths}`;
 };
 
-const parseMidiNotes = (value) => {
-  if (Array.isArray(value)) return value;
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+/**
+ * Derive detailed MIDI events for a chord block so we can visualize and describe it consistently.
+ */
+const getChordMidiEvents = (
+  item,
+  fallbackDuration = 0,
+  patternSteps = null
+) => {
+  if (!item) return [];
+
+  if (Array.isArray(item.customMidiEvents) && item.customMidiEvents.length) {
+    return item.customMidiEvents;
   }
-  return [];
+
+  const duration = fallbackDuration || item.duration || 0;
+  if (Array.isArray(item.midiNotes) && item.midiNotes.length) {
+    const chordMidi = item.midiNotes.map((pitch) => ({
+      pitch: Number(pitch),
+      startTime: 0,
+      duration,
+    }));
+    if (patternSteps?.length && duration > 0) {
+      const generated = generatePatternMidiEvents(
+        chordMidi.map((event) => event.pitch),
+        patternSteps,
+        duration
+      );
+      if (generated.length) return generated;
+    }
+    return chordMidi;
+  }
+
+  const fallbackNotes = getMidiNotesForChord(item.chordName || item.chord);
+  if (!fallbackNotes.length) return [];
+
+  if (patternSteps?.length && duration > 0) {
+    const generated = generatePatternMidiEvents(
+      fallbackNotes,
+      patternSteps,
+      duration
+    );
+    if (generated.length) return generated;
+  }
+
+  return fallbackNotes.map((pitch) => ({
+    pitch,
+    startTime: 0,
+    duration,
+  }));
 };
 
-/**
- * Convert MIDI note number to note name (C, C#, D, etc.)
- */
-const midiToNoteName = (midiNote) => {
-  const noteNames = [
-    "C",
-    "C#",
-    "D",
-    "D#",
-    "E",
-    "F",
-    "F#",
-    "G",
-    "G#",
-    "A",
-    "A#",
-    "B",
-  ];
-  const octave = Math.floor(midiNote / 12) - 1;
-  const note = midiNote % 12;
-  return noteNames[note] + octave;
+const generatePatternMidiEvents = (
+  pitches = [],
+  patternSteps = [],
+  totalDuration = 0
+) => {
+  if (!pitches.length || !patternSteps.length || !totalDuration) return [];
+  const stepDuration = Math.max(
+    MIN_CLIP_DURATION,
+    totalDuration / patternSteps.length
+  );
+  const events = [];
+
+  patternSteps.forEach((value, index) => {
+    if (!value || value <= 0) return;
+    const startTime = index * stepDuration;
+    const duration = Math.max(MIN_CLIP_DURATION, stepDuration * 0.85);
+    const velocity = Math.max(0.1, Math.min(1, value));
+    pitches.forEach((pitch) => {
+      events.push({
+        pitch: Number(pitch),
+        startTime,
+        duration,
+        velocity,
+      });
+    });
+  });
+
+  return events;
 };
 
-/**
- * Convert MIDI note number to note name without octave (C, C#, D, etc.)
- */
-const midiToNoteNameNoOctave = (midiNote) => {
-  const noteNames = [
-    "C",
-    "C#",
-    "D",
-    "D#",
-    "E",
-    "F",
-    "F#",
-    "G",
-    "G#",
-    "A",
-    "A#",
-    "B",
-  ];
-  const note = midiNote % 12;
-  return noteNames[note];
+const deriveRhythmGrid = (
+  events = [],
+  totalDuration = 0,
+  fallbackSteps = [],
+  preferredLength = 0
+) => {
+  const stepCount =
+    preferredLength ||
+    (fallbackSteps?.length
+      ? fallbackSteps.length
+      : Math.min(32, Math.max(8, Math.round(totalDuration * 2))));
+
+  if (!events.length || !totalDuration || !stepCount) {
+    return fallbackSteps || [];
+  }
+
+  const grid = Array(stepCount).fill(0);
+  const stepDuration = totalDuration / stepCount;
+
+  events.forEach((event) => {
+    const start = Math.max(0, Number(event.startTime) || 0);
+    const duration = Math.max(
+      MIN_CLIP_DURATION,
+      Number(event.duration) || stepDuration
+    );
+    const end = Math.min(totalDuration, start + duration);
+    let startIndex = Math.floor(start / stepDuration);
+    let endIndex = Math.floor(end / stepDuration);
+    if (endIndex < startIndex) endIndex = startIndex;
+    for (let i = startIndex; i <= endIndex && i < stepCount; i += 1) {
+      const overlapStart = Math.max(start, i * stepDuration);
+      const overlapEnd = Math.min(end, (i + 1) * stepDuration);
+      const proportion = Math.max(0, overlapEnd - overlapStart) / stepDuration;
+      const velocity = Number(event.velocity) || 0.6;
+      grid[i] = Math.max(grid[i], 0.2 + proportion * velocity);
+    }
+  });
+
+  return grid;
 };
 
 /**
@@ -462,6 +735,23 @@ const normalizeChordEntry = (entry) => {
     chordName,
     midiNotes: parseMidiNotes(entry.midiNotes),
     variation: entry.variation || entry.variant || null,
+    rhythmPatternId:
+      entry.rhythmPatternId ||
+      entry.rhythmPattern ||
+      entry.patternId ||
+      entry.rhythm?.patternId ||
+      entry.rhythm?.id ||
+      null,
+    rhythmPatternName:
+      entry.rhythmPatternName ||
+      entry.rhythm?.name ||
+      entry.patternName ||
+      null,
+    rhythmPatternSteps:
+      entry.rhythmPatternSteps ||
+      entry.rhythm?.steps ||
+      entry.patternSteps ||
+      null,
     rhythm: entry.rhythm || entry.pattern || null,
     instrumentStyle: entry.instrumentStyle || entry.timbre || null,
   };
@@ -600,6 +890,7 @@ const ProjectDetailPage = () => {
   const [draggedChord, setDraggedChord] = useState(null);
   const [dragOverTrack, setDragOverTrack] = useState(null);
   const [dragOverPosition, setDragOverPosition] = useState(null);
+  const [selectedTrackId, setSelectedTrackId] = useState(null); // New state for selected track
 
   // UI State
   const [activeTab, setActiveTab] = useState("lick-library"); // "lick-library", "midi-editor", "instrument"
@@ -642,8 +933,6 @@ const ProjectDetailPage = () => {
   const [lickAudioRefs, setLickAudioRefs] = useState({});
   const [lickProgress, setLickProgress] = useState({});
 
-
-
   // Generate all keys (12 major + 12 minor)
   const allKeys = useMemo(() => {
     const notes = [
@@ -672,11 +961,108 @@ const ProjectDetailPage = () => {
   const [instruments, setInstruments] = useState([]);
   const [loadingInstruments, setLoadingInstruments] = useState(false);
   const [selectedInstrumentId, setSelectedInstrumentId] = useState(null);
+  const resolvedBackingInstrumentId = useMemo(
+    () => selectedInstrumentId || project?.backingInstrumentId || null,
+    [selectedInstrumentId, project?.backingInstrumentId]
+  );
+  const instrumentHighlightId = useMemo(() => {
+    if (!selectedTrackId) return resolvedBackingInstrumentId;
+    const targetTrack = tracks.find((t) => t._id === selectedTrackId);
+    if (!targetTrack) return null;
+    if (targetTrack.isBackingTrack || targetTrack.trackType === "backing") {
+      return resolvedBackingInstrumentId;
+    }
+    return targetTrack.instrument || null;
+  }, [selectedTrackId, tracks, resolvedBackingInstrumentId]);
 
   // Rhythm Patterns
   const [rhythmPatterns, setRhythmPatterns] = useState([]);
   const [loadingRhythmPatterns, setLoadingRhythmPatterns] = useState(false);
   const [selectedRhythmPatternId, setSelectedRhythmPatternId] = useState(null);
+  const rhythmPatternLookup = useMemo(() => {
+    const map = {};
+    (rhythmPatterns || []).forEach((pattern) => {
+      if (!pattern) return;
+      const normalized = normalizeRhythmPattern(pattern);
+      registerPatternLookupKey(map, pattern._id, normalized);
+      registerPatternLookupKey(map, pattern.id, normalized);
+      registerPatternLookupKey(map, pattern.slug, normalized);
+      registerPatternLookupKey(map, pattern.name, normalized);
+    });
+    return map;
+  }, [rhythmPatterns]);
+
+  const lookupRhythmPattern = useCallback(
+    (key) => lookupPatternFromMap(rhythmPatternLookup, key),
+    [rhythmPatternLookup]
+  );
+
+  const getRhythmPatternVisual = useCallback(
+    (item) => {
+      if (!item) return null;
+
+      const patternKeys = [
+        item.rhythmPatternId,
+        item.rhythmPattern,
+        item.rhythm?.patternId,
+        item.rhythm?.id,
+        item.rhythmPatternName,
+        item.rhythm?.name,
+      ].filter(Boolean);
+
+      const tryLookupPattern = () => {
+        for (const key of patternKeys) {
+          const found = lookupRhythmPattern(key);
+          if (found) return found;
+        }
+        return null;
+      };
+
+      const directSources = [
+        item.rhythmPatternSteps,
+        item.rhythmPatternData,
+        item.rhythm?.steps,
+        item.rhythm,
+      ];
+
+      for (const source of directSources) {
+        const steps = normalizeRhythmSteps(source);
+        if (steps.length) {
+          const matchedPattern = tryLookupPattern();
+          const label =
+            item.rhythmPatternName ||
+            item.rhythm?.name ||
+            matchedPattern?.displayName ||
+            null;
+          return { steps, label };
+        }
+      }
+
+      const matchedPattern = tryLookupPattern();
+      if (matchedPattern) {
+        return {
+          steps: matchedPattern.visualSteps,
+          label: matchedPattern.displayName,
+        };
+      }
+
+      if (selectedRhythmPatternId) {
+        const fallback = lookupRhythmPattern(selectedRhythmPatternId);
+        if (fallback) {
+          return {
+            steps: fallback.visualSteps,
+            label: fallback.displayName,
+          };
+        }
+      }
+
+      return {
+        steps: createDefaultPatternSteps(),
+        label: null,
+      };
+    },
+    [lookupRhythmPattern, selectedRhythmPatternId]
+  );
 
   // MIDI Editor
   const [midiEditorOpen, setMidiEditorOpen] = useState(false);
@@ -1098,8 +1484,6 @@ const ProjectDetailPage = () => {
     fetchRhythmPatterns();
   }, [projectId, fetchProject]);
 
-
-
   useEffect(() => {
     const fetchChordLibrary = async () => {
       try {
@@ -1252,6 +1636,10 @@ const ProjectDetailPage = () => {
           midiNotes: entry?.midiNotes || [],
           variation: entry?.variation || null,
           instrumentStyle: entry?.instrumentStyle || null,
+          rhythmPatternId: entry?.rhythmPatternId || null,
+          rhythmPatternName: entry?.rhythmPatternName || null,
+          rhythmPatternSteps: entry?.rhythmPatternSteps || null,
+          rhythm: entry?.rhythm || null,
         };
       }),
     [chordProgression, chordDurationSeconds]
@@ -2194,22 +2582,42 @@ const ProjectDetailPage = () => {
     }
   };
 
-  // Handle instrument selection for backing track
+  const applyBackingInstrumentSelection = async (instrumentId) => {
+    setSelectedInstrumentId(instrumentId);
+    setProject((prev) => ({
+      ...prev,
+      backingInstrumentId: instrumentId,
+    }));
+    await updateProject(projectId, { backingInstrumentId: instrumentId });
+    refreshProject();
+  };
+
+  // Handle instrument selection for backing track or selected track
   const handleSelectInstrument = async (instrumentId) => {
     try {
-      // Optimistic update
-      setSelectedInstrumentId(instrumentId);
-      setProject((prev) => ({
-        ...prev,
-        backingInstrumentId: instrumentId,
-      }));
+      if (selectedTrackId) {
+        const track = tracks.find((t) => t._id === selectedTrackId);
 
-      await updateProject(projectId, { backingInstrumentId: instrumentId });
-      // Silent refresh in background
-      refreshProject();
+        if (!track) {
+          alert("That track is no longer available. Please select it again.");
+          setSelectedTrackId(null);
+          return;
+        }
+
+        if (!track.isBackingTrack && track.trackType !== "backing") {
+          await handleUpdateTrack(selectedTrackId, {
+            instrument: instrumentId,
+          });
+          return;
+        }
+
+        await applyBackingInstrumentSelection(instrumentId);
+        return;
+      }
+
+      await applyBackingInstrumentSelection(instrumentId);
     } catch (err) {
       console.error("Error updating instrument:", err);
-      // Revert on error
       refreshProject();
     }
   };
@@ -3655,6 +4063,9 @@ const ProjectDetailPage = () => {
                     trackContextMenu.isOpen &&
                     trackContextMenu.trackId === track._id;
                   const trackAccent = track.color || "#2563eb";
+                  const readableTrackName = formatTrackTitle(
+                    track.trackName || "Track"
+                  );
                   return (
                     <div
                       key={track._id}
@@ -3674,16 +4085,31 @@ const ProjectDetailPage = () => {
                           borderLeft: `4px solid ${trackAccent}`,
                         }}
                         onContextMenu={(e) => openTrackMenu(e, track)}
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedTrackId(track._id);
+                        }}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2 min-w-0">
                             <span
                               className="w-2.5 h-2.5 rounded-full"
-                              style={{ backgroundColor: trackAccent }}
+                              style={{
+                                backgroundColor: trackAccent,
+                                boxShadow:
+                                  selectedTrackId === track._id
+                                    ? `0 0 8px ${trackAccent}`
+                                    : "none",
+                              }}
                             />
-                            <span className="text-white font-medium text-sm truncate">
-                              {track.trackName}
+                            <span
+                              className={`text-white font-medium text-sm truncate ${
+                                selectedTrackId === track._id
+                                  ? "text-orange-400"
+                                  : ""
+                              }`}
+                            >
+                              {readableTrackName}
                             </span>
                           </div>
                           <div className="flex gap-1">
@@ -3808,8 +4234,12 @@ const ProjectDetailPage = () => {
                               const isSelected =
                                 focusedClipId === item._id ||
                                 selectedItem === item._id;
+
+                              // Calculate Dimensions & Position
                               const clipWidth = item.duration * pixelsPerSecond;
                               const clipLeft = item.startTime * pixelsPerSecond;
+
+                              // Determine Labels
                               const isVirtualChord =
                                 typeof item._id === "string" &&
                                 item._id.startsWith("chord-");
@@ -3823,40 +4253,68 @@ const ProjectDetailPage = () => {
                                   (track.trackType === "backing" ||
                                     track.isBackingTrack) &&
                                   !item.lickId);
-                              const sourceDurationSeconds =
-                                item.sourceDuration ||
-                                item.lickId?.duration ||
-                                300;
-                              const clipLabel = isChord
-                                ? item.chordName ||
-                                  item.chord ||
-                                  `Chord ${trackIndex + 1}`
-                                : item.lickId?.title ||
-                                  (item.type === "midi"
-                                    ? item.isCustomized
-                                      ? "Custom MIDI"
-                                      : "MIDI Clip"
-                                    : `Lick ${trackIndex + 1}`);
-                              const clipStyle = {
-                                left: `${clipLeft}px`,
-                                width: `${clipWidth}px`,
-                                top: "5px",
-                                height: "70px",
-                                minWidth: "60px",
-                                backgroundColor: !isChord
-                                  ? trackAccent
-                                  : undefined,
-                                borderColor: isChord
-                                  ? isSelected
-                                    ? "#facc15"
-                                    : trackAccent
-                                  : isSelected
-                                  ? "#facc15"
-                                  : trackAccent,
-                                boxShadow: isSelected
-                                  ? "0 0 0 2px rgba(250, 204, 21, 0.55)"
-                                  : undefined,
-                              };
+
+                              const mainLabel = isChord
+                                ? item.chordName || item.chord || "Chord"
+                                : formatLabelValue(item.lickId?.title) ||
+                                  formatLabelValue(item.title) ||
+                                  formatLabelValue(item.name) ||
+                                  formatLabelValue(item.trackName) ||
+                                  readableTrackName ||
+                                  "Clip";
+
+                              const trackInstrumentLabel =
+                                formatLabelValue(track.instrumentStyle) ||
+                                formatLabelValue(track.instrument) ||
+                                (track.isBackingTrack
+                                  ? "Backing Instrument"
+                                  : "") ||
+                                readableTrackName;
+                              const instrumentLabel =
+                                formatLabelValue(item.instrumentStyle) ||
+                                trackInstrumentLabel;
+
+                              const subLabel = isChord
+                                ? (() => {
+                                    const rhythmVisual =
+                                      getRhythmPatternVisual(item);
+                                    const patternLabel =
+                                      rhythmVisual?.label || null;
+                                    const formattedPatternLabel =
+                                      formatLabelValue(patternLabel);
+                                    return [
+                                      formattedPatternLabel,
+                                      instrumentLabel,
+                                    ]
+                                      .filter((label) => label && label.trim())
+                                      .join(" • ");
+                                  })()
+                                : instrumentLabel || readableTrackName || null;
+
+                              const trackAccent = track.color || "#2563eb";
+                              const isMuted = Boolean(
+                                track.muted || item.muted
+                              );
+
+                              // For chords, compute MIDI events and merge into item data for MidiClip
+                              let itemWithMidi = { ...item };
+                              if (isChord) {
+                                const rhythmVisual =
+                                  getRhythmPatternVisual(item);
+                                const patternSteps = rhythmVisual?.steps || [];
+                                const chordMidiEvents = getChordMidiEvents(
+                                  item,
+                                  item.duration,
+                                  patternSteps
+                                );
+                                if (chordMidiEvents.length > 0) {
+                                  itemWithMidi = {
+                                    ...item,
+                                    customMidiEvents: chordMidiEvents,
+                                  };
+                                }
+                              }
+
                               // Show waveform for licks OR chord items with generated audio
                               const showWaveform =
                                 (item.type === "lick" &&
@@ -3866,6 +4324,19 @@ const ProjectDetailPage = () => {
                                     item.audioUrl ||
                                     item.lickId?.waveformData));
                               const showResizeHandles = !isVirtualChord;
+
+                              // Calculate loop notches
+                              const loopSegmentDuration =
+                                item.loopEnabled && item.sourceDuration
+                                  ? item.sourceDuration
+                                  : null;
+                              const loopRepeats =
+                                loopSegmentDuration && loopSegmentDuration > 0
+                                  ? Math.floor(
+                                      item.duration / loopSegmentDuration
+                                    )
+                                  : 0;
+                              const loopNotches = Math.max(0, loopRepeats - 1);
 
                               return (
                                 <div
@@ -3877,20 +4348,36 @@ const ProjectDetailPage = () => {
                                       clipRefs.current.delete(item._id);
                                     }
                                   }}
-                                  className={`absolute rounded border-2 text-white cursor-move overflow-hidden ${
-                                    // Disable smooth transitions while dragging so the clip sticks to the cursor
-                                    isDraggingItem && selectedItem === item._id
-                                      ? ""
-                                      : "transition-all"
-                                  } ${
-                                    isChord
-                                      ? isSelected
-                                        ? "bg-green-500 border-yellow-400 shadow-lg shadow-yellow-400/50"
-                                        : "bg-green-600 border-green-700 hover:bg-green-700"
-                                      : ""
-                                  }`}
-                                  style={clipStyle}
-                                  title={clipLabel}
+                                  className={`absolute rounded-md overflow-hidden cursor-pointer group border 
+                                    ${
+                                      isSelected
+                                        ? "border-yellow-400 shadow-md z-50"
+                                        : "border-transparent z-10"
+                                    }
+                                  `}
+                                  style={{
+                                    left: `${clipLeft}px`,
+                                    width: `${clipWidth}px`,
+                                    top: "4px",
+                                    bottom: "4px", // Use flex height to fill track lane
+                                    height: "auto", // Allow it to stretch
+                                    backgroundColor: trackAccent, // Fallback color
+                                    opacity:
+                                      isDraggingItem &&
+                                      selectedItem === item._id
+                                        ? 0.8
+                                        : isMuted
+                                        ? 0.45
+                                        : 1,
+                                    filter: isMuted
+                                      ? "grayscale(0.35)"
+                                      : undefined,
+                                    transition:
+                                      isDraggingItem &&
+                                      selectedItem === item._id
+                                        ? "none"
+                                        : "left 0.1s, width 0.1s", // Disable transition during drag
+                                  }}
                                   onMouseDown={(e) =>
                                     handleClipMouseDown(e, item, track._id)
                                   }
@@ -3900,16 +4387,11 @@ const ProjectDetailPage = () => {
                                   }}
                                   onDoubleClick={(e) => {
                                     e.stopPropagation();
-                                    // Open MIDI editor for chord/MIDI items
-                                    if (
-                                      item.type === "chord" ||
-                                      item.type === "midi"
-                                    ) {
-                                      handleOpenMidiEditor(item);
-                                    }
+                                    handleOpenMidiEditor(item);
                                   }}
                                 >
-                                  <div className="absolute inset-0 overflow-hidden">
+                                  {/* 1. THE RENDERED CANVAS (The Data Layer) */}
+                                  <div className="absolute inset-0 w-full h-full">
                                     {showWaveform ? (
                                       (() => {
                                         try {
@@ -3992,22 +4474,6 @@ const ProjectDetailPage = () => {
                                             )
                                           );
 
-                                          // DEBUG LOGGING - REMOVED
-                                          /*
-                                      console.log("Waveform Adaptive Debug:", {
-                                        id: item._id,
-                                        offset: item.offset,
-                                        duration: item.duration,
-                                        clipWidth: actualClipWidth,
-                                        fullSourceDuration,
-                                        totalSamples,
-                                        visibleSamplesCount:
-                                          visibleSamples.length,
-                                        targetBarCount,
-                                        step,
-                                      });
-                                      */
-
                                           return (
                                             <div className="absolute inset-0 overflow-hidden">
                                               <div
@@ -4047,24 +4513,46 @@ const ProjectDetailPage = () => {
                                         }
                                       })()
                                     ) : (
-                                      <div className="absolute inset-0 flex flex-col justify-end p-2 bg-black/10">
-                                        <div className="text-xs opacity-75">
-                                          {item.startTime.toFixed(2)}s
-                                        </div>
+                                      <MidiClip
+                                        data={itemWithMidi}
+                                        width={clipWidth} // Pass explicit width for canvas scaling
+                                        height={82} // Approximate height of track lane (90px - padding)
+                                        color={trackAccent}
+                                        isSelected={isSelected}
+                                        isMuted={isMuted}
+                                      />
+                                    )}
+                                  </div>
+
+                                  {/* 2. THE HEADER TEXT (HTML Overlay) */}
+                                  <div className="absolute top-0 left-0 right-0 h-6 px-2 flex items-center gap-2 pointer-events-none">
+                                    <span className="text-[11px] font-bold text-white truncate drop-shadow-md">
+                                      {mainLabel}
+                                    </span>
+                                    {clipWidth > 80 && subLabel && (
+                                      <span className="text-[10px] text-white/70 truncate">
+                                        {subLabel}
+                                      </span>
+                                    )}
+                                    {loopNotches > 0 && (
+                                      <div className="flex items-center gap-0.5 ml-auto">
+                                        {Array.from({
+                                          length: loopNotches,
+                                        }).map((_loop, notchIdx) => (
+                                          <span
+                                            key={`loop-notch-${item._id}-${notchIdx}`}
+                                            className="w-1 h-2 rounded-sm bg-white/70"
+                                          />
+                                        ))}
                                       </div>
                                     )}
                                   </div>
 
-                                  {/* Clip title + track name label */}
-                                  <div className="absolute top-1 left-1 max-w-[85%] rounded bg-black/60 px-2 py-0.5 text-[10px] leading-tight font-medium truncate pointer-events-none">
-                                    {track.trackName || "Track"} · {clipLabel}
-                                  </div>
-
-                                  {/* Resize handles */}
+                                  {/* 3. RESIZE HANDLES (Keep existing logic) */}
                                   {showResizeHandles && (
                                     <div
                                       data-resize-handle="left"
-                                      className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
+                                      className="absolute left-0 top-0 bottom-0 w-3 cursor-w-resize hover:bg-white/20 z-20 transition-colors"
                                       onMouseDown={(e) =>
                                         startClipResize(
                                           e,
@@ -4078,7 +4566,7 @@ const ProjectDetailPage = () => {
                                   {showResizeHandles && (
                                     <div
                                       data-resize-handle="right"
-                                      className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-blue-400"
+                                      className="absolute right-0 top-0 bottom-0 w-3 cursor-e-resize hover:bg-white/20 z-20 transition-colors"
                                       onMouseDown={(e) =>
                                         startClipResize(
                                           e,
@@ -4090,7 +4578,7 @@ const ProjectDetailPage = () => {
                                     />
                                   )}
 
-                                  {/* Delete button */}
+                                  {/* 4. DELETE BUTTON (Only show on Hover/Select) */}
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -4103,9 +4591,13 @@ const ProjectDetailPage = () => {
                                         handleDeleteTimelineItem(item._id);
                                       }
                                     }}
-                                    className="absolute top-1 right-1 w-5 h-5 bg-red-600 hover:bg-red-700 rounded text-white text-xs flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity"
+                                    className={`absolute top-1 right-1 w-4 h-4 flex items-center justify-center text-white/50 hover:text-white hover:bg-red-500/80 rounded z-30 transition-opacity ${
+                                      isSelected
+                                        ? "opacity-100"
+                                        : "opacity-0 group-hover:opacity-100"
+                                    }`}
                                   >
-                                    <FaTimes size={8} />
+                                    <FaTimes size={10} />
                                   </button>
                                 </div>
                               );
@@ -4186,8 +4678,7 @@ const ProjectDetailPage = () => {
                           </option>
                           {allKeys
                             .filter(
-                              (key) =>
-                                key !== (project?.key || "C Major")
+                              (key) => key !== (project?.key || "C Major")
                             )
                             .map((key) => (
                               <option key={key} value={key}>
@@ -4683,6 +5174,7 @@ const ProjectDetailPage = () => {
                       chordLibrary={chordPalette}
                       instruments={instruments}
                       rhythmPatterns={rhythmPatterns}
+                      getRhythmPatternVisual={getRhythmPatternVisual}
                       onAddChord={handleAddChordToTimeline}
                       onGenerateBackingTrack={handleGenerateBackingTrack}
                       onGenerateAIBackingTrack={handleGenerateAIBackingTrack}
@@ -4793,8 +5285,34 @@ const ProjectDetailPage = () => {
                         <h3 className="text-white font-semibold text-sm mb-1">
                           Select Instrument
                         </h3>
-                        <p className="text-gray-400 text-xs">
-                          Choose instrument for backing track
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-gray-400 text-xs">Target:</span>
+                          <select
+                            value={selectedTrackId || "backing"}
+                            onChange={(e) =>
+                              setSelectedTrackId(
+                                e.target.value === "backing"
+                                  ? null
+                                  : e.target.value
+                              )
+                            }
+                            className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-orange-500"
+                          >
+                            <option value="backing">Backing Track</option>
+                            {tracks
+                              .filter(
+                                (t) =>
+                                  !t.isBackingTrack && t.trackType !== "backing"
+                              )
+                              .map((t) => (
+                                <option key={t._id} value={t._id}>
+                                  {t.trackName}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                        <p className="text-gray-500 text-[10px] mb-2">
+                          Select a track above, then choose an instrument below.
                         </p>
                       </div>
 
@@ -4811,7 +5329,7 @@ const ProjectDetailPage = () => {
                                 handleSelectInstrument(instrument._id)
                               }
                               className={`p-3 rounded border-2 transition-all flex-shrink-0 min-w-[100px] ${
-                                selectedInstrumentId === instrument._id
+                                instrumentHighlightId === instrument._id
                                   ? "bg-orange-600 border-orange-500 text-white"
                                   : "bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-600"
                               }`}
@@ -4886,7 +5404,7 @@ const ProjectDetailPage = () => {
             >
               <div>
                 <p className="text-sm font-semibold text-white truncate">
-                  {menuTrack.trackName}
+                  {formatTrackTitle(menuTrack.trackName || "Track")}
                 </p>
                 {menuTrack.isBackingTrack && (
                   <p className="text-xs text-orange-400 mt-1">Backing track</p>
