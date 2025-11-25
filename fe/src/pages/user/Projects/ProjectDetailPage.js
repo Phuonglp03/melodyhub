@@ -4296,9 +4296,13 @@ const ProjectDetailPage = () => {
                                 track.muted || item.muted
                               );
 
-                              // For chords, compute MIDI events and merge into item data for MidiClip
+                              // Prepare MIDI data for MidiClip component
+                              // For chords, compute MIDI events using getChordMidiEvents
+                              // For other items, use existing customMidiEvents or midiNotes
                               let itemWithMidi = { ...item };
+
                               if (isChord) {
+                                // For chords, compute MIDI events from chord data and rhythm patterns
                                 const rhythmVisual =
                                   getRhythmPatternVisual(item);
                                 const patternSteps = rhythmVisual?.steps || [];
@@ -4307,12 +4311,56 @@ const ProjectDetailPage = () => {
                                   item.duration,
                                   patternSteps
                                 );
-                                if (chordMidiEvents.length > 0) {
-                                  itemWithMidi = {
-                                    ...item,
-                                    customMidiEvents: chordMidiEvents,
-                                  };
+                                // Always set customMidiEvents, even if empty, so MidiClip knows to process it
+                                itemWithMidi = {
+                                  ...item,
+                                  customMidiEvents: chordMidiEvents,
+                                };
+                              } else {
+                                // For non-chord items (licks, etc.), check if they have MIDI data
+                                // If customMidiEvents exists, use it; otherwise check midiNotes
+                                if (
+                                  !item.customMidiEvents ||
+                                  item.customMidiEvents.length === 0
+                                ) {
+                                  if (
+                                    item.midiNotes &&
+                                    Array.isArray(item.midiNotes) &&
+                                    item.midiNotes.length > 0
+                                  ) {
+                                    // Convert midiNotes array to customMidiEvents format
+                                    const duration = item.duration || 1;
+                                    itemWithMidi = {
+                                      ...item,
+                                      customMidiEvents: item.midiNotes.map(
+                                        (pitch) => ({
+                                          pitch: Number(pitch),
+                                          startTime: 0,
+                                          duration: duration,
+                                          velocity: 0.8,
+                                        })
+                                      ),
+                                    };
+                                  } else if (
+                                    item.lickId?.midiNotes &&
+                                    Array.isArray(item.lickId.midiNotes) &&
+                                    item.lickId.midiNotes.length > 0
+                                  ) {
+                                    // Check nested lickId.midiNotes
+                                    const duration = item.duration || 1;
+                                    itemWithMidi = {
+                                      ...item,
+                                      customMidiEvents:
+                                        item.lickId.midiNotes.map((pitch) => ({
+                                          pitch: Number(pitch),
+                                          startTime: 0,
+                                          duration: duration,
+                                          velocity: 0.8,
+                                        })),
+                                    };
+                                  }
                                 }
+                                // If customMidiEvents already exists, itemWithMidi is already correct
                               }
 
                               // Show waveform for licks OR chord items with generated audio
@@ -4522,6 +4570,20 @@ const ProjectDetailPage = () => {
                                         isMuted={isMuted}
                                       />
                                     )}
+                                    {/* Always render MidiClip behind waveform if both exist */}
+                                    {showWaveform &&
+                                      (itemWithMidi.customMidiEvents?.length >
+                                        0 ||
+                                        itemWithMidi.midiNotes?.length > 0) && (
+                                        <MidiClip
+                                          data={itemWithMidi}
+                                          width={clipWidth}
+                                          height={82}
+                                          color={trackAccent}
+                                          isSelected={isSelected}
+                                          isMuted={isMuted}
+                                        />
+                                      )}
                                   </div>
 
                                   {/* 2. THE HEADER TEXT (HTML Overlay) */}

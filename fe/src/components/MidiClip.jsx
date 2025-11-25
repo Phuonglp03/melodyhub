@@ -24,7 +24,7 @@ const MidiClip = ({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !data) return;
 
     const ctx = canvas.getContext("2d");
 
@@ -53,8 +53,17 @@ const MidiClip = ({
 
     // 3. Prepare MIDI Data
     // Combine custom events or fallback notes
-    let notes = data.customMidiEvents || [];
-    if (!notes.length && data.midiNotes) {
+    let notes = [];
+
+    // First, check for customMidiEvents (preferred format)
+    if (
+      Array.isArray(data?.customMidiEvents) &&
+      data.customMidiEvents.length > 0
+    ) {
+      notes = data.customMidiEvents;
+    }
+    // If no customMidiEvents, check for midiNotes array
+    else if (Array.isArray(data?.midiNotes) && data.midiNotes.length > 0) {
       // Handle legacy/simple chord block notes
       // We assume they sustain for the full clip duration if not specified
       const duration = data.duration || 1;
@@ -62,6 +71,21 @@ const MidiClip = ({
         pitch: Number(n),
         startTime: 0,
         duration: duration,
+        velocity: 0.8,
+      }));
+    }
+    // Also check for nested midiNotes (e.g., item.lickId?.midiNotes)
+    else if (
+      data?.lickId?.midiNotes &&
+      Array.isArray(data.lickId.midiNotes) &&
+      data.lickId.midiNotes.length > 0
+    ) {
+      const duration = data.duration || 1;
+      notes = data.lickId.midiNotes.map((n) => ({
+        pitch: Number(n),
+        startTime: 0,
+        duration: duration,
+        velocity: 0.8,
       }));
     }
 
