@@ -73,6 +73,60 @@ function chordNameToMidiNotes(chordName, octave = 4) {
 }
 
 /**
+ * Generate waveform based on instrument type
+ * @param {Number} frequency - Frequency in Hz
+ * @param {Number} t - Time in seconds
+ * @param {Number} instrumentProgram - MIDI program number (0-127)
+ * @returns {Number} - Waveform amplitude
+ */
+function generateWaveform(frequency, t, instrumentProgram = 0) {
+  // Map MIDI program numbers to different waveforms
+  // Piano family (0-7): Sine wave (smooth)
+  // Organ family (16-23): Square wave (harsh)
+  // Guitar family (24-31): Sawtooth-like (bright)
+  // Bass family (32-39): Triangle wave (mellow)
+  // Strings family (40-47): Sine with harmonics
+  // Brass family (56-63): Square with harmonics
+  // Synth family (80-87): Various waveforms
+  
+  if (instrumentProgram >= 0 && instrumentProgram <= 7) {
+    // Piano: Pure sine wave
+    return Math.sin(2 * Math.PI * frequency * t);
+  } else if (instrumentProgram >= 16 && instrumentProgram <= 23) {
+    // Organ: Square wave
+    return Math.sign(Math.sin(2 * Math.PI * frequency * t));
+  } else if (instrumentProgram >= 24 && instrumentProgram <= 31) {
+    // Guitar: Sawtooth-like (approximated)
+    const phase = (frequency * t) % 1;
+    return 2 * phase - 1;
+  } else if (instrumentProgram >= 32 && instrumentProgram <= 39) {
+    // Bass: Triangle wave
+    const phase = (frequency * t) % 1;
+    return phase < 0.5 ? 4 * phase - 1 : 3 - 4 * phase;
+  } else if (instrumentProgram >= 40 && instrumentProgram <= 47) {
+    // Strings: Sine with harmonics
+    return Math.sin(2 * Math.PI * frequency * t) * 0.7 + 
+           Math.sin(4 * Math.PI * frequency * t) * 0.3;
+  } else if (instrumentProgram >= 56 && instrumentProgram <= 63) {
+    // Brass: Square with harmonics
+    return Math.sign(Math.sin(2 * Math.PI * frequency * t)) * 0.8 +
+           Math.sin(4 * Math.PI * frequency * t) * 0.2;
+  } else if (instrumentProgram >= 80 && instrumentProgram <= 87) {
+    // Synth: Complex waveform
+    return Math.sin(2 * Math.PI * frequency * t) * 0.6 +
+           Math.sin(4 * Math.PI * frequency * t) * 0.3 +
+           Math.sin(6 * Math.PI * frequency * t) * 0.1;
+  } else if (instrumentProgram === -1) {
+    // Percussion: use filtered noise burst
+    const noise = Math.random() * 2 - 1;
+    return noise;
+  } else {
+    // Default: Sine wave
+    return Math.sin(2 * Math.PI * frequency * t);
+  }
+}
+
+/**
  * Generate audio directly from chord data (simpler than parsing MIDI)
  * This uses pure JavaScript and uploads to Cloudinary
  * @param {Array} chords - Array of chord objects with midiNotes
@@ -89,7 +143,13 @@ export const generateAudioFromChords = async (chords, options = {}) => {
       cloudinaryFolder = 'backing_tracks_audio',
       projectId = 'unknown',
       rhythmPatternId = null, // Rhythm pattern ID to apply
+      instrumentId = null, // Instrument ID for different sounds
+      instrumentProgram = 0, // MIDI program number (0-127)
     } = options;
+
+    console.log(
+      `[Audio Generator] Starting audio generation with instrumentProgram: ${instrumentProgram}, instrumentId: ${instrumentId}`
+    );
 
     // Fetch rhythm pattern if provided
     let rhythmPattern = null;
@@ -230,7 +290,10 @@ export const generateAudioFromChords = async (chords, options = {}) => {
 
           // Generate audio for each note in this event
           notesToPlay.forEach((midiNote) => {
-            const frequency = 440 * Math.pow(2, (midiNote - 69) / 12);
+            const frequency =
+              instrumentProgram === -1
+                ? 60 // base freq placeholder
+                : 440 * Math.pow(2, (midiNote - 69) / 12);
             const velocity = event.velocity || 0.8;
             
             // Calculate actual event duration in samples for envelope
@@ -244,14 +307,31 @@ export const generateAudioFromChords = async (chords, options = {}) => {
 
             for (let i = eventStartSample; i < eventEndSample && i < numSamples; i++) {
               const t = (i - eventStartSample) / sampleRate;
-              const amplitude = Math.sin(2 * Math.PI * frequency * t) * 0.3 * velocity; // Increased from 0.2 to 0.3
+              const waveform = generateWaveform(
+                frequency + (instrumentProgram === -1 ? midiNote : 0),
+                t,
+                instrumentProgram
+              );
+              const amplitude =
+                waveform *
+                (instrumentProgram === -1 ? 0.6 : 0.3) *
+                velocity; // Percussion louder
 
               // Apply ADSR envelope with sharper attack/release for rhythm patterns
               const noteProgress = (i - eventStartSample) / actualEventDuration;
               let envelope = 1;
 
               // Sharper attack: 0-2% of note (faster onset for rhythm)
-              if (noteProgress < 0.02) {
+              if (instrumentProgram === -1) {
+                // Percussion: extremely fast decay
+                if (noteProgress < 0.01) {
+                  envelope = noteProgress / 0.01;
+                } else if (noteProgress > 0.2) {
+                  envelope = Math.max(0, (1 - noteProgress) / 0.05);
+                } else {
+                  envelope = 1 - noteProgress * 0.8;
+                }
+              } else if (noteProgress < 0.02) {
                 envelope = noteProgress / 0.02;
               }
               // Sharper release: last 15% of note (faster decay to prevent overlap)
@@ -272,18 +352,35 @@ export const generateAudioFromChords = async (chords, options = {}) => {
         // No rhythm pattern: play all notes simultaneously for full duration (block chord)
         console.log(`[Audio Generator] Chord ${chordIndex + 1} (${chord.chordName || 'unknown'}): No rhythm pattern - using block chord`);
         midiNotes.forEach((midiNote) => {
-          const frequency = 440 * Math.pow(2, (midiNote - 69) / 12); // MIDI note to frequency
+          const frequency =
+            instrumentProgram === -1
+              ? 80
+              : 440 * Math.pow(2, (midiNote - 69) / 12); // MIDI note to frequency
 
           for (let i = chordStartSample; i < chordEndSample && i < numSamples; i++) {
             const t = (i - chordStartSample) / sampleRate;
-            const amplitude = Math.sin(2 * Math.PI * frequency * t) * 0.2; // Sine wave, lower volume for multiple notes
+            const waveform = generateWaveform(
+              frequency + (instrumentProgram === -1 ? midiNote : 0),
+              t,
+              instrumentProgram
+            );
+            const amplitude =
+              waveform * (instrumentProgram === -1 ? 0.5 : 0.2); // louder for percussion
 
             // Apply ADSR envelope (Attack, Decay, Sustain, Release)
             const noteProgress = (i - chordStartSample) / (chordEndSample - chordStartSample);
             let envelope = 1;
 
             // Attack: 0-5% of note
-            if (noteProgress < 0.05) {
+            if (instrumentProgram === -1) {
+              if (noteProgress < 0.005) {
+                envelope = noteProgress / 0.005;
+              } else if (noteProgress > 0.2) {
+                envelope = (1 - noteProgress) / 0.05;
+              } else {
+                envelope = 1 - noteProgress * 0.9;
+              }
+            } else if (noteProgress < 0.05) {
               envelope = noteProgress / 0.05;
             }
             // Release: last 10% of note

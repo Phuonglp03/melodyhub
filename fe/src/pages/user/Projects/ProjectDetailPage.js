@@ -1313,7 +1313,25 @@ const ProjectDetailPage = () => {
               track.trackName?.toLowerCase() === "backing track"
           );
           if (existingBackingTrack) {
+            console.log("[Fetch Project] Found backing track:", {
+              id: existingBackingTrack._id,
+              name: existingBackingTrack.trackName,
+              instrument: existingBackingTrack.instrument,
+              instrumentId: existingBackingTrack.instrument?.instrumentId,
+            });
+            // Update selectedInstrumentId if backing track has an instrument
+            if (existingBackingTrack.instrument?.instrumentId) {
+              console.log(
+                "[Fetch Project] Setting selectedInstrumentId to:",
+                existingBackingTrack.instrument.instrumentId
+              );
+              setSelectedInstrumentId(
+                existingBackingTrack.instrument.instrumentId
+              );
+            }
             setBackingTrack(existingBackingTrack);
+          } else {
+            console.log("[Fetch Project] No backing track found in tracks");
           }
         } else {
           throw new Error(response.message || "Failed to fetch project");
@@ -1900,6 +1918,9 @@ const ProjectDetailPage = () => {
   };
 
   // Handle generating full backing track with audio generation
+  const [isGeneratingBackingTrack, setIsGeneratingBackingTrack] =
+    useState(false);
+
   const handleGenerateBackingTrack = async (data) => {
     // Validate that instrument is selected (required for audio generation)
     if (!data.instrumentId) {
@@ -1921,8 +1942,8 @@ const ProjectDetailPage = () => {
       return;
     }
 
-    setIsGeneratingAI(true);
-    setAiNotification(null);
+    setIsGeneratingBackingTrack(true);
+    setError(null);
 
     try {
       // Include project tempo and key for accurate audio generation
@@ -1935,33 +1956,83 @@ const ProjectDetailPage = () => {
         generateAudio: true,
       };
 
+      console.log(
+        "[Generate Backing Track] Starting generation with data:",
+        generationData
+      );
+      console.log(
+        "[Generate Backing Track] Selected instrumentId:",
+        generationData.instrumentId
+      );
       const response = await generateBackingTrackAPI(projectId, generationData);
+      console.log("[Generate Backing Track] API Response:", response);
+      console.log(
+        "[Generate Backing Track] Backing track from response:",
+        response.data?.track
+      );
+      console.log(
+        "[Generate Backing Track] Backing track instrument:",
+        response.data?.track?.instrument
+      );
 
       if (response.success) {
-        // Show success notification
-        setAiNotification({
-          type: "success",
-          message: `🎵 Backing track generated with ${
-            response.data.items?.length || 0
-          } audio clips!`,
-        });
+        console.log(
+          "[Generate Backing Track] Success! Response data:",
+          response.data
+        );
+        console.log(
+          "[Generate Backing Track] Items generated:",
+          response.data?.items?.length || 0
+        );
+
+        // Update selectedInstrumentId from response if available
+        if (response.data?.track?.instrument?.instrumentId) {
+          console.log(
+            "[Generate Backing Track] Setting selectedInstrumentId to:",
+            response.data.track.instrument.instrumentId
+          );
+          setSelectedInstrumentId(response.data.track.instrument.instrumentId);
+        }
+
+        // Small delay to ensure server has saved everything
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
         // Refresh project to get new backing track items with audio
+        console.log("[Generate Backing Track] Refreshing project...");
         await refreshProject();
+        console.log("[Generate Backing Track] Project refreshed successfully");
 
-        // Auto-hide notification after 5 seconds
-        setTimeout(() => setAiNotification(null), 5000);
+        // Show success message
+        alert(
+          `✅ Backing track generated successfully with ${
+            response.data?.items?.length || 0
+          } chord clips!`
+        );
       } else {
+        console.error(
+          "[Generate Backing Track] API returned success:false",
+          response
+        );
         throw new Error(response.message || "Failed to generate backing track");
       }
     } catch (error) {
-      console.error("Error generating backing track:", error);
-      setAiNotification({
-        type: "error",
-        message: error.message || "Failed to generate backing track audio",
+      console.error(
+        "[Generate Backing Track] Error generating backing track:",
+        error
+      );
+      console.error("[Generate Backing Track] Error details:", {
+        message: error.message,
+        response: error.response?.data,
+        stack: error.stack,
       });
+      const errorMessage =
+        error.response?.data?.message ||
+        error.message ||
+        "Failed to generate backing track audio";
+      setError(errorMessage);
+      alert(`❌ Error: ${errorMessage}`);
     } finally {
-      setIsGeneratingAI(false);
+      setIsGeneratingBackingTrack(false);
     }
   };
 
@@ -5262,7 +5333,8 @@ const ProjectDetailPage = () => {
                       loading={
                         loadingChords ||
                         loadingInstruments ||
-                        loadingRhythmPatterns
+                        loadingRhythmPatterns ||
+                        isGeneratingBackingTrack
                       }
                       project={project}
                     />
