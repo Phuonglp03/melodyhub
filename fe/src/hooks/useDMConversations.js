@@ -38,9 +38,46 @@ export default function useDMConversations() {
       console.log('[DM] conversation updated', conversationId, conversation);
       // Update the specific conversation in the list
       setConversations((prev) => {
-        const updated = prev.map((c) => 
-          c._id === conversationId ? { ...c, ...conversation, status: conversation.status } : c
-        );
+        const updated = prev.map((c) => {
+          if (c._id !== conversationId) return c;
+
+          // Giữ lại thông tin participants đã được populate (displayName, username)
+          let mergedParticipants = conversation.participants;
+          try {
+            if (Array.isArray(c.participants) && Array.isArray(conversation.participants)) {
+              mergedParticipants = conversation.participants.map((p, idx) => {
+                const prevP = c.participants[idx];
+                const hasName =
+                  prevP &&
+                  (prevP.displayName ||
+                    prevP.username ||
+                    (prevP.user && (prevP.user.displayName || prevP.user.username)));
+
+                const newHasName =
+                  p &&
+                  (p.displayName ||
+                    p.username ||
+                    (p.user && (p.user.displayName || p.user.username)));
+
+                // Nếu dữ liệu mới không có tên nhưng cũ có, ưu tiên dùng dữ liệu cũ
+                if (!newHasName && hasName) {
+                  return prevP;
+                }
+                return p || prevP;
+              });
+            }
+          } catch (e) {
+            // Nếu có lỗi merge thì fallback dùng participants cũ
+            mergedParticipants = c.participants || conversation.participants;
+          }
+
+          return {
+            ...c,
+            ...conversation,
+            participants: mergedParticipants || c.participants,
+            status: conversation.status,
+          };
+        });
         // If conversation not in list, add it
         if (!updated.find(c => c._id === conversationId)) {
           return [...updated, conversation];
