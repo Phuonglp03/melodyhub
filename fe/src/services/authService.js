@@ -205,6 +205,15 @@ export const resetPassword = async (token, email, newPassword) => {
   }
 };
 
+export const changePassword = async (currentPassword, newPassword) => {
+  try {
+    const response = await api.post('/auth/change-password', { currentPassword, newPassword });
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { message: 'Đổi mật khẩu thất bại' };
+  }
+};
+
 // Google login
 export const loginWithGoogle = async (token) => {
   try {

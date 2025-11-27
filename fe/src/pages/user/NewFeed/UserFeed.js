@@ -15,6 +15,7 @@ import {
   List,
   Dropdown,
   Radio,
+  Drawer,
 } from "antd";
 import { 
   LikeOutlined, 
@@ -22,9 +23,10 @@ import {
   MoreOutlined, 
   EditOutlined, 
   DeleteOutlined, 
-  FlagOutlined
+  FlagOutlined,
+  MenuOutlined,
 } from "@ant-design/icons";
-import { listPostsByUser, createPost, getPostById, updatePost, deletePost } from "../../../services/user/post";
+import { listPostsByUser, createPost, getPostById, updatePost, deletePost, deletePostComment } from "../../../services/user/post";
 import {
   likePost,
   unlikePost,
@@ -38,6 +40,7 @@ import { onPostCommentNew, offPostCommentNew, onPostArchived, offPostArchived, j
 import { getMyLicks } from "../../../services/user/lickService";
 import { reportPost, checkPostReport } from "../../../services/user/reportService";
 import PostLickEmbed from "../../../components/PostLickEmbed";
+import "./newFeedResponsive.css";
 import { useNavigate, useParams } from "react-router-dom";
 
 const { Text } = Typography;
@@ -190,6 +193,12 @@ const getLinkInfo = (url) => {
   }
 };
 
+const getValidAvatarUrl = (url) => {
+  if (typeof url !== "string") return undefined;
+  const trimmed = url.trim();
+  return trimmed ? trimmed : undefined;
+};
+
 const UserFeed = () => {
   const navigate = useNavigate();
   const { userId } = useParams();
@@ -212,6 +221,7 @@ const UserFeed = () => {
   const [postIdToLiked, setPostIdToLiked] = useState({});
   const [postIdToStats, setPostIdToStats] = useState({});
   const [postIdToComments, setPostIdToComments] = useState({});
+  const [deletingCommentId, setDeletingCommentId] = useState(null);
   const [modalPost, setModalPost] = useState(null);
   const [likesModalOpen, setLikesModalOpen] = useState(false);
   const [likesPostId, setLikesPostId] = useState(null);
@@ -242,6 +252,11 @@ const UserFeed = () => {
   const [reportReason, setReportReason] = useState("");
   const [reportDescription, setReportDescription] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [isMobileSidebar, setIsMobileSidebar] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth <= 1024;
+  });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [postIdToReported, setPostIdToReported] = useState({});
   const [currentUserId] = useState(() => {
     try {
@@ -254,7 +269,37 @@ const UserFeed = () => {
       return undefined;
     }
   });
+  const [currentUserRole] = useState(() => {
+    try {
+      const raw = localStorage.getItem('user');
+      if (!raw) return undefined;
+      const obj = JSON.parse(raw);
+      const u = obj?.user || obj;
+      return u?.roleId || u?.role;
+    } catch {
+      return undefined;
+    }
+  });
+  const isAdminUser = (currentUserRole || '').toLowerCase() === 'admin';
+  const [commentModal, commentModalContextHolder] = Modal.useModal();
   const isOwnProfile = !!currentUserId && userId && (currentUserId.toString() === userId.toString());
+  const getAuthorId = (post) => {
+    if (!post) return '';
+    const user = post?.userId;
+    if (!user) return '';
+    if (typeof user === 'string' || typeof user === 'number') return user.toString();
+    if (typeof user === 'object') {
+      const id = user._id || user.id;
+      if (id) return id.toString();
+    }
+    return '';
+  };
+  const isPostOwner = (post) => {
+    const ownerId = getAuthorId(post);
+    if (!ownerId || !currentUserId) return false;
+    return ownerId.toString() === currentUserId.toString();
+  };
+  const canDeleteComment = (_, post) => isAdminUser || isPostOwner(post);
 
   const fetchProfile = async (id) => {
     try {
@@ -432,6 +477,63 @@ const UserFeed = () => {
     }
   };
 
+  const handleDeleteComment = async (postId, commentId) => {
+    if (!postId || !commentId) return;
+    try {
+      setDeletingCommentId(commentId);
+      await deletePostComment(postId, commentId);
+      setPostIdToComments((prev) => {
+        const list = Array.isArray(prev[postId]) ? prev[postId] : [];
+        return { ...prev, [postId]: list.filter((c) => c._id !== commentId) };
+      });
+      setPostIdToStats((prev) => {
+        const current = prev[postId] || { likesCount: 0, commentsCount: 0 };
+        const nextComments = Math.max((current.commentsCount || 1) - 1, 0);
+        return { ...prev, [postId]: { ...current, commentsCount: nextComments } };
+      });
+      getPostStats(postId)
+        .then((res) => {
+          if (res?.data) {
+            setPostIdToStats((prev) => ({ ...prev, [postId]: res.data }));
+          }
+        })
+        .catch(() => {});
+      message.success('Đã xóa bình luận');
+    } catch (e) {
+      message.error(e?.message || 'Không thể xóa bình luận');
+    } finally {
+      setDeletingCommentId(null);
+    }
+  };
+
+  const confirmDeleteComment = (postId, commentId) => {
+    commentModal.confirm({
+      title: 'Xóa bình luận này?',
+      content: 'Bình luận sẽ bị xóa khỏi bài viết và người viết sẽ không nhận thông báo.',
+      okText: 'Xóa',
+      cancelText: 'Hủy',
+      okButtonProps: { danger: true },
+      centered: true,
+      onOk: () => handleDeleteComment(postId, commentId),
+    });
+  };
+
+  const buildCommentMenuProps = (postId, commentId) => ({
+    items: [
+      {
+        key: 'delete-comment',
+        label: 'Xóa bình luận',
+        danger: true,
+        disabled: deletingCommentId === commentId,
+      },
+    ],
+    onClick: ({ key }) => {
+      if (key === 'delete-comment' && deletingCommentId !== commentId) {
+        confirmDeleteComment(postId, commentId);
+      }
+    },
+  });
+
   useEffect(() => {
     if (!Array.isArray(items) || items.length === 0) return;
     try {
@@ -486,6 +588,66 @@ const UserFeed = () => {
       offPostCommentNew(handler);
     };
   }, [commentOpen, commentPostId]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (typeof window === "undefined") return;
+      const mobile = window.innerWidth <= 1024;
+      setIsMobileSidebar(mobile);
+      if (!mobile) {
+        setSidebarOpen(false);
+      }
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const sidebarContent = (
+    <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
+      <div style={{ color: "#fff", fontWeight: 700, marginBottom: 12 }}>
+        Find Me On
+      </div>
+      {profile?.links && Array.isArray(profile.links) && profile.links.length > 0 ? (
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          {profile.links.map((link, index) => {
+            const linkInfo = getLinkInfo(link);
+            return (
+              <Space key={index} style={{ width: "100%" }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 999,
+                    background: "#111",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: linkInfo.color,
+                    fontSize: 18,
+                  }}
+                >
+                  <i className={linkInfo.iconClass}></i>
+                </div>
+                <a 
+                  href={link} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  style={{ color: "#fff", textDecoration: "none" }}
+                >
+                  {linkInfo.label}
+                </a>
+              </Space>
+            );
+          })}
+        </Space>
+      ) : (
+        <div style={{ color: "#9ca3af", fontSize: 14 }}>
+          No links available
+        </div>
+      )}
+    </Card>
+  );
 
   // Listen for post archived event (realtime removal from feed)
   useEffect(() => {
@@ -641,9 +803,19 @@ const UserFeed = () => {
     }
   };
 
+  const MAX_POST_TEXT_LENGTH = 300;
+
   const handleCreatePost = async () => {
-    if (!newText.trim()) {
+    const trimmed = newText.trim();
+    if (!trimmed) {
       message.warning("Vui lòng nhập nội dung");
+      return;
+    }
+    if (trimmed.length > MAX_POST_TEXT_LENGTH) {
+      commentModal.warning({
+        title: "Nội dung quá dài",
+        content: `Nội dung không được vượt quá ${MAX_POST_TEXT_LENGTH} ký tự (hiện tại: ${trimmed.length}). Vui lòng rút gọn trước khi đăng.`,
+      });
       return;
     }
     try {
@@ -652,7 +824,7 @@ const UserFeed = () => {
       if (files.length > 0) {
         const form = new FormData();
         form.append("postType", "status_update");
-        form.append("textContent", newText.trim());
+        form.append("textContent", trimmed);
         if (linkPreview) {
           form.append("linkPreview", JSON.stringify(linkPreview));
         }
@@ -665,7 +837,7 @@ const UserFeed = () => {
         const response = await createPost(form);
         newPost = response?.data || response;
       } else {
-        const payload = { postType: "status_update", textContent: newText.trim(), linkPreview };
+        const payload = { postType: "status_update", textContent: trimmed, linkPreview };
         if (selectedLickIds.length > 0) {
           payload.attachedLickIds = selectedLickIds;
         }
@@ -699,6 +871,10 @@ const UserFeed = () => {
       setSelectedLickIds([]);
       setIsModalOpen(false);
       message.success("Đăng bài thành công");
+      commentModal.success({
+        title: "Đăng bài thành công",
+        content: "Bài viết của bạn đã được đăng lên bảng tin.",
+      });
     } catch (e) {
       message.error(e.message || "Đăng bài thất bại");
     } finally {
@@ -910,27 +1086,35 @@ const UserFeed = () => {
 
   return (
     <>
+      {commentModalContextHolder}
       <div
+        className="newsfeed-page"
         style={{
           maxWidth: 1680,
           margin: "0 auto",
-          padding: "24px 24px",
+          padding: "var(--newsfeed-page-padding, 24px 24px)",
           background: "#0a0a0a",
           minHeight: "100vh",
         }}
       >
         <div
+          className="profile-cover"
           style={{
             position: "relative",
             height: 300,
-            background: profile?.coverPhotoUrl ? `url(${profile.coverPhotoUrl})` : "#131313",
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-            borderRadius: 8,
+            background: profile?.coverPhotoUrl ? "#000" : "#131313",
+            borderRadius: 12,
             marginBottom: 16,
             overflow: "hidden",
           }}
         >
+          {profile?.coverPhotoUrl && (
+            <img
+              src={profile.coverPhotoUrl}
+              alt="Cover"
+              className="profile-cover__image"
+            />
+          )}
           {isOwnProfile && (
             <Upload
               showUploadList={false}
@@ -987,13 +1171,14 @@ const UserFeed = () => {
           )}
         </div>
         <div
+          className="profile-feed-grid"
           style={{
             display: "grid",
-            gridTemplateColumns: "360px minmax(0, 1.2fr) 360px",
-            gap: 24,
+            gridTemplateColumns: "var(--newsfeed-grid-columns, 360px minmax(0, 1.2fr) 360px)",
+            gap: "var(--newsfeed-grid-gap, 24px)",
           }}
         >
-          <div>
+          <div className="profile-feed-left">
             <Card
               style={{
                 background: "#0f0f10",
@@ -1014,7 +1199,7 @@ const UserFeed = () => {
               >
                 <Avatar
                   size={150}
-                  src={profile?.avatarUrl}
+                  src={getValidAvatarUrl(profile?.avatarUrl)}
                   style={{
                     backgroundColor: "#722ed1",
                     border: "4px solid #0f0f10",
@@ -1103,10 +1288,21 @@ const UserFeed = () => {
             </Card>
           </div>
 
-          <div>
+          <div className="profile-feed-main">
+            {isMobileSidebar && (
+              <Button
+                block
+                className="newsfeed-sidebar-toggle"
+                icon={<MenuOutlined />}
+                onClick={() => setSidebarOpen(true)}
+                style={{ marginBottom: 16 }}
+              >
+                Xem mạng xã hội
+              </Button>
+            )}
             {/* Post composer - only show if own profile */}
             {isOwnProfile && (
-              <div style={{ 
+              <div className="composer-card" style={{ 
                 marginBottom: 20, 
                 background: "#0f0f10", 
                 border: "1px solid #1f1f1f",
@@ -1116,10 +1312,11 @@ const UserFeed = () => {
                 alignItems: "center",
                 gap: 16
               }} onClick={handleModalOpen}>
-                <Avatar size={40} src={profile?.avatarUrl} style={{ backgroundColor: "#722ed1" }}>
+                <Avatar size={40} src={getValidAvatarUrl(profile?.avatarUrl)} style={{ backgroundColor: "#722ed1" }}>
                   {(profile?.displayName || profile?.username || "U")[0]}
                 </Avatar>
                 <Input.TextArea 
+                  className="composer-input"
                   placeholder="Có gì mới ?" 
                   autoSize={{ minRows: 2, maxRows: 8 }}
                   style={{ 
@@ -1132,7 +1329,15 @@ const UserFeed = () => {
                   }}
                   readOnly
                 />
-                <Button type="primary" size="large" style={{ borderRadius: 999, background: "#1890ff", padding: "0 22px", height: 44 }} onClick={(e) => { e.stopPropagation(); handleModalOpen(); }}>Post</Button>
+                <Button
+                  className="composer-action-btn"
+                  type="primary"
+                  size="large"
+                  style={{ borderRadius: 999, background: "#1890ff", padding: "0 22px", height: 44 }}
+                  onClick={(e) => { e.stopPropagation(); handleModalOpen(); }}
+                >
+                  Post
+                </Button>
               </div>
             )}
 
@@ -1167,7 +1372,6 @@ const UserFeed = () => {
                   autoSize={{ minRows: 3, maxRows: 8 }}
                   value={newText}
                   onChange={(e) => setNewText(e.target.value)}
-                  maxLength={maxChars}
                   showCount
                 />
                 <div>
@@ -1291,7 +1495,7 @@ const UserFeed = () => {
                       }}
                     >
                       <Space align="start" size={14}>
-                        <Avatar size={40} src={post?.userId?.avatarUrl} style={{ background: "#2db7f5" }}>
+                        <Avatar size={40} src={getValidAvatarUrl(post?.userId?.avatarUrl)} style={{ background: "#2db7f5" }}>
                           {
                             (post?.userId?.displayName ||
                               post?.userId?.username ||
@@ -1410,6 +1614,8 @@ const UserFeed = () => {
                           color: "#fff",
                           fontSize: 15,
                           lineHeight: 1.6,
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
                         }}
                       >
                         {post.textContent}
@@ -1517,7 +1723,7 @@ const UserFeed = () => {
                         </div>
                       </a>
                     )}
-                    <Space style={{ marginTop: 14, display: "flex", justifyContent: "space-between" }}>
+                    <Space className="post-actions" style={{ marginTop: 14, display: "flex", justifyContent: "space-between" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <Button
                           icon={<LikeOutlined />}
@@ -1562,15 +1768,33 @@ const UserFeed = () => {
                     {/* Danh sách bình luận - chỉ hiển thị 3 comment gần nhất */}
                     {postIdToComments[post._id] && postIdToComments[post._id].length > 0 && (
                       <div style={{ marginTop: 12, background: "#0f0f10", borderTop: "1px solid #1f1f1f", paddingTop: 8 }}>
-                        {limitToNewest3(postIdToComments[post._id]).map((c) => (
-                          <div key={c._id} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                            <Avatar size={28} style={{ background: "#555" }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || "U"}</Avatar>
-                            <div style={{ background: "#151515", border: "1px solid #232323", borderRadius: 10, padding: "6px 10px", color: "#e5e7eb" }}>
-                              <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || "Người dùng"}</div>
-                              <div>{c.comment}</div>
+                        {limitToNewest3(postIdToComments[post._id]).map((c) => {
+                          const canDelete = canDeleteComment(c, post);
+                          return (
+                            <div key={c._id} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                              <Avatar size={28} style={{ background: "#555" }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || "U"}</Avatar>
+                              <div style={{ background: "#151515", border: "1px solid #232323", borderRadius: 10, padding: "6px 10px", color: "#e5e7eb", flex: 1 }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                                  <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || "Người dùng"}</div>
+                                  {canDelete && (
+                                    <Dropdown
+                                      trigger={['click']}
+                                      menu={buildCommentMenuProps(post._id, c._id)}
+                                    >
+                                      <Button
+                                        type="text"
+                                        icon={<MoreOutlined />}
+                                        loading={deletingCommentId === c._id}
+                                        style={{ color: "#9ca3af", padding: 0 }}
+                                      />
+                                    </Dropdown>
+                                  )}
+                                </div>
+                                <div>{c.comment}</div>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </Card>
@@ -1580,52 +1804,27 @@ const UserFeed = () => {
             <div ref={loaderRef} style={{ height: 1 }} />
           </div>
 
-          <div>
-            <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
-              <div style={{ color: "#fff", fontWeight: 700, marginBottom: 12 }}>
-                Find Me On
-              </div>
-              {profile?.links && Array.isArray(profile.links) && profile.links.length > 0 ? (
-                <Space direction="vertical" size={12} style={{ width: "100%" }}>
-                  {profile.links.map((link, index) => {
-                    const linkInfo = getLinkInfo(link);
-                    return (
-                      <Space key={index} style={{ width: "100%" }}>
-                        <div
-                          style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 999,
-                            background: "#111",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: linkInfo.color,
-                            fontSize: 18,
-                          }}
-                        >
-                          <i className={linkInfo.iconClass}></i>
-                        </div>
-                        <a 
-                          href={link} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          style={{ color: "#fff", textDecoration: "none" }}
-                        >
-                          {linkInfo.label}
-                        </a>
-                      </Space>
-                    );
-                  })}
-                </Space>
-              ) : (
-                <div style={{ color: "#9ca3af", fontSize: 14 }}>
-                  No links available
-                </div>
-              )}
-            </Card>
-          </div>
+          {!isMobileSidebar && (
+            <div className="profile-feed-sidebar">
+              {sidebarContent}
+            </div>
+          )}
         </div>
+        {isMobileSidebar && (
+          <Drawer
+            placement="right"
+            open={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            width={320}
+            destroyOnClose
+            className="newsfeed-sidebar-drawer"
+            bodyStyle={{ padding: 0, background: "#0a0a0a" }}
+          >
+            <div className="newsfeed-sidebar-drawer-content hide-scrollbar">
+              {sidebarContent}
+            </div>
+          </Drawer>
+        )}
       </div>
 
       <Modal
@@ -1681,7 +1880,7 @@ const UserFeed = () => {
                     avatar={
                       <Avatar
                         size={40}
-                        src={user.avatarUrl}
+                        src={getValidAvatarUrl(user.avatarUrl)}
                         style={{ background: "#2db7f5", cursor: "pointer" }}
                         onClick={() => navigate(`/users/${user.id}/newfeeds`)}
                       >
@@ -1767,15 +1966,33 @@ const UserFeed = () => {
             </div>
 
             <div style={{ marginTop: 12, maxHeight: 360, overflowY: "auto" }}>
-              {(postIdToComments[commentPostId] || []).map((c) => (
-                <div key={c._id} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                  <Avatar size={28} style={{ background: "#555" }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || "U"}</Avatar>
-                  <div style={{ background: "#151515", border: "1px solid #232323", borderRadius: 10, padding: "6px 10px", color: "#e5e7eb" }}>
-                    <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || "Người dùng"}</div>
-                    <div>{c.comment}</div>
+              {(postIdToComments[commentPostId] || []).map((c) => {
+                const canDelete = canDeleteComment(c, modalPost);
+                return (
+                  <div key={c._id} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                    <Avatar size={28} style={{ background: "#555" }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || "U"}</Avatar>
+                    <div style={{ background: "#151515", border: "1px solid #232323", borderRadius: 10, padding: "6px 10px", color: "#e5e7eb", flex: 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || "Người dùng"}</div>
+                        {canDelete && (
+                          <Dropdown
+                            trigger={['click']}
+                            menu={buildCommentMenuProps(commentPostId, c._id)}
+                          >
+                            <Button
+                              type="text"
+                              icon={<MoreOutlined />}
+                              loading={deletingCommentId === c._id}
+                              style={{ color: "#9ca3af", padding: 0 }}
+                            />
+                          </Dropdown>
+                        )}
+                      </div>
+                      <div>{c.comment}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12 }}>
