@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Select, Dropdown, Radio } from 'antd';
-import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined, MoreOutlined, FlagOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, CustomerServiceOutlined, LinkOutlined } from '@ant-design/icons';
+import { Card, Avatar, Button, Typography, Space, Input, List, Divider, Tag, Spin, Empty, message, Modal, Select, Dropdown, Radio, Drawer } from 'antd';
+import { LikeOutlined, MessageOutlined, PlusOutlined, HeartOutlined, CrownOutlined, UserOutlined, MoreOutlined, FlagOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, CustomerServiceOutlined, LinkOutlined, MenuOutlined } from '@ant-design/icons';
 import { listPosts, createPost, getPostById, updatePost, deletePost } from '../../../services/user/post';
-import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments, getPostLikes } from '../../../services/user/post';
+import { likePost, unlikePost, createPostComment, getPostStats, getAllPostComments, getPostLikes, deletePostComment } from '../../../services/user/post';
 import { followUser, unfollowUser, getFollowSuggestions, getProfileById, getFollowingList, getMyProfile } from '../../../services/user/profile';
 import { ensureConversationWith } from '../../../services/dmService';
 import { onPostCommentNew, offPostCommentNew, onPostArchived, offPostArchived, joinRoom } from '../../../services/user/socketService';
 import { getMyLicks } from '../../../services/user/lickService';
 import { reportPost, checkPostReport } from '../../../services/user/reportService';
 import PostLickEmbed from '../../../components/PostLickEmbed';
+import './newFeedResponsive.css';
 
 const { Title, Text } = Typography;
 const WavePlaceholder = () => (
@@ -61,50 +62,66 @@ const WavePlaceholder = () => (
 );
 
 const Suggestion = ({ user, following, loading, onFollow }) => {
+  const navigate = useNavigate();
+
+  const handleOpenUserFeed = () => {
+    if (!user?.id) return;
+    navigate(`/users/${user.id}/newfeeds`);
+  };
+
+  const handleFollowClick = (e) => {
+    e.stopPropagation();
+    if (!user?.id) return;
+    onFollow(user.id);
+  };
+
   const primaryReason = Array.isArray(user?.reasons) && user.reasons.length > 0
     ? user.reasons[0]
     : null;
 
   return (
-  <div style={{ display: 'flex', alignItems: 'center', padding: '6px 0', width: '100%' }}>
-    <Space size={12}>
-      <Avatar 
-        size={36} 
-        src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined} 
-        style={{ background: '#555' }}
-      >
-        {(user.displayName || user.username || 'U')[0]}
-      </Avatar>
-      <div>
-        <Text strong style={{ color: '#fff' }}>{user.displayName || user.username}</Text>
-        <div style={{ fontSize: 12, color: '#f3f5f7ff' }}>{Number(user.followersCount || 0)} người theo dõi</div>
-        {primaryReason && (
-          <div style={{ fontSize: 12, color: '#9ca3af' }}>{primaryReason}</div>
-        )}
-      </div>
-    </Space>
-    {following ? (
-      <Button 
-        size="middle" 
-        type="primary" 
-        loading={loading}
-        onClick={() => onFollow(user.id)}
-        style={{ marginLeft: 'auto', borderRadius: 999 }} 
-      >
-        Đang theo dõi
-      </Button>
-    ) : (
-      <Button 
-        shape="circle" 
-        size="large" 
-        type="primary" 
-        loading={loading}
-        onClick={() => onFollow(user.id)}
-        icon={<PlusOutlined />} 
-        style={{ marginLeft: 'auto' }} 
-      />
-    )}
-  </div>
+  <div 
+    style={{ display: 'flex', alignItems: 'center', padding: '6px 0', width: '100%', cursor: 'pointer' }}
+    onClick={handleOpenUserFeed}
+  >
+      <Space size={12}>
+        <Avatar 
+          size={36} 
+          src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined} 
+          style={{ background: '#555' }}
+        >
+          {(user.displayName || user.username || 'U')[0]}
+        </Avatar>
+        <div>
+          <Text strong style={{ color: '#fff' }}>{user.displayName || user.username}</Text>
+          <div style={{ fontSize: 12, color: '#f3f5f7ff' }}>{Number(user.followersCount || 0)} người theo dõi</div>
+          {primaryReason && (
+            <div style={{ fontSize: 12, color: '#9ca3af' }}>{primaryReason}</div>
+          )}
+        </div>
+      </Space>
+      {following ? (
+        <Button 
+          size="middle" 
+          type="primary" 
+          loading={loading}
+          onClick={handleFollowClick}
+          style={{ marginLeft: 'auto', borderRadius: 999 }} 
+        >
+          Đang theo dõi
+        </Button>
+      ) : (
+        <Button 
+          shape="circle" 
+          size="large" 
+          type="primary" 
+          loading={loading}
+          onClick={handleFollowClick}
+          icon={<PlusOutlined />} 
+          style={{ marginLeft: 'auto' }} 
+        />
+      )}
+    </div>
   );
 };
 
@@ -219,6 +236,7 @@ const NewsFeed = () => {
   const [commentText, setCommentText] = useState('');
   const [likingPostId, setLikingPostId] = useState(null);
   const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [deletingCommentId, setDeletingCommentId] = useState(null);
   const [postIdToStats, setPostIdToStats] = useState({}); // postId -> {likesCount, commentsCount}
   const [postIdToComments, setPostIdToComments] = useState({}); // postId -> comments[]
   const [postIdToLiked, setPostIdToLiked] = useState({}); // postId -> boolean
@@ -269,6 +287,13 @@ const NewsFeed = () => {
     return null;
   });
   const [loadingProfile, setLoadingProfile] = useState(false);
+
+  const [modal, modalContextHolder] = Modal.useModal();
+  const [isMobileSidebar, setIsMobileSidebar] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth <= 1024;
+  });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const composerUser = useMemo(() => {
     if (currentUser && Object.keys(currentUser).length > 0) return currentUser;
@@ -394,6 +419,38 @@ const NewsFeed = () => {
     return '';
   };
 
+  const getCommentAuthorId = (comment) => {
+    if (!comment) return '';
+    const user = comment.userId || comment.user_id;
+    if (!user) return '';
+    if (typeof user === 'string' || typeof user === 'number') {
+      return user.toString();
+    }
+    if (typeof user === 'object') {
+      const candidate = user._id || user.id || user.userId || user.user_id;
+      return candidate ? candidate.toString() : '';
+    }
+    return '';
+  };
+
+  const currentUserRole = React.useMemo(() => {
+    if (currentUser?.roleId) return currentUser.roleId;
+    if (currentUser?.role) return currentUser.role;
+    if (currentUser?.user?.roleId) return currentUser.user.roleId;
+    if (currentUser?.user?.role) return currentUser.user.role;
+    return undefined;
+  }, [currentUser]);
+
+  const isAdminUser = (currentUserRole || '').toLowerCase() === 'admin';
+
+  const isPostOwner = (post) => {
+    const ownerId = getAuthorId(post);
+    if (!ownerId || !currentUserId) return false;
+    return ownerId.toString() === currentUserId.toString();
+  };
+
+  const canDeleteComment = (_, post) => isAdminUser || isPostOwner(post);
+
   const toggleFollow = async (uid) => {
     if (!uid) return;
     try {
@@ -442,6 +499,20 @@ const NewsFeed = () => {
   };
 
   useEffect(() => { loadSuggestions(); }, []);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (typeof window === 'undefined') return;
+      const mobile = window.innerWidth <= 1024;
+      setIsMobileSidebar(mobile);
+      if (!mobile) {
+        setSidebarOpen(false);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const openComment = async (postId) => {
     setCommentPostId(postId);
@@ -518,6 +589,64 @@ const NewsFeed = () => {
     }
   };
 
+  const handleDeleteComment = async (postId, commentId) => {
+    if (!postId || !commentId) return;
+    try {
+      setDeletingCommentId(commentId);
+      await deletePostComment(postId, commentId);
+      setPostIdToComments((prev) => {
+        const list = Array.isArray(prev[postId]) ? prev[postId] : [];
+        return { ...prev, [postId]: list.filter((c) => c._id !== commentId) };
+      });
+      setPostIdToStats((prev) => {
+        const current = prev[postId] || { likesCount: 0, commentsCount: 0 };
+        const nextComments = Math.max((current.commentsCount || 1) - 1, 0);
+        return { ...prev, [postId]: { ...current, commentsCount: nextComments } };
+      });
+      getPostStats(postId)
+        .then((res) => {
+          if (res?.data) {
+            setPostIdToStats((prev) => ({ ...prev, [postId]: res.data }));
+          }
+        })
+        .catch(() => {});
+      message.success('Đã xóa bình luận');
+    } catch (e) {
+      message.error(e?.message || 'Không thể xóa bình luận');
+    } finally {
+      setDeletingCommentId(null);
+    }
+  };
+
+  const confirmDeleteComment = (postId, commentId) => {
+    modal.confirm({
+      title: 'Xóa bình luận này?',
+      content: 'Bình luận sẽ bị xóa khỏi bài viết và người viết sẽ không nhận thông báo.',
+      okText: 'Xóa',
+      cancelText: 'Hủy',
+      okButtonProps: { danger: true },
+      closable: true,
+      centered: true,
+      onOk: () => handleDeleteComment(postId, commentId),
+    });
+  };
+
+  const buildCommentMenuProps = (postId, commentId) => ({
+    items: [
+      {
+        key: 'delete-comment',
+        label: 'Xóa bình luận',
+        danger: true,
+        disabled: deletingCommentId === commentId,
+      },
+    ],
+    onClick: ({ key }) => {
+      if (key === 'delete-comment' && deletingCommentId !== commentId) {
+        confirmDeleteComment(postId, commentId);
+      }
+    },
+  });
+
   const openReportModal = async (postId) => {
     setReportPostId(postId);
     setReportReason('');
@@ -558,7 +687,7 @@ const NewsFeed = () => {
   };
 
   const handleHidePost = (postId) => {
-    Modal.confirm({
+    modal.confirm({
       title: 'Xác nhận lưu trữ bài viết',
       content: 'Bạn có chắc chắn muốn lưu trữ bài viết này? Bài viết sẽ được chuyển vào kho lưu trữ và sẽ bị xóa vĩnh viễn sau 30 ngày nếu không khôi phục.',
       okText: 'Lưu trữ',
@@ -614,6 +743,121 @@ const NewsFeed = () => {
       setEditing(false);
     }
   };
+
+  const sidebarContent = (
+    <>
+      {/* Người liên hệ */}
+      <Card 
+        style={{ marginBottom: 16, background: '#0f0f10', borderColor: '#1f1f1f' }} 
+        title={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ color: '#fff', fontWeight: 700 }}>Người liên hệ</Text>
+            <Button type="text" icon={<MoreOutlined />} style={{ color: '#9ca3af', padding: 0 }} />
+          </div>
+        }
+      >
+        {loadingFollowing ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}>
+            <Spin />
+          </div>
+        ) : followingUsers.length === 0 ? (
+          <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+            Chưa có người liên hệ
+          </div>
+        ) : (
+          <List
+            dataSource={followingUsers}
+            renderItem={(user) => {
+              const userId = user.id || user._id || user.userId;
+              return (
+                <List.Item
+                  style={{ 
+                    padding: '8px 0', 
+                    cursor: 'pointer',
+                    borderBottom: '1px solid #1f1f1f'
+                  }}
+                  onClick={async () => {
+                    try {
+                      const conversation = await ensureConversationWith(userId);
+                      if (conversation && conversation._id) {
+                        window.dispatchEvent(new CustomEvent('openChatWindow', { 
+                          detail: { conversation } 
+                        }));
+                      } else {
+                        message.error('Không thể tạo cuộc trò chuyện');
+                      }
+                    } catch (error) {
+                      console.error('Error opening chat:', error);
+                      message.error(error.message || 'Không thể mở chat');
+                    }
+                  }}
+                >
+                  <List.Item.Meta
+                    avatar={
+                      <Avatar 
+                        src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined} 
+                        icon={<UserOutlined />}
+                        size={40}
+                        style={{ background: '#2db7f5' }}
+                      />
+                    }
+                    title={
+                      <Text style={{ color: '#fff', fontWeight: 500 }}>
+                        {user.displayName || user.username || 'Người dùng'}
+                      </Text>
+                    }
+                    description={
+                      <Text style={{ color: '#9ca3af', fontSize: 12 }}>
+                        {user.isOnline ? (
+                          <span style={{ color: '#52c41a' }}>● Đang hoạt động</span>
+                        ) : user.lastSeen ? (
+                          `Hoạt động ${formatTimeAgo(user.lastSeen)}`
+                        ) : (
+                          'Offline'
+                        )}
+                      </Text>
+                    }
+                  />
+                </List.Item>
+              );
+            }}
+          />
+        )}
+      </Card>
+
+      <Card style={{ marginBottom: 16, background: '#0f0f10', borderColor: '#1f1f1f' }} title={<Text style={{ color: '#fff', fontWeight: 700 }}>Gợi ý theo dõi</Text>}>
+        {suggestionsLoading && (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}><Spin /></div>
+        )}
+        {!suggestionsLoading && (
+          <List
+            itemLayout="horizontal"
+            dataSource={suggestions}
+            renderItem={(user) => (
+              <List.Item style={{ padding: '8px 0' }}>
+                <Suggestion 
+                  user={user}
+                  following={!!userIdToFollowing[user.id]}
+                  loading={!!userIdToFollowLoading[user.id]}
+                  onFollow={(uid) => toggleFollow(uid)}
+                />
+              </List.Item>
+            )}
+          />
+        )}
+      </Card>
+
+      <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>
+        <Title level={4} style={{ color: '#fff', marginBottom: 12, textAlign: 'center' }}>LeaderBoard</Title>
+        <Divider style={{ margin: '8px 0', borderColor: '#1f1f1f' }} />
+        <Space direction="vertical" size={18} style={{ width: '100%' }}>
+          <LeaderboardItem name="Tên lick" icon="XVEN" iconColor="#ef4444" />
+          <LeaderboardItem name="Tên lick" icon="UNITED" iconColor="#3b82f6" />
+          <LeaderboardItem name="Tên lick" icon={<UserOutlined />} iconColor="#6b7280" />
+        </Space>
+      </Card>
+    </>
+  );
 
   // Join socket rooms for all posts currently in the feed to receive inline updates
   useEffect(() => {
@@ -1070,9 +1314,19 @@ const NewsFeed = () => {
     }
   };
 
+  const MAX_POST_TEXT_LENGTH = 300;
+
   const handleCreatePost = async () => {
-    if (!newText.trim()) {
+    const trimmed = newText.trim();
+    if (!trimmed) {
       message.warning('Vui lòng nhập nội dung');
+      return;
+    }
+    if (trimmed.length > MAX_POST_TEXT_LENGTH) {
+      modal.warning({
+        title: 'Nội dung quá dài',
+        content: `Nội dung không được vượt quá ${MAX_POST_TEXT_LENGTH} ký tự (hiện tại: ${trimmed.length}). Vui lòng rút gọn trước khi đăng.`,
+      });
       return;
     }
     try {
@@ -1083,7 +1337,7 @@ const NewsFeed = () => {
       // và BE sẽ trả lỗi rõ ràng nếu thiếu
       // eslint-disable-next-line no-console
       console.log('[UI] Sending JSON createPost...');
-      const payload = { postType: 'status_update', textContent: newText.trim(), linkPreview };
+      const payload = { postType: 'status_update', textContent: trimmed, linkPreview };
       if (selectedLickIds.length > 0) {
         payload.attachedLickIds = selectedLickIds;
       }
@@ -1157,6 +1411,10 @@ const NewsFeed = () => {
       setSelectedLickIds([]);
       setIsModalOpen(false);
       message.success('Đăng bài thành công');
+      modal.success({
+        title: 'Đăng bài thành công',
+        content: 'Bài viết của bạn đã được đăng lên bảng tin.',
+      });
       // KHÔNG fetch lại data - post mới đã được thêm vào đầu danh sách
       // Chỉ khi refresh trang thì mới sort theo engagement
     } catch (e) {
@@ -1168,43 +1426,44 @@ const NewsFeed = () => {
 
   return (
     <>
-    <style>{`
-      .hide-scrollbar::-webkit-scrollbar {
-        display: none;
-      }
-      .hide-scrollbar {
-        -ms-overflow-style: none;
-        scrollbar-width: none;
-      }
-    `}</style>
-    <div style={{ 
-      maxWidth: 1680, 
-      margin: '0 auto', 
-      padding: '24px 24px',
-      background: '#0a0a0a',
-      minHeight: '100vh',
-      height: '100vh',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden'
-    }}>
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: 'minmax(0, 1.2fr) 460px', 
-        gap: 32,
-        flex: 1,
-        overflow: 'hidden',
-        minHeight: 0
-      }}>
-        <div style={{
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          height: '100%',
-          paddingRight: 8,
-          scrollbarWidth: 'none', // Firefox
-          msOverflowStyle: 'none', // IE and Edge
-        }} className="hide-scrollbar">
-          <div style={{ 
+    {modalContextHolder}
+    <div
+      className="newsfeed-page"
+      style={{
+        maxWidth: 1680,
+        margin: '0 auto',
+        padding: 'var(--newsfeed-page-padding, 24px 24px)',
+        background: '#0a0a0a',
+        minHeight: '100vh',
+        height: 'var(--newsfeed-page-height, 100vh)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      }}
+    >
+      <div
+        className="newsfeed-grid"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'var(--newsfeed-grid-columns, minmax(0, 1.2fr) 460px)',
+          gap: 'var(--newsfeed-grid-gap, 32px)',
+          flex: 1,
+          overflow: 'hidden',
+          minHeight: 0
+        }}
+      >
+        <div
+          className="newsfeed-main-column hide-scrollbar"
+          style={{
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            height: '100%',
+            paddingRight: 'var(--newsfeed-main-pr, 8px)',
+            scrollbarWidth: 'none', // Firefox
+            msOverflowStyle: 'none', // IE and Edge
+          }}
+        >
+          <div className="composer-card" style={{ 
             marginBottom: 20, 
             background: '#0f0f10', 
             border: '1px solid #1f1f1f',
@@ -1255,6 +1514,7 @@ const NewsFeed = () => {
               );
             })()}
             <Input.TextArea 
+              className="composer-input"
               placeholder="Có gì mới ?" 
               autoSize={{ minRows: 2, maxRows: 8 }}
               style={{ 
@@ -1267,7 +1527,15 @@ const NewsFeed = () => {
               }}
               readOnly
             />
-            <Button type="primary" size="large" style={{ borderRadius: 999, background: '#1890ff', padding: '0 22px', height: 44 }} onClick={(e) => { e.stopPropagation(); handleModalOpen(); }}>Post</Button>
+            <Button
+              className="composer-action-btn"
+              type="primary"
+              size="large"
+              style={{ borderRadius: 999, background: '#1890ff', padding: '0 22px', height: 44 }}
+              onClick={(e) => { e.stopPropagation(); handleModalOpen(); }}
+            >
+              Post
+            </Button>
           </div>
 
           <Modal
@@ -1318,7 +1586,6 @@ const NewsFeed = () => {
                   autoSize={{ minRows: 4, maxRows: 10 }}
                   value={newText}
                   onChange={(e) => setNewText(e.target.value)}
-                  maxLength={maxChars}
                   allowClear
                   style={{
                     background: '#0b0b0f',
@@ -1385,6 +1652,17 @@ const NewsFeed = () => {
               )}
             </div>
           </Modal>
+
+          {isMobileSidebar && (
+            <Button
+              block
+              className="newsfeed-sidebar-toggle"
+              icon={<MenuOutlined />}
+              onClick={() => setSidebarOpen(true)}
+            >
+              Khám phá danh mục bên phải
+            </Button>
+          )}
 
           {isInitialLoading && (
             <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
@@ -1475,7 +1753,7 @@ const NewsFeed = () => {
                               },
                               {
                                 key: 'hide',
-                                label: 'Lưu trữ bài post',
+                                label: 'Ẩn bài post',
                                 icon: <DeleteOutlined />,
                                 danger: true,
                                 loading: deletingPostId === post._id,
@@ -1522,7 +1800,16 @@ const NewsFeed = () => {
                 </Space>
               </div>
               {post?.textContent && (
-                <div style={{ marginBottom: 10, color: '#fff', fontSize: 15, lineHeight: 1.6 }}>
+                <div
+                  style={{
+                    marginBottom: 10,
+                    color: '#fff',
+                    fontSize: 15,
+                    lineHeight: 1.6,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
                   {post.textContent}
                 </div>
               )}
@@ -1571,7 +1858,7 @@ const NewsFeed = () => {
                   </div>
                 </a>
               )}
-              <Space style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between' }}>
+              <Space className="post-actions" style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Button 
                     icon={<LikeOutlined />} 
@@ -1608,15 +1895,37 @@ const NewsFeed = () => {
               {/* Danh sách bình luận - chỉ hiển thị 3 comment gần nhất */}
               {postIdToComments[post._id] && postIdToComments[post._id].length > 0 && (
                 <div style={{ marginTop: 12, background: '#0f0f10', borderTop: '1px solid #1f1f1f', paddingTop: 8 }}>
-                  {limitToNewest3(postIdToComments[post._id]).map((c) => (
-                    <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                      <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
-                      <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>
-                        <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || 'Người dùng'}</div>
-                        <div>{c.comment}</div>
+                  {limitToNewest3(postIdToComments[post._id]).map((c) => {
+                    const canDelete = canDeleteComment(c, post);
+                    return (
+                      <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                        <Avatar size={28} style={{ background: '#555' }}>
+                          {c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}
+                        </Avatar>
+                        <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb', flex: 1 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                            <div style={{ fontWeight: 600 }}>
+                              {c?.userId?.displayName || c?.userId?.username || 'Người dùng'}
+                            </div>
+                            {canDelete && (
+                              <Dropdown
+                                trigger={['click']}
+                                menu={buildCommentMenuProps(post._id, c._id)}
+                              >
+                                <Button
+                                  type="text"
+                                  icon={<MoreOutlined />}
+                                  loading={deletingCommentId === c._id}
+                                  style={{ color: '#9ca3af', padding: 0 }}
+                                />
+                              </Dropdown>
+                            )}
+                          </div>
+                          <div>{c.comment}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -1632,129 +1941,36 @@ const NewsFeed = () => {
           )}
         </div>
 
-        <div style={{
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          height: '100%',
-          paddingLeft: 8,
-          scrollbarWidth: 'none', // Firefox
-          msOverflowStyle: 'none', // IE and Edge
-        }} className="hide-scrollbar">
-          {/* Người liên hệ */}
-          <Card 
-            style={{ marginBottom: 16, background: '#0f0f10', borderColor: '#1f1f1f' }} 
-            title={
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ color: '#fff', fontWeight: 700 }}>Người liên hệ</Text>
-                <Button type="text" icon={<MoreOutlined />} style={{ color: '#9ca3af', padding: 0 }} />
-              </div>
-            }
+        {!isMobileSidebar && (
+          <div
+            className="newsfeed-sidebar-column hide-scrollbar"
+            style={{
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              height: '100%',
+              paddingLeft: 'var(--newsfeed-sidebar-pl, 8px)',
+              scrollbarWidth: 'none', // Firefox
+              msOverflowStyle: 'none', // IE and Edge
+            }}
           >
-            {loadingFollowing ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}>
-                <Spin />
-              </div>
-            ) : followingUsers.length === 0 ? (
-              <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-                Chưa có người liên hệ
-              </div>
-            ) : (
-              <List
-                dataSource={followingUsers}
-                renderItem={(user) => {
-                  const userId = user.id || user._id || user.userId;
-                  return (
-                    <List.Item
-                      style={{ 
-                        padding: '8px 0', 
-                        cursor: 'pointer',
-                        borderBottom: '1px solid #1f1f1f'
-                      }}
-                      onClick={async () => {
-                        try {
-                          // Create or get conversation with this user
-                          const conversation = await ensureConversationWith(userId);
-                          if (conversation && conversation._id) {
-                            // Dispatch custom event to open chat window (header will listen)
-                            window.dispatchEvent(new CustomEvent('openChatWindow', { 
-                              detail: { conversation } 
-                            }));
-                          } else {
-                            message.error('Không thể tạo cuộc trò chuyện');
-                          }
-                        } catch (error) {
-                          console.error('Error opening chat:', error);
-                          message.error(error.message || 'Không thể mở chat');
-                        }
-                      }}
-                    >
-                      <List.Item.Meta
-                        avatar={
-                          <Avatar 
-                            src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined} 
-                            icon={<UserOutlined />}
-                            size={40}
-                            style={{ background: '#2db7f5' }}
-                          />
-                        }
-                        title={
-                          <Text style={{ color: '#fff', fontWeight: 500 }}>
-                            {user.displayName || user.username || 'Người dùng'}
-                          </Text>
-                        }
-                        description={
-                          <Text style={{ color: '#9ca3af', fontSize: 12 }}>
-                            {user.isOnline ? (
-                              <span style={{ color: '#52c41a' }}>● Đang hoạt động</span>
-                            ) : user.lastSeen ? (
-                              `Hoạt động ${formatTimeAgo(user.lastSeen)}`
-                            ) : (
-                              'Offline'
-                            )}
-                          </Text>
-                        }
-                      />
-                    </List.Item>
-                  );
-                }}
-              />
-            )}
-          </Card>
-
-          <Card style={{ marginBottom: 16, background: '#0f0f10', borderColor: '#1f1f1f' }} title={<Text style={{ color: '#fff', fontWeight: 700 }}>Gợi ý theo dõi</Text>}>
-            {suggestionsLoading && (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}><Spin /></div>
-            )}
-            {!suggestionsLoading && (
-              <List
-                itemLayout="horizontal"
-                dataSource={suggestions}
-                renderItem={(user) => (
-                  <List.Item style={{ padding: '8px 0' }}>
-                    <Suggestion 
-                      user={user}
-                      following={!!userIdToFollowing[user.id]}
-                      loading={!!userIdToFollowLoading[user.id]}
-                      onFollow={(uid) => toggleFollow(uid)}
-                    />
-                  </List.Item>
-                )}
-              />
-            )}
-          </Card>
-
-          <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>
-            <Title level={4} style={{ color: '#fff', marginBottom: 12, textAlign: 'center' }}>LeaderBoard</Title>
-            <Divider style={{ margin: '8px 0', borderColor: '#1f1f1f' }} />
-            <Space direction="vertical" size={18} style={{ width: '100%' }}>
-              <LeaderboardItem name="Tên lick" icon="XVEN" iconColor="#ef4444" />
-              <LeaderboardItem name="Tên lick" icon="UNITED" iconColor="#3b82f6" />
-              <LeaderboardItem name="Tên lick" icon={<UserOutlined />} iconColor="#6b7280" />
-            </Space>
-          </Card>
-        </div>
+            {sidebarContent}
+          </div>
+        )}
       </div>
     </div>
+      <Drawer
+        placement="right"
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        width={360}
+        className="newsfeed-sidebar-drawer"
+        destroyOnClose
+        bodyStyle={{ padding: 0, background: '#0a0a0a' }}
+      >
+        <div className="newsfeed-sidebar-drawer-content hide-scrollbar">
+          {sidebarContent}
+        </div>
+      </Drawer>
 
       <Modal
         title={<span style={{ color: '#fff', fontWeight: 700 }}>Người đã thích</span>}
@@ -1897,15 +2113,37 @@ const NewsFeed = () => {
 
             {/* comments list */}
             <div style={{ marginTop: 12, maxHeight: 360, overflowY: 'auto' }}>
-              {(postIdToComments[commentPostId] || []).map((c) => (
-                <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                  <Avatar size={28} style={{ background: '#555' }}>{c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}</Avatar>
-                  <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb' }}>
-                    <div style={{ fontWeight: 600 }}>{c?.userId?.displayName || c?.userId?.username || 'Người dùng'}</div>
-                    <div>{c.comment}</div>
+              {(postIdToComments[commentPostId] || []).map((c) => {
+                const canDelete = canDeleteComment(c, modalPost);
+                return (
+                  <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <Avatar size={28} style={{ background: '#555' }}>
+                      {c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}
+                    </Avatar>
+                    <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb', flex: 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                        <div style={{ fontWeight: 600 }}>
+                          {c?.userId?.displayName || c?.userId?.username || 'Người dùng'}
+                        </div>
+                        {canDelete && (
+                          <Dropdown
+                            trigger={['click']}
+                            menu={buildCommentMenuProps(commentPostId, c._id)}
+                          >
+                            <Button
+                              type="text"
+                              icon={<MoreOutlined />}
+                              loading={deletingCommentId === c._id}
+                              style={{ color: '#9ca3af', padding: 0 }}
+                            />
+                          </Dropdown>
+                        )}
+                      </div>
+                      <div>{c.comment}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* input */}
@@ -2070,15 +2308,71 @@ const NewsFeed = () => {
         },
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <Input.TextArea
           placeholder="Chia sẻ điều gì đó..."
-          autoSize={{ minRows: 3, maxRows: 8 }}
+          autoSize={{ minRows: 6, maxRows: 16 }}
           value={editText}
           onChange={(e) => setEditText(e.target.value)}
-          maxLength={maxChars}
-          showCount
         />
+
+        {/* Preview phần nội dung giống ngoài feed (lick/media) */}
+        {editingPost && (
+          <>
+            {(() => {
+              const url = extractFirstUrl(editingPost?.textContent || '');
+              const sharedLickId = parseSharedLickId(url);
+              if (!sharedLickId) return null;
+              return (
+                <div style={{ marginTop: 8 }}>
+                  <PostLickEmbed lickId={sharedLickId} url={url} />
+                </div>
+              );
+            })()}
+
+            {/* Attached licks giống ngoài feed */}
+            {editingPost?.attachedLicks &&
+              Array.isArray(editingPost.attachedLicks) &&
+              editingPost.attachedLicks.length > 0 && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 12,
+                  }}
+                >
+                  {editingPost.attachedLicks.map((lick) => {
+                    const lickId = lick?._id || lick?.lick_id || lick;
+                    if (!lickId) return null;
+                    return (
+                      <div key={lickId} style={{ marginBottom: 8 }}>
+                        <PostLickEmbed lickId={lickId} />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+            {editingPost?.media?.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div
+                  style={{
+                    height: 120,
+                    background: '#111',
+                    borderRadius: 8,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#9ca3af',
+                  }}
+                >
+                  Media hiện tại của bài viết
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </Modal>
   </>

@@ -132,6 +132,14 @@ export const getPostComments = async (
   return res.data;
 };
 
+export const deletePostComment = async (postId, commentId) => {
+  if (!postId || !commentId) {
+    throw new Error('postId and commentId are required');
+  }
+  const res = await api.delete(`/posts/${postId}/comments/${commentId}`);
+  return res.data;
+};
+
 // Stats
 export const getPostStats = async (postId) => {
   const res = await api.get(`/posts/${postId}/stats`);
@@ -175,6 +183,7 @@ export default {
   unlikePost,
   createPostComment,
   getPostComments,
+  deletePostComment,
   getPostStats,
   getPostLikes,
   getAllPostComments,

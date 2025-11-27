@@ -1,15 +1,20 @@
 import React, { useEffect, useRef } from 'react';
-import { Card, Form, Input, Button, Typography, message, Avatar, Layout, Space, Select, Upload } from 'antd';
+import { Card, Form, Input, Button, Typography, message, Avatar, Space, Select, Upload, Modal, Divider } from 'antd';
 import { ArrowLeftOutlined, UserOutlined, KeyOutlined, DeleteOutlined } from '@ant-design/icons';
 import { InfoCircleOutlined, SmileOutlined } from '@ant-design/icons';
 import { getMyProfile, updateMyProfile, uploadMyAvatar, uploadMyCoverPhoto } from '../../../services/user/profile';
 import { useNavigate } from 'react-router-dom';
+import './profileResponsive.css';
+import api from '../../../services/api';
+import { changePassword } from '../../../services/authService';
 
 const { Title, Text } = Typography;
 
 const ProfilePage = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
+  const [messageApi, messageContextHolder] = message.useMessage();
+  const [modalApi, modalContextHolder] = Modal.useModal();
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [aboutCount, setAboutCount] = React.useState(0);
@@ -22,6 +27,14 @@ const ProfilePage = () => {
   const [pendingCoverFile, setPendingCoverFile] = React.useState(null);
   const avatarObjectUrlRef = useRef(null);
   const coverObjectUrlRef = useRef(null);
+  const [addressLoading, setAddressLoading] = React.useState(false);
+  const [provinces, setProvinces] = React.useState([]);
+  const [districts, setDistricts] = React.useState([]);
+  const [wards, setWards] = React.useState([]);
+  const [selectedProvince, setSelectedProvince] = React.useState(null);
+  const [selectedDistrict, setSelectedDistrict] = React.useState(null);
+  const [changingPassword, setChangingPassword] = React.useState(false);
+  const changePasswordCardRef = useRef(null);
 
   const revokeAvatarPreview = () => {
     if (avatarObjectUrlRef.current) {
@@ -62,6 +75,25 @@ const ProfilePage = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const fetchProvinces = async () => {
+      setAddressLoading(true);
+      try {
+        const response = await api.get('/locations/provinces', {
+          params: { depth: 3 }
+        });
+        setProvinces(response.data || []);
+      } catch (error) {
+        console.error('Failed to fetch provinces', error);
+        messageApi.error('Không thể tải danh sách địa chỉ. Vui lòng thử lại sau.');
+      } finally {
+        setAddressLoading(false);
+      }
+    };
+
+    fetchProvinces();
+  }, []);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -83,13 +115,70 @@ const ProfilePage = () => {
       setPendingCoverFile(null);
       setAboutCount((u.bio || '').length);
     } catch (e) {
-      message.error(e.message || 'Không tải được hồ sơ');
+      messageApi.error(e.message || 'Không tải được hồ sơ');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (!profile || provinces.length === 0) return;
+
+    const province = provinces.find(
+      (item) => item.code.toString() === (profile.provinceCode || '').toString()
+    );
+    setSelectedProvince(province || null);
+    const provinceDistricts = province?.districts || [];
+    setDistricts(provinceDistricts);
+
+    const district = provinceDistricts.find(
+      (item) => item.code.toString() === (profile.districtCode || '').toString()
+    );
+    setSelectedDistrict(district || null);
+    const districtWards = district?.wards || [];
+    setWards(districtWards);
+
+    form.setFieldsValue({
+      addressLine: profile.addressLine || profile.location || '',
+      province: profile.provinceCode ? profile.provinceCode.toString() : undefined,
+      district: profile.districtCode ? profile.districtCode.toString() : undefined,
+      ward: profile.wardCode ? profile.wardCode.toString() : undefined,
+    });
+  }, [profile, provinces, form]);
+
+  const handleProvinceChange = (value) => {
+    form.setFieldsValue({ district: undefined, ward: undefined });
+    const province = provinces.find((item) => item.code.toString() === value);
+    setSelectedProvince(province || null);
+    setDistricts(province?.districts || []);
+    setSelectedDistrict(null);
+    setWards([]);
+  };
+
+  const handleDistrictChange = (value) => {
+    form.setFieldsValue({ ward: undefined });
+    const district = (selectedProvince?.districts || []).find((item) => item.code.toString() === value);
+    setSelectedDistrict(district || null);
+    setWards(district?.wards || []);
+  };
+
+  const handleWardChange = () => {
+    // No additional logic needed for now, but function retained for clarity
+  };
+
+  const handleChangePassword = async (values) => {
+    try {
+      setChangingPassword(true);
+      await changePassword(values.currentPassword, values.newPassword);
+      messageApi.success('Đổi mật khẩu thành công');
+    } catch (error) {
+      messageApi.error(error.message || 'Đổi mật khẩu thất bại');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
 
   const onFinish = async (values) => {
     setSaving(true);
@@ -108,6 +197,37 @@ const ProfilePage = () => {
         const trimmedLocation = values.location.trim();
         if (trimmedLocation) {
           payload.location = trimmedLocation;
+        }
+      }
+
+      const addressLine = typeof values.addressLine === 'string' ? values.addressLine.trim() : '';
+      const province = provinces.find((item) => item.code.toString() === values.province);
+      const district = province?.districts?.find((item) => item.code.toString() === values.district);
+      const ward = district?.wards?.find((item) => item.code.toString() === values.ward);
+
+      if (addressLine) {
+        payload.addressLine = addressLine;
+      }
+
+      if (province && district && ward) {
+        payload.provinceCode = province.code.toString();
+        payload.provinceName = province.name;
+        payload.districtCode = district.code.toString();
+        payload.districtName = district.name;
+        payload.wardCode = ward.code.toString();
+        payload.wardName = ward.name;
+
+        const fullLocation = [
+          addressLine || profile?.addressLine || '',
+          ward.name,
+          district.name,
+          province.name
+        ]
+          .filter(Boolean)
+          .join(', ');
+
+        if (fullLocation) {
+          payload.location = fullLocation;
         }
       }
 
@@ -143,24 +263,31 @@ const ProfilePage = () => {
       }
 
       await updateMyProfile(payload);
-      message.success('Cập nhật hồ sơ thành công');
+      messageApi.success('Cập nhật hồ sơ thành công');
+      modalApi.success({
+        title: 'Update profile',
+        content: 'Hồ sơ của bạn đã được cập nhật thành công.',
+        centered: true
+      });
       load();
     } catch (e) {
-      message.error(e.message || 'Cập nhật thất bại');
+      messageApi.error(e.message || 'Cập nhật thất bại');
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 24px' }}>
+    <div className="profile-settings-page">
+      {messageContextHolder}
+      {modalContextHolder}
       {/** unified input styles for dark theme */}
       {/** Using inline const to avoid external CSS edits */}
       {(() => {})()}
-      <Layout style={{ background: 'transparent' }}>
-        <Layout.Sider width={300} style={{ background: 'transparent', paddingRight: 16 }}>
+      <div className="profile-settings-layout">
+        <div className="profile-settings-sider">
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Button icon={<ArrowLeftOutlined />} style={{ height: 44 }}>
+            <Button icon={<ArrowLeftOutlined />} style={{ height: 44 }} block>
               Back to Profile
             </Button>
             <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f', padding: 0 }} bodyStyle={{ padding: 0 }}>
@@ -168,9 +295,12 @@ const ProfilePage = () => {
                 <UserOutlined style={{ fontSize: 20 }} />
                 <div style={{ fontWeight: 600, color: '#e5e7eb' }}>Profile</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16 }}>
-                <KeyOutlined style={{ fontSize: 20, color: '#9ca3af' }} />
-                <div style={{ color: '#9ca3af' }}>Change Password</div>
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16, cursor: 'pointer' }}
+                onClick={() => navigate('/change-password')}
+              >
+                <KeyOutlined style={{ fontSize: 20, color: '#fbbf24' }} />
+                <div style={{ color: '#fbbf24', fontWeight: 600 }}>Change Password</div>
               </div>
               <div 
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16, cursor: 'pointer' }}
@@ -181,18 +311,18 @@ const ProfilePage = () => {
               </div>
             </Card>
           </Space>
-        </Layout.Sider>
-        <Layout.Content>
+        </div>
+        <div className="profile-settings-content">
           <Title level={2} style={{ color: '#fff', marginBottom: 16 }}>Profile Settings</Title>
           <Card loading={loading} style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>
             {/* Cover Photo Section */}
             <div style={{ marginBottom: 24 }}>
-              <div style={{ position: 'relative', width: '100%', height: 200, borderRadius: 8, overflow: 'hidden', background: '#1f1f1f', marginBottom: 16 }}>
+              <div className="profile-cover-wrapper">
                 {coverPreview ? (
                   <img 
                     src={coverPreview} 
                     alt="Cover" 
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    className="profile-cover-wrapper__image"
                   />
                 ) : (
                   <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
@@ -220,7 +350,7 @@ const ProfilePage = () => {
                     const previewUrl = URL.createObjectURL(fileToUpload);
                     setCoverPreviewValue(previewUrl, { isObjectUrl: true });
                     setPendingCoverFile(fileToUpload);
-                    message.info('Ảnh bìa mới sẽ được lưu sau khi bấm Save changes');
+                    messageApi.info('Ảnh bìa mới sẽ được lưu sau khi bấm Save changes');
                   }}
                 >
                   <Button 
@@ -246,14 +376,14 @@ const ProfilePage = () => {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 24, alignItems: 'start' }}>
-              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <div className="profile-form-grid">
+              <div className="profile-avatar-block">
                 <Avatar shape="square" size={160} src={avatarPreview} style={{ background: '#4b5563', borderRadius: 28 }}>
                   {((form.getFieldValue('displayName') || form.getFieldValue('username') || 'T')[0] || 'T')}
                 </Avatar>
               </div>
 
-        <Form form={form} layout="vertical" onFinish={onFinish} style={{ width: '100%' }}>
+        <Form form={form} layout="vertical" onFinish={onFinish} className="profile-settings-form">
           {/** common input style for consistency */}
           {(() => {})()}
           <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Name</Text>} name="displayName" rules={[{ required: true, message: 'Vui lòng nhập tên' }]}> 
@@ -264,8 +394,74 @@ const ProfilePage = () => {
             <Input disabled style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
           </Form.Item>
 
-          <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Location</Text>} name="location">
+          {/* <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Location</Text>} name="location">
             <Input placeholder="Search City" style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
+          </Form.Item> */}
+
+          <Form.Item
+            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Address Line</Text>}
+            name="addressLine"
+          >
+            <Input
+              placeholder="House number, street name, etc."
+              style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Province / City</Text>}
+            name="province"
+          >
+            <Select
+              placeholder="Select province/city"
+              style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }}
+              loading={addressLoading && provinces.length === 0}
+              options={provinces.map((province) => ({
+                label: province.name,
+                value: province.code.toString()
+              }))}
+              showSearch
+              optionFilterProp="label"
+              onChange={handleProvinceChange}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>District</Text>}
+            name="district"
+          >
+            <Select
+              placeholder="Select district"
+              style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }}
+              disabled={!selectedProvince}
+              loading={addressLoading && !!selectedProvince && districts.length === 0}
+              options={districts.map((district) => ({
+                label: district.name,
+                value: district.code.toString()
+              }))}
+              showSearch
+              optionFilterProp="label"
+              onChange={handleDistrictChange}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Ward</Text>}
+            name="ward"
+          >
+            <Select
+              placeholder="Select ward"
+              style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }}
+              disabled={!selectedDistrict}
+              loading={addressLoading && !!selectedDistrict && wards.length === 0}
+              options={wards.map((ward) => ({
+                label: ward.name,
+                value: ward.code.toString()
+              }))}
+              showSearch
+              optionFilterProp="label"
+              onChange={handleWardChange}
+            />
           </Form.Item>
 
           <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Gender</Text>} name="gender">
@@ -341,7 +537,7 @@ const ProfilePage = () => {
                 const previewUrl = URL.createObjectURL(fileToUpload);
                 setAvatarPreviewValue(previewUrl, { isObjectUrl: true });
                 setPendingAvatarFile(fileToUpload);
-                message.info('Ảnh đại diện mới sẽ được lưu sau khi bấm Save changes');
+                messageApi.info('Ảnh đại diện mới sẽ được lưu sau khi bấm Save changes');
               }}
             >
               <Button 
@@ -371,8 +567,8 @@ const ProfilePage = () => {
         </Form>
         </div>
       </Card>
-        </Layout.Content>
-      </Layout>
+        </div>
+      </div>
     </div>
   );
 };

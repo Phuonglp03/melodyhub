@@ -10,6 +10,7 @@ import {
   BarChart3, 
   Video, 
   CheckSquare,
+  Sliders,
   Bell,
   User,
   LogOut,
@@ -36,6 +37,7 @@ const AdminLayout = () => {
     { path: "/admin/create-admin", icon: UserPlus, label: "Create Admin", color: "from-purple-500 to-pink-500" },
     { path: "/admin/user-management", icon: Users, label: "User List", color: "from-green-500 to-emerald-500" },
     { path: "/admin/reports-management", icon: BarChart3, label: "Reports ", color: "from-orange-500 to-red-500" },
+    { path: "/admin/report-settings", icon: Sliders, label: "Report Settings", color: "from-amber-500 to-rose-500" },
     { path: "/admin/liveroom-management", icon: Video, label: "Liverooms", color: "from-violet-500 to-purple-500" },
     { path: "/admin/lick-approvement", icon: CheckSquare, label: "Lick Approvement", color: "from-teal-500 to-cyan-500" }
   ];

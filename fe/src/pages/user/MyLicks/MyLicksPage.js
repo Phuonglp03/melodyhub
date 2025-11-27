@@ -255,6 +255,13 @@ const MyLicksPage = () => {
         : `/licks/${lickId}`;
       const title = lick.title || "My new lick";
       const textContent = `🎸 ${title}\n${shareUrl}`;
+      const MAX_POST_TEXT_LENGTH = 300;
+      if (textContent.length > MAX_POST_TEXT_LENGTH) {
+        alert(
+          `Nội dung không được vượt quá ${MAX_POST_TEXT_LENGTH} ký tự (hiện tại: ${textContent.length})`
+        );
+        return;
+      }
       await createPostApi({ postType: "status_update", textContent });
       alert("Shared to your feed!"); // replace with toast if available
     } catch (err) {
