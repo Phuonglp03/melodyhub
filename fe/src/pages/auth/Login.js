@@ -68,10 +68,9 @@ const Login = () => {
 
         // If login is successful
         messageApi.success('Đăng nhập thành công!');
-        const userRole = result.user?.roleId;
-
-        if (userRole === 'admin') {
-          window.location.href = '/admin/dashboard'; 
+        
+        if (result.user?.roleId === 'admin') {
+          window.location.href = '/admin'; 
         } else {
           navigate(from, { replace: true });
         }
