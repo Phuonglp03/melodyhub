@@ -68,14 +68,17 @@ const Login = () => {
 
         // If login is successful
         messageApi.success('Đăng nhập thành công!');
-        
-        // Redirect to the intended page or home
-        const from = location.state?.from?.pathname || '/';
-        navigate(from, { replace: true });
+        const userRole = result.user?.roleId;
+
+        if (userRole === 'admin') {
+          window.location.href = '/admin/dashboard'; 
+        } else {
+          navigate(from, { replace: true });
+        }
       }
     } catch (error) {
       console.error('Login error:', error);
-      // Error message will be shown by the useEffect hook
+      messageApi.error(error || 'Login failed. Please try again.');
     }
   };
 
