@@ -69,9 +69,11 @@ const Login = () => {
         // If login is successful
         messageApi.success('Đăng nhập thành công!');
         
-        // Redirect to the intended page or home
-        const from = location.state?.from?.pathname || '/';
-        navigate(from, { replace: true });
+        if (result.user?.roleId === 'admin') {
+          window.location.href = '/admin'; 
+        } else {
+          navigate(from, { replace: true });
+        }
       }
     } catch (error) {
       console.error('Login error:', error);
