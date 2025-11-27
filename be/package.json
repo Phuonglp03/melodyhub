@@ -9,7 +9,8 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "lint": "echo 'no linter configured'",
-    "seed:instruments": "node src/scripts/seedInstruments.js"
+    "seed:instruments": "node src/scripts/seedInstruments.js",
+    "migrate:project-music": "node src/scripts/migrateProjectMusicFields.js"
   },
   "engines": {
     "node": ">=18.0.0"

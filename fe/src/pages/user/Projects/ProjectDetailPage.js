@@ -7,10 +7,6 @@ import React, {
 } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  FaPlay,
-  FaPause,
-  FaStop,
-  FaCircle,
   FaMusic,
   FaTrash,
   FaPlus,
@@ -23,8 +19,8 @@ import {
   FaArrowDown,
   FaUndo,
   FaRedo,
-  FaStepBackward,
-  FaSync,
+  FaPlay,
+  FaPause,
 } from "react-icons/fa";
 import { RiPulseFill } from "react-icons/ri";
 import {
@@ -55,13 +51,25 @@ import BackingTrackPanel from "../../../components/BackingTrackPanel";
 import MidiEditor from "../../../components/MidiEditor";
 import AIGenerationLoadingModal from "../../../components/AIGenerationLoadingModal";
 import MidiClip from "../../../components/MidiClip";
-import * as Tone from "tone";
+// Note: Tone.js is now accessed through useAudioEngine hook instead of direct import
+// This follows the rule: "NEVER store Tone.js objects in Redux" - all audio objects
+// are managed through the singleton audioEngine
 import {
   parseMidiNotes,
   getMidiNotesForChord,
   midiToNoteName,
   midiToNoteNameNoOctave,
 } from "../../../utils/midi";
+import { useAudioEngine } from "../../../hooks/useAudioEngine";
+import { useAudioScheduler } from "../../../hooks/useAudioScheduler";
+import { AudioTransportControls } from "../../../components/audio";
+import {
+  normalizeKeyPayload,
+  normalizeTimeSignaturePayload,
+  getKeyDisplayName,
+  getTimeSignatureDisplayName,
+  clampSwingAmount,
+} from "../../../utils/musicTheory";
 
 const HISTORY_LIMIT = 50;
 const MIN_CLIP_DURATION = 0.1;
@@ -1098,6 +1106,7 @@ const ProjectDetailPage = () => {
     [trackContextMenu.trackId, tracks]
   );
   const [tempoDraft, setTempoDraft] = useState("120");
+  const [swingDraft, setSwingDraft] = useState("0");
   const [metronomeEnabled, setMetronomeEnabled] = useState(true);
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [recordArmed, setRecordArmed] = useState(false);
@@ -1105,13 +1114,15 @@ const ProjectDetailPage = () => {
     canUndo: false,
     canRedo: false,
   });
+  const audioEngine = useAudioEngine();
+  const { schedulePlayback, stopPlayback, loadClipAudio } = useAudioScheduler();
   const historyRef = useRef([]);
   const futureRef = useRef([]);
   const playbackPositionRef = useRef(0);
   const dirtyTimelineItemsRef = useRef(new Set());
   const saveTimeoutRef = useRef(null);
-  const playersRef = useRef(null); // Tone.Players for managing audio clips
-  const audioBuffersRef = useRef(new Map()); // Cache loaded audio URLs
+  // Note: Tone.js players are now managed through audioEngine hook (not stored in component refs)
+  // This avoids storing non-serializable objects and follows the rule of using useAudioEngine singleton
   const menuPosition = useMemo(() => {
     const padding = 12;
     const width = 260;
@@ -1139,6 +1150,21 @@ const ProjectDetailPage = () => {
   }, []);
 
   const hasUnsavedTimelineChanges = dirtyTimelineItemsRef.current.size > 0;
+
+  const normalizedProjectKey = useMemo(
+    () => normalizeKeyPayload(project?.key),
+    [project?.key]
+  );
+  const projectKeyName = normalizedProjectKey.name;
+  const normalizedTimeSignature = useMemo(
+    () => normalizeTimeSignaturePayload(project?.timeSignature),
+    [project?.timeSignature]
+  );
+  const projectTimeSignatureName = normalizedTimeSignature.name;
+  const projectSwingAmount = useMemo(
+    () => clampSwingAmount(project?.swingAmount ?? 0),
+    [project?.swingAmount]
+  );
 
   const collectTimelineItemSnapshot = useCallback(
     (itemId) => {
@@ -1527,7 +1553,7 @@ const ProjectDetailPage = () => {
     };
 
     fetchChordLibrary();
-  }, [project?.key, selectedKeyFilter]); // Reload when key changes
+  }, [projectKeyName, selectedKeyFilter]); // Reload when key changes
 
   // Load complex chords when user expands (no need to fetch, just change state)
   const loadComplexChords = () => {
@@ -1619,6 +1645,10 @@ const ProjectDetailPage = () => {
     setTempoDraft(String(project?.tempo || 120));
   }, [project?.tempo]);
 
+  useEffect(() => {
+    setSwingDraft(String(projectSwingAmount));
+  }, [projectSwingAmount]);
+
   const formattedPlayTime = useMemo(
     () => formatTransportTime(playbackPosition),
     [playbackPosition]
@@ -1669,9 +1699,7 @@ const ProjectDetailPage = () => {
       : DEFAULT_FALLBACK_CHORDS;
     // Use null check to allow "" (All Keys) to be valid
     const filterKey =
-      selectedKeyFilter !== null
-        ? selectedKeyFilter
-        : project?.key || "C Major";
+      selectedKeyFilter !== null ? selectedKeyFilter : projectKeyName;
 
     let filtered = sourceChords;
 
@@ -1756,7 +1784,7 @@ const ProjectDetailPage = () => {
     });
 
     return sorted.map((chord) => normalizeChordLibraryItem(chord));
-  }, [chordLibrary, project?.key, selectedKeyFilter, showComplexChords]);
+  }, [chordLibrary, projectKeyName, selectedKeyFilter, showComplexChords]);
 
   const reorderChordProgression = (fromIndex, toIndex) => {
     if (
@@ -1950,8 +1978,8 @@ const ProjectDetailPage = () => {
       const generationData = {
         ...data,
         tempo: project?.tempo || 120,
-        key: project?.key || "C Major",
-        timeSignature: project?.timeSignature || "4/4",
+        key: normalizeKeyPayload(project?.key),
+        timeSignature: normalizeTimeSignaturePayload(project?.timeSignature),
         // Flag to indicate we want audio generation (not just MIDI)
         generateAudio: true,
       };
@@ -2081,7 +2109,7 @@ const ProjectDetailPage = () => {
     return () => clearTimeout(timeout);
   }, [fetchLicks, lickSearchTerm]);
 
-  // Playback control with playhead movement synced to Tone.Transport
+  // Playback control with playhead movement synced to audioEngine transport
   useEffect(() => {
     let animationFrame = null;
     let lastStateUpdate = 0;
@@ -2091,12 +2119,11 @@ const ProjectDetailPage = () => {
       const loopLenSeconds = Math.max(1, width / pixelsPerSecond);
 
       const animate = () => {
-        // Sync position with Tone.Transport
-        const position = Tone.Transport
-          ? loopEnabled
-            ? Tone.Transport.seconds % loopLenSeconds
-            : Tone.Transport.seconds
-          : playbackPositionRef.current;
+        // Sync position with audioEngine transport
+        const transportPos = audioEngine.getPosition();
+        const position = loopEnabled
+          ? transportPos % loopLenSeconds
+          : transportPos;
 
         // 1. Direct DOM update for smooth 60fps animation without re-renders
         if (playheadRef.current) {
@@ -2127,23 +2154,12 @@ const ProjectDetailPage = () => {
     };
   }, [isPlaying, loopEnabled, pixelsPerSecond, tracks]);
 
-  // Initialize Tone.js
+  // Initialize Tone.js via audioEngine
   useEffect(() => {
-    // Initialize Tone context
     const initTone = async () => {
       try {
-        // Start Tone.js audio context
-        await Tone.start();
-
-        // Initialize empty Map for managing individual Tone.Player instances
-        if (!playersRef.current) {
-          playersRef.current = new Map(); // Map of clipId -> Tone.Player
-        }
-
-        // Set initial BPM (Transport should be available after Tone.start())
-        if (Tone.Transport) {
-          Tone.Transport.bpm.value = bpm;
-        }
+        await audioEngine.ensureStarted();
+        audioEngine.setBpm(bpm);
       } catch (error) {
         console.error("Error initializing Tone.js:", error);
       }
@@ -2152,230 +2168,64 @@ const ProjectDetailPage = () => {
     initTone();
 
     return () => {
-      // Cleanup: stop transport and dispose all players
-      if (Tone.Transport && Tone.Transport.state === "started") {
-        Tone.Transport.stop();
+      // Cleanup via audioEngine (keeps singleton alive but stops playback)
+      if (audioEngine.isTransportPlaying()) {
+        audioEngine.stopTransport();
       }
-      if (playersRef.current) {
-        // Dispose all individual players
-        playersRef.current.forEach((player) => {
-          if (player) {
-            player.unsync();
-            player.dispose();
-          }
-        });
-        playersRef.current.clear();
-        playersRef.current = null;
-      }
+      audioEngine.disposeAllPlayers();
     };
   }, []);
 
-  // Sync BPM changes with Tone.Transport
+  // Sync BPM changes with audioEngine
   useEffect(() => {
-    if (Tone.Transport) {
-      Tone.Transport.bpm.value = bpm;
-    }
+    audioEngine.setBpm(bpm);
   }, [bpm]);
 
-  // Load audio into individual Tone.Player
-  const loadAudioToPlayer = async (clipId, audioUrl) => {
-    if (!playersRef.current) return false;
-
-    // Check if already loaded
-    if (playersRef.current.has(clipId)) {
-      return true;
-    }
-
-    try {
-      // Create a new Tone.Player for this clip
-      const player = new Tone.Player({
-        url: audioUrl,
-        onload: () => {
-          audioBuffersRef.current.set(clipId, audioUrl);
-        },
-      }).toDestination();
-
-      // Wait for the player to load
-      await Tone.loaded();
-
-      // Store the player in our Map
-      playersRef.current.set(clipId, player);
-      return true;
-    } catch (error) {
-      console.error("Error loading audio to Tone.js:", error);
-      return false;
-    }
-  };
-
-  // Schedule audio playback for timeline items using Tone.js Transport sync
-  const scheduleAudioPlayback = async () => {
-    if (!playersRef.current) return;
-
-    // First, unsync and stop all players to clear previous scheduling
-    playersRef.current.forEach((player) => {
-      if (player) {
-        player.unsync();
-        player.stop();
+  // Get audio URL for a timeline item (used by useAudioScheduler)
+  const getAudioUrlForItem = useCallback(
+    async (item) => {
+      // Handle lick items - get audio URL from API
+      if (item.type === "lick" && item.lickId) {
+        const audioResponse = await playLickAudio(
+          item.lickId._id || item.lickId,
+          user?._id
+        );
+        return (
+          audioResponse?.data?.audio_url ||
+          audioResponse?.data?.audioUrl ||
+          null
+        );
       }
-    });
 
-    // Load and sync all clips to the Transport timeline
-    let scheduledCount = 0;
-    for (const track of tracks) {
-      if (track.muted) continue; // Skip muted tracks
-
-      for (const item of track.items || []) {
-        const clipStart = item.startTime || 0;
-        const clipId = item._id;
-        let audioUrl = null;
-
-        try {
-          // Skip virtual chords (they don't have audio, only real timeline items do)
-          const isVirtualChord =
-            typeof item._id === "string" && item._id.startsWith("chord-");
-          if (isVirtualChord) {
-            continue;
-          }
-
-          // Handle lick items - get audio URL from API
-          if (item.type === "lick" && item.lickId) {
-            const audioResponse = await playLickAudio(
-              item.lickId._id || item.lickId,
-              user?._id
-            );
-
-            // Check for both audio_url (snake_case from API) and audioUrl (camelCase)
-            audioUrl =
-              audioResponse?.data?.audio_url || audioResponse?.data?.audioUrl;
-
-            if (!audioResponse?.success || !audioUrl) {
-              console.warn(
-                `[Audio] Failed to get audio URL for lick clip ${clipId}`
-              );
-              continue;
-            }
-          }
-          // Handle chord items with generated audio - use direct audio URL
-          // Check multiple possible locations for audio URL
-          else if (
-            item.type === "chord" ||
-            (item.chordName &&
-              (item.audioUrl || item.audio_url || item.lickId?.audioUrl))
-          ) {
-            // Check all possible locations for audio URL
-            audioUrl =
-              item.audioUrl ||
-              item.audio_url ||
-              item.lickId?.audioUrl ||
-              item.lickId?.audio_url ||
-              null;
-
-            if (!audioUrl) {
-              // Debug: log chord items without audio
-              console.log(`[Audio] Chord item ${clipId} has no audio URL:`, {
-                type: item.type,
-                chordName: item.chordName,
-                hasAudioUrl: !!item.audioUrl,
-                hasAudio_url: !!item.audio_url,
-                hasLickId: !!item.lickId,
-                lickIdAudioUrl: !!item.lickId?.audioUrl,
-                fullItem: item,
-              });
-              continue;
-            }
-
-            // Check if it's a MIDI file - Tone.js can't play MIDI directly
-            // If conversion failed on backend, skip these items
-            if (audioUrl.endsWith(".mid") || audioUrl.endsWith(".midi")) {
-              console.warn(
-                `[Audio] Chord item ${clipId} has MIDI file (${audioUrl}), which cannot be played directly.`
-              );
-              console.warn(
-                `[Audio] Backend should convert MIDI to audio. Check server logs for conversion errors.`
-              );
-              continue;
-            }
-          }
-          // Skip items without audio
-          else {
-            continue;
-          }
-
-          // Load audio into Tone.Player
-          const loaded = await loadAudioToPlayer(clipId, audioUrl);
-          if (!loaded) {
-            console.warn(
-              `[Audio] Failed to load audio for clip ${clipId} from URL: ${audioUrl}`
-            );
-            continue;
-          }
-
-          // Get the player for this clip
-          const player = playersRef.current.get(clipId);
-          if (!player) {
-            console.warn(`[Audio] Player not found for clip ${clipId}`);
-            continue;
-          }
-
-          // Set playback rate
-          player.playbackRate = item.playbackRate || 1;
-
-          // Set volume (Tone.js uses decibels)
-          // For backing tracks, use full volume if not soloed
-          const trackVolume = track.volume || 1;
-          const soloMultiplier = track.solo ? 1 : 0.7;
-          const volumeDb = Tone.gainToDb(trackVolume * soloMultiplier);
-          player.volume.value = volumeDb;
-
-          // Calculate playback parameters
-          const offset = item.offset || 0;
-          const duration = item.duration || 0;
-
-          // Sync the player to the Transport timeline and start it
-          player.sync().start(clipStart, offset, duration);
-          scheduledCount++;
-
-          console.log(`[Audio] Scheduled clip ${clipId} at ${clipStart}s:`, {
-            type: item.type,
-            chordName: item.chordName,
-            trackName: track.trackName,
-            audioUrl: audioUrl.substring(0, 50) + "...",
-          });
-        } catch (error) {
-          console.error(`[Audio] Error scheduling clip ${clipId}:`, error);
-        }
+      // Handle chord items with generated audio
+      if (
+        item.type === "chord" ||
+        (item.chordName &&
+          (item.audioUrl || item.audio_url || item.lickId?.audioUrl))
+      ) {
+        return (
+          item.audioUrl ||
+          item.audio_url ||
+          item.lickId?.audioUrl ||
+          item.lickId?.audio_url ||
+          null
+        );
       }
-    }
 
-    if (scheduledCount === 0) {
-      console.warn("[Audio] No audio clips were scheduled");
-      // Debug: log what items we have
-      console.log(
-        "[Audio] Available items:",
-        tracks.map((track) => ({
-          trackName: track.trackName,
-          isBackingTrack: track.isBackingTrack,
-          muted: track.muted,
-          items: (track.items || []).map((item) => ({
-            _id: item._id,
-            type: item.type,
-            chordName: item.chordName,
-            hasAudioUrl: !!(item.audioUrl || item.audio_url),
-            hasLickId: !!item.lickId,
-          })),
-        }))
-      );
-    } else {
-      console.log(
-        `[Audio] Successfully scheduled ${scheduledCount} audio clip(s)`
-      );
-    }
-  };
+      return null;
+    },
+    [user?._id]
+  );
+
+  // Schedule audio playback using the extracted hook
+  const scheduleAudioPlayback = useCallback(async () => {
+    await schedulePlayback(tracks, getAudioUrlForItem);
+  }, [tracks, schedulePlayback, getAudioUrlForItem]);
 
   //  Auto-reschedule audio when tracks change during playback
   // This is key for live editing while playing (like professional DAWs)
   useEffect(() => {
-    if (isPlaying && playersRef.current) {
+    if (isPlaying && audioEngine.players.size > 0) {
       // Debounce rescheduling to avoid too many updates
       const timeoutId = setTimeout(() => {
         scheduleAudioPlayback();
@@ -2430,18 +2280,18 @@ const ProjectDetailPage = () => {
 
   const handlePlay = async () => {
     // Start Tone.js audio context if needed
-    await Tone.start();
+    await audioEngine.ensureStarted();
 
-    if (!Tone.Transport) {
+    if (!audioEngine.transport) {
       console.error("Tone.Transport is not available");
       return;
     }
 
     // Set the transport position to current playback position
-    Tone.Transport.seconds = playbackPositionRef.current;
+    audioEngine.setPosition(playbackPositionRef.current);
 
     // Update BPM in case it changed
-    Tone.Transport.bpm.value = bpm;
+    audioEngine.setBpm(bpm);
 
     setIsPlaying(true);
 
@@ -2449,23 +2299,17 @@ const ProjectDetailPage = () => {
     await scheduleAudioPlayback();
 
     // Start the Tone.js Transport
-    Tone.Transport.start();
+    audioEngine.startTransport();
   };
 
   const handlePause = () => {
     setIsPlaying(false);
 
     // Pause the Tone.js Transport
-    if (Tone.Transport) {
-      Tone.Transport.pause();
-    }
+    audioEngine.pauseTransport();
 
     // Stop all audio players
-    if (playersRef.current) {
-      playersRef.current.forEach((player) => {
-        if (player) player.stop();
-      });
-    }
+    audioEngine.stopAllPlayers();
   };
 
   const handleStop = () => {
@@ -2474,17 +2318,10 @@ const ProjectDetailPage = () => {
     playbackPositionRef.current = 0;
 
     // Stop the Tone.js Transport and reset position
-    if (Tone.Transport) {
-      Tone.Transport.stop();
-      Tone.Transport.seconds = 0;
-    }
+    audioEngine.stopTransport();
 
     // Stop all audio players
-    if (playersRef.current) {
-      playersRef.current.forEach((player) => {
-        if (player) player.stop();
-      });
-    }
+    audioEngine.stopAllPlayers();
   };
 
   const handleReturnToStart = () => {
@@ -2791,11 +2628,35 @@ const ProjectDetailPage = () => {
     }
   }, [project, tempoDraft, projectId, refreshProject]);
 
-  const handleTimeSignatureChange = async (value) => {
-    if (!project || !value || project.timeSignature === value) return;
-    setProject((prev) => (prev ? { ...prev, timeSignature: value } : prev));
+  const commitSwingChange = useCallback(async () => {
+    if (!project) return;
+    const parsed = clampSwingAmount(swingDraft);
+    if (parsed === clampSwingAmount(project.swingAmount ?? 0)) {
+      setSwingDraft(String(parsed));
+      return;
+    }
+    setProject((prev) => (prev ? { ...prev, swingAmount: parsed } : prev));
     try {
-      await updateProject(projectId, { timeSignature: value });
+      await updateProject(projectId, { swingAmount: parsed });
+    } catch (err) {
+      console.error("Error updating swing amount:", err);
+      refreshProject();
+    }
+  }, [project, swingDraft, projectId, refreshProject]);
+
+  const handleTimeSignatureChange = async (value) => {
+    if (!project || !value) return;
+    const normalized = normalizeTimeSignaturePayload(value);
+    const current = normalizeTimeSignaturePayload(project.timeSignature);
+    const isSame =
+      current.numerator === normalized.numerator &&
+      current.denominator === normalized.denominator;
+    if (isSame) return;
+    setProject((prev) =>
+      prev ? { ...prev, timeSignature: normalized } : prev
+    );
+    try {
+      await updateProject(projectId, { timeSignature: normalized });
     } catch (err) {
       console.error("Error updating time signature:", err);
       refreshProject();
@@ -2803,10 +2664,15 @@ const ProjectDetailPage = () => {
   };
 
   const handleKeyChange = async (value) => {
-    if (!project || !value || project.key === value) return;
-    setProject((prev) => (prev ? { ...prev, key: value } : prev));
+    if (!project || !value) return;
+    const normalized = normalizeKeyPayload(value);
+    const current = normalizeKeyPayload(project.key);
+    const isSame =
+      current.root === normalized.root && current.scale === normalized.scale;
+    if (isSame) return;
+    setProject((prev) => (prev ? { ...prev, key: normalized } : prev));
     try {
-      await updateProject(projectId, { key: value });
+      await updateProject(projectId, { key: normalized });
     } catch (err) {
       console.error("Error updating key:", err);
       refreshProject();
@@ -3935,7 +3801,7 @@ const ProjectDetailPage = () => {
               <div className="flex items-center bg-gray-800 rounded-full px-3 py-1 text-sm text-white gap-2">
                 <span className="text-xs uppercase text-gray-400">Time</span>
                 <select
-                  value={project.timeSignature || "4/4"}
+                  value={projectTimeSignatureName}
                   onChange={(e) => handleTimeSignatureChange(e.target.value)}
                   className="bg-transparent text-white text-sm focus:outline-none"
                 >
@@ -3953,7 +3819,7 @@ const ProjectDetailPage = () => {
               <div className="flex items-center bg-gray-800 rounded-full px-3 py-1 text-sm text-white gap-2">
                 <span className="text-xs uppercase text-gray-400">Key</span>
                 <select
-                  value={project.key || "C Major"}
+                  value={projectKeyName || "C Major"}
                   onChange={(e) => handleKeyChange(e.target.value)}
                   className="bg-transparent text-white text-sm focus:outline-none"
                 >
@@ -3968,56 +3834,44 @@ const ProjectDetailPage = () => {
                   ))}
                 </select>
               </div>
-            </div>
-
-            <div className="flex items-center gap-1 bg-gray-800/70 rounded-full px-3 py-1">
-              <button
-                type="button"
-                onClick={handleReturnToStart}
-                className={toolbarButtonClasses(false, false)}
-                title="Return to start"
-              >
-                <FaStepBackward size={12} />
-              </button>
-              <button
-                type="button"
-                onClick={handlePlayToggle}
-                className={toolbarButtonClasses(isPlaying, false)}
-                title={isPlaying ? "Pause" : "Play"}
-              >
-                {isPlaying ? <FaPause size={12} /> : <FaPlay size={12} />}
-              </button>
-              <button
-                type="button"
-                onClick={handleStop}
-                className={toolbarButtonClasses(false, false)}
-                title="Stop"
-              >
-                <FaStop size={12} />
-              </button>
-              <button
-                type="button"
-                onClick={handleRecordToggle}
-                className={toolbarButtonClasses(recordArmed, false)}
-                title="Record arm"
-              >
-                <FaCircle
-                  size={12}
-                  className={recordArmed ? "text-red-500" : "text-gray-200"}
+              <div className="flex items-center bg-gray-800 rounded-full px-3 py-1 text-sm text-white gap-2">
+                <span className="text-xs uppercase text-gray-400">Swing</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Number(swingDraft)}
+                  onChange={(e) => setSwingDraft(e.target.value)}
+                  onMouseUp={commitSwingChange}
+                  onTouchEnd={commitSwingChange}
+                  className="w-24 accent-orange-500"
                 />
-              </button>
-              <button
-                type="button"
-                onClick={() => setLoopEnabled((prev) => !prev)}
-                className={toolbarButtonClasses(loopEnabled, false)}
-                title="Loop playback"
-              >
-                <FaSync size={12} />
-              </button>
-              <div className="text-xs font-mono text-blue-200 px-2">
-                {formattedPlayTime}
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={swingDraft}
+                  onChange={(e) => setSwingDraft(e.target.value)}
+                  onBlur={commitSwingChange}
+                  className="bg-transparent w-12 text-white text-sm focus:outline-none"
+                />
+                <span className="text-xs text-gray-400">%</span>
               </div>
             </div>
+
+            {/* Transport Controls - Extracted Component */}
+            <AudioTransportControls
+              isPlaying={isPlaying}
+              recordArmed={recordArmed}
+              loopEnabled={loopEnabled}
+              formattedPlayTime={formattedPlayTime}
+              onPlay={handlePlay}
+              onPause={handlePause}
+              onStop={handleStop}
+              onReturnToStart={handleReturnToStart}
+              onRecordToggle={handleRecordToggle}
+              onLoopToggle={() => setLoopEnabled((prev) => !prev)}
+            />
           </div>
           <div className="flex flex-wrap items-center justify-between text-xs text-gray-400">
             <span>
@@ -4025,8 +3879,8 @@ const ProjectDetailPage = () => {
             </span>
             <span>
               Zoom {Math.round(zoomLevel * 100)}% · Display{" "}
-              {workspaceScalePercentage}% · {project.timeSignature || "4/4"} ·{" "}
-              {project.key || "Key"}
+              {workspaceScalePercentage}% · {projectTimeSignatureName} ·{" "}
+              {projectKeyName || "Key"}
             </span>
           </div>
         </div>
@@ -4810,22 +4664,20 @@ const ProjectDetailPage = () => {
                           value={
                             selectedKeyFilter !== null
                               ? selectedKeyFilter
-                              : project?.key || "C Major"
+                              : projectKeyName
                           }
                           onChange={(e) => setSelectedKeyFilter(e.target.value)}
                           className="w-full bg-gray-800/80 border border-gray-700/50 rounded px-2 py-1.5 text-white text-xs focus:outline-none focus:ring-1 focus:ring-orange-500/50"
                         >
                           <option value="">All Keys</option>
                           <option
-                            value={project?.key || "C Major"}
+                            value={projectKeyName}
                             className="bg-orange-600/80"
                           >
-                            {project?.key || "C Major"} (current)
+                            {projectKeyName} (current)
                           </option>
                           {allKeys
-                            .filter(
-                              (key) => key !== (project?.key || "C Major")
-                            )
+                            .filter((key) => key !== projectKeyName)
                             .map((key) => (
                               <option key={key} value={key}>
                                 {key}
@@ -4834,8 +4686,8 @@ const ProjectDetailPage = () => {
                         </select>
                         <p className="text-gray-500 text-[10px] px-0.5">
                           {chordPalette.length} chords
-                          {(selectedKeyFilter || project?.key) &&
-                            ` in ${selectedKeyFilter || project?.key}`}
+                          {(selectedKeyFilter || projectKeyName) &&
+                            ` in ${selectedKeyFilter || projectKeyName}`}
                         </p>
                       </div>
                       {loadingChords && (
@@ -4877,11 +4729,11 @@ const ProjectDetailPage = () => {
                                   <span className="block font-semibold text-xs truncate">
                                     {chord.chordName || "Chord"}
                                   </span>
-                                  {(selectedKeyFilter || project?.key) && (
+                                  {(selectedKeyFilter || projectKeyName) && (
                                     <span className="text-[9px] bg-purple-600/50 px-1 py-0.5 rounded font-medium flex-shrink-0">
                                       {getChordDegree(
                                         chord.chordName || chord.name,
-                                        selectedKeyFilter || project.key
+                                        selectedKeyFilter || projectKeyName
                                       ) || "?"}
                                     </span>
                                   )}

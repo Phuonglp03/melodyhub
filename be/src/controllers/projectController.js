@@ -11,6 +11,13 @@ import {
   getAllInstruments,
   getInstrumentById,
 } from "../services/instrumentService.js";
+import {
+  normalizeKeyPayload,
+  normalizeTimeSignaturePayload,
+  clampSwingAmount,
+  DEFAULT_KEY,
+  DEFAULT_TIME_SIGNATURE,
+} from "../utils/musicTheory.js";
 
 const TRACK_TYPES = ["audio", "midi", "backing"];
 const TIMELINE_ITEM_TYPES = ["lick", "chord", "midi"];
@@ -72,11 +79,40 @@ const sanitizeMidiEvents = (events) => {
     .filter(Boolean);
 };
 
+const clampTempo = (value, fallback = 120) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(300, Math.max(40, Math.round(numeric)));
+};
+
+const normalizeProjectResponse = (projectDoc) => {
+  if (!projectDoc) return projectDoc;
+  const plain =
+    typeof projectDoc.toObject === "function"
+      ? projectDoc.toObject()
+      : { ...projectDoc };
+  plain.key = normalizeKeyPayload(plain.key ?? DEFAULT_KEY);
+  plain.timeSignature = normalizeTimeSignaturePayload(
+    plain.timeSignature ?? DEFAULT_TIME_SIGNATURE
+  );
+  plain.swingAmount = clampSwingAmount(
+    plain.swingAmount !== undefined ? plain.swingAmount : 0
+  );
+  return plain;
+};
+
 // Create a new project
 export const createProject = async (req, res) => {
   try {
-    const { title, description, tempo, key, timeSignature, isPublic } =
-      req.body;
+    const {
+      title,
+      description,
+      tempo,
+      key,
+      timeSignature,
+      isPublic,
+      swingAmount,
+    } = req.body;
     const creatorId = req.userId;
 
     // Validate required fields (BR-21)
@@ -92,9 +128,12 @@ export const createProject = async (req, res) => {
       creatorId,
       title,
       description: description || "",
-      tempo: tempo || 120,
-      key: key || "",
-      timeSignature: timeSignature || "4/4",
+      tempo: clampTempo(tempo),
+      key: normalizeKeyPayload(key),
+      timeSignature: normalizeTimeSignaturePayload(timeSignature),
+      swingAmount: clampSwingAmount(
+        swingAmount !== undefined ? swingAmount : 0
+      ),
       status: "draft",
       isPublic: isPublic || false,
     });
@@ -128,7 +167,7 @@ export const createProject = async (req, res) => {
     res.status(201).json({
       success: true,
       message: "Project created successfully",
-      data: project,
+      data: normalizeProjectResponse(project),
     });
   } catch (error) {
     console.error("Error creating project:", error);
@@ -185,7 +224,7 @@ export const getUserProjects = async (req, res) => {
 
     res.json({
       success: true,
-      data: projects,
+      data: projects.map((project) => normalizeProjectResponse(project)),
     });
   } catch (error) {
     console.error("Error fetching user projects:", error);
@@ -262,7 +301,7 @@ export const getProjectById = async (req, res) => {
     res.json({
       success: true,
       data: {
-        project,
+        project: normalizeProjectResponse(project),
         tracks: tracksWithItems,
         collaborators,
         userRole: isOwner
@@ -318,9 +357,18 @@ export const updateProject = async (req, res) => {
     // Update fields
     if (title !== undefined) project.title = title;
     if (description !== undefined) project.description = description;
-    if (tempo !== undefined) project.tempo = tempo;
-    if (key !== undefined) project.key = key;
-    if (timeSignature !== undefined) project.timeSignature = timeSignature;
+    if (tempo !== undefined) {
+      project.tempo = clampTempo(tempo, project.tempo || 120);
+    }
+    if (key !== undefined) {
+      project.key = normalizeKeyPayload(key);
+    }
+    if (timeSignature !== undefined) {
+      project.timeSignature = normalizeTimeSignaturePayload(timeSignature);
+    }
+    if (req.body.swingAmount !== undefined) {
+      project.swingAmount = clampSwingAmount(req.body.swingAmount);
+    }
     if (isPublic !== undefined) project.isPublic = isPublic;
     if (status !== undefined) project.status = status;
     if (backingInstrumentId !== undefined) {
@@ -342,7 +390,7 @@ export const updateProject = async (req, res) => {
     res.json({
       success: true,
       message: "Project updated successfully",
-      data: project,
+      data: normalizeProjectResponse(project),
     });
   } catch (error) {
     console.error("Error updating project:", error);
