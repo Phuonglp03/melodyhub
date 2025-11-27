@@ -62,3 +62,22 @@ export const adminDeletePost = async (postId) => {
   return res.data;
 };
 
+/**
+ * Get current report limit setting (admin only)
+ * @returns {Promise<object>} Response data with limit
+ */
+export const getReportLimitSetting = async () => {
+  const res = await api.get(`/reports/settings/report-limit`);
+  return res.data;
+};
+
+/**
+ * Update report limit setting (admin only)
+ * @param {number} limit - New report limit
+ * @returns {Promise<object>} Response data with updated limit
+ */
+export const updateReportLimitSetting = async (limit) => {
+  const res = await api.put(`/reports/settings/report-limit`, { limit });
+  return res.data;
+};
+

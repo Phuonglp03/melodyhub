@@ -1,0 +1,161 @@
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.newsfeed-page {
+  --newsfeed-page-padding: 24px 24px;
+  --newsfeed-page-height: 100vh;
+  width: 100%;
+}
+
+.newsfeed-grid {
+  --newsfeed-grid-columns: minmax(0, 1.2fr) 460px;
+  --newsfeed-grid-gap: 32px;
+}
+
+.profile-feed-grid {
+  --newsfeed-grid-columns: 360px minmax(0, 1.2fr) 360px;
+  --newsfeed-grid-gap: 24px;
+}
+
+.newsfeed-main-column {
+  --newsfeed-main-pr: 8px;
+}
+
+.newsfeed-sidebar-column {
+  --newsfeed-sidebar-pl: 8px;
+}
+
+.profile-feed-left,
+.profile-feed-main,
+.profile-feed-sidebar {
+  min-width: 0;
+}
+
+.composer-card {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.post-actions {
+  width: 100%;
+}
+
+.profile-cover {
+  position: relative;
+  width: 100%;
+  min-height: 240px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #131313;
+}
+
+.profile-cover__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.profile-cover .ant-btn {
+  border-radius: 999px;
+}
+
+.newsfeed-sidebar-toggle {
+  margin-bottom: 16px;
+  border-radius: 14px !important;
+  border-color: #1f1f1f !important;
+  background: #111213 !important;
+  color: #f8fafc !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.newsfeed-sidebar-toggle .anticon {
+  font-size: 16px;
+}
+
+.newsfeed-sidebar-drawer .ant-drawer-header {
+  background: #0a0a0a;
+  border-bottom: 1px solid #1f1f1f;
+}
+
+.newsfeed-sidebar-drawer .ant-drawer-title {
+  color: #f8fafc;
+}
+
+.newsfeed-sidebar-drawer .ant-drawer-close {
+  color: #f8fafc;
+}
+
+.newsfeed-sidebar-drawer-content {
+  padding: 20px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+
+@media (max-width: 1200px) {
+  .newsfeed-grid,
+  .profile-feed-grid {
+    --newsfeed-grid-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1024px) {
+  .newsfeed-page {
+    --newsfeed-page-padding: 20px 16px;
+    --newsfeed-page-height: auto;
+  }
+}
+
+@media (max-width: 768px) {
+  .newsfeed-page {
+    --newsfeed-page-padding: 16px 12px;
+  }
+
+  .newsfeed-grid,
+  .profile-feed-grid {
+    --newsfeed-grid-gap: 16px;
+  }
+
+  .newsfeed-main-column {
+    --newsfeed-main-pr: 0px;
+  }
+
+  .newsfeed-sidebar-column {
+    --newsfeed-sidebar-pl: 0px;
+  }
+
+  .composer-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .composer-card .composer-input {
+    min-height: 80px;
+    font-size: 15px;
+  }
+
+  .composer-card .composer-action-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .post-actions {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+
+  .profile-cover {
+    border-radius: 8px;
+    min-height: 220px;
+  }
+}
+

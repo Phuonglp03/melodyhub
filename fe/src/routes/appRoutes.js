@@ -20,6 +20,7 @@ const NewsFeed = lazy(() => import("../pages/user/NewFeed"));
 const PersonalFeed = lazy(() => import("../pages/user/NewFeed/Personal"));
 const UserFeed = lazy(() => import("../pages/user/NewFeed/UserFeed"));
 const ProfilePage = lazy(() => import("../pages/user/Profile"));
+const ChangePasswordPage = lazy(() => import("../pages/user/ChangePassword"));
 const ArchivedPosts = lazy(() => import("../pages/user/ArchivedPosts"));
 const Login = lazy(() => import("../pages/auth/Login"));
 const Register = lazy(() => import("../pages/auth/Register"));
@@ -75,6 +76,9 @@ const AdminLiveroomManagement = lazy(() =>
 );
 const AdminLickApprovement = lazy(() =>
   import("../pages/admin/AdminSite/LickApprovement")
+);
+const AdminReportSettings = lazy(() =>
+  import("../pages/admin/AdminSite/ReportSettings")
 );
 
 // Loading component for Suspense fallback
@@ -171,6 +175,7 @@ const AppRoutes = () => {
               element={<AdminLiveroomManagement />}
             />
             <Route path="lick-approvement" element={<AdminLickApprovement />} />
+            <Route path="report-settings" element={<AdminReportSettings />} />
           </Route>
 
           {/* Protected routes */}
@@ -197,6 +202,7 @@ const AppRoutes = () => {
             <Route path="newfeedspersonal" element={<PersonalFeed />} />
             <Route path="users/:userId/newfeeds" element={<UserFeed />} />
             <Route path="profile" element={<ProfilePage />} />
+            <Route path="change-password" element={<ChangePasswordPage />} />
             <Route path="archived-posts" element={<ArchivedPosts />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="notifications" element={<NotificationsPage />} />

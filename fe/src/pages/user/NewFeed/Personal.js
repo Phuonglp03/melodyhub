@@ -31,6 +31,7 @@ import {
 import { getMyProfile } from "../../../services/user/profile";
 import { useNavigate } from "react-router-dom";
 import PostLickEmbed from "../../../components/PostLickEmbed";
+import "./newFeedResponsive.css";
 
 const { Title, Text } = Typography;
 
@@ -180,6 +181,7 @@ const PersonalFeed = () => {
   const [postIdToLiked, setPostIdToLiked] = useState({});
   const [postIdToCommentInput, setPostIdToCommentInput] = useState({});
   const [modalPost, setModalPost] = useState(null);
+  const [warningModal, warningModalContextHolder] = Modal.useModal();
 
   const fetchProfile = async () => {
     try {
@@ -456,9 +458,19 @@ const PersonalFeed = () => {
     };
   }, [newText]);
 
+  const MAX_POST_TEXT_LENGTH = 300;
+
   const handleCreatePost = async () => {
-    if (!newText.trim()) {
+    const trimmed = newText.trim();
+    if (!trimmed) {
       message.warning("Vui lòng nhập nội dung");
+      return;
+    }
+    if (trimmed.length > MAX_POST_TEXT_LENGTH) {
+      Modal.warning({
+        title: "Nội dung quá dài",
+        content: `Nội dung không được vượt quá ${MAX_POST_TEXT_LENGTH} ký tự (hiện tại: ${trimmed.length}). Vui lòng rút gọn trước khi đăng.`,
+      });
       return;
     }
     try {
@@ -466,7 +478,7 @@ const PersonalFeed = () => {
       if (files.length > 0) {
         const form = new FormData();
         form.append("postType", "status_update");
-        form.append("textContent", newText.trim());
+        form.append("textContent", trimmed);
         if (linkPreview)
           form.append("linkPreview", JSON.stringify(linkPreview));
         files.forEach((f) => {
@@ -476,7 +488,7 @@ const PersonalFeed = () => {
       } else {
         await createPost({
           postType: "status_update",
-          textContent: newText.trim(),
+          textContent: trimmed,
           linkPreview,
         });
       }
@@ -484,6 +496,10 @@ const PersonalFeed = () => {
       setFiles([]);
       setIsModalOpen(false);
       message.success("Đăng bài thành công");
+      warningModal.success({
+        title: "Đăng bài thành công",
+        content: "Bài viết của bạn đã được đăng lên bảng tin cá nhân.",
+      });
       fetchData(1);
       setPage(1);
     } catch (e) {
@@ -512,11 +528,14 @@ const PersonalFeed = () => {
   }, [loading, hasMore, page]);
 
   return (
-    <div
+    <>
+      {warningModalContextHolder}
+      <div
+      className="newsfeed-page"
       style={{
         maxWidth: 1680,
         margin: "0 auto",
-        padding: "24px 24px",
+        padding: "var(--newsfeed-page-padding, 24px 24px)",
         background: "#0a0a0a",
         minHeight: "100vh",
       }}
@@ -529,14 +548,15 @@ const PersonalFeed = () => {
           marginBottom: 16,
         }}
       />
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "360px minmax(0, 1.2fr) 360px",
-          gap: 24,
-        }}
-      >
-        <div>
+    <div
+      className="profile-feed-grid"
+      style={{
+        display: "grid",
+        gridTemplateColumns: "var(--newsfeed-grid-columns, 360px minmax(0, 1.2fr) 360px)",
+        gap: "var(--newsfeed-grid-gap, 24px)",
+      }}
+    >
+      <div className="profile-feed-left">
           <Card
             style={{
               background: "#0f0f10",
@@ -628,9 +648,10 @@ const PersonalFeed = () => {
           </Card>
         </div>
 
-        <div>
-          <div
-            style={{
+      <div className="profile-feed-main">
+        <div
+          className="composer-card"
+          style={{
               marginBottom: 20,
               background: "#0f0f10",
               border: "1px solid #1f1f1f",
@@ -646,6 +667,7 @@ const PersonalFeed = () => {
               {(profile?.displayName || "U")[0]}
             </Avatar>
             <Input.TextArea
+              className="composer-input"
               placeholder="Có gì mới ?"
               autoSize={{ minRows: 2, maxRows: 8 }}
               style={{
@@ -659,6 +681,7 @@ const PersonalFeed = () => {
               readOnly
             />
             <Button
+              className="composer-action-btn"
               type="primary"
               size="large"
               style={{
@@ -746,7 +769,6 @@ const PersonalFeed = () => {
                 autoSize={{ minRows: 3, maxRows: 8 }}
                 value={newText}
                 onChange={(e) => setNewText(e.target.value)}
-                maxLength={maxChars}
                 showCount
               />
               <Upload.Dragger
@@ -953,7 +975,7 @@ const PersonalFeed = () => {
                             "U")[0]
                         }
                       </Avatar>
-                      <div>
+      <div className="profile-feed-sidebar">
                         <Space style={{ marginBottom: 4 }}>
                           <Text strong style={{ color: "#fff", fontSize: 16 }}>
                             {post?.userId?.displayName ||
@@ -977,6 +999,8 @@ const PersonalFeed = () => {
                         color: "#fff",
                         fontSize: 15,
                         lineHeight: 1.6,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
                       }}
                     >
                       {post.textContent}
@@ -1072,6 +1096,7 @@ const PersonalFeed = () => {
                     </a>
                   )}
                   <Space
+                    className="post-actions"
                     style={{
                       marginTop: 14,
                       display: "flex",
@@ -1408,6 +1433,7 @@ const PersonalFeed = () => {
         </div>
       </div>
     </div>
+    </>
   );
 };
 
