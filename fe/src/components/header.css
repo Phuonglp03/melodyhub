@@ -27,12 +27,35 @@
   white-space: nowrap;
 }
 
+.app-header__menu-toggle {
+  display: none;
+  border-radius: 999px;
+  border-color: #1f1f1f;
+  color: #f8fafc;
+  background: #111213;
+}
+
+.app-header__menu-toggle .anticon {
+  font-size: 18px;
+}
+
+.app-header__menu-toggle:hover,
+.app-header__menu-toggle:focus {
+  color: #ffffff;
+  border-color: #ffffff;
+}
+
 .app-header__nav {
   display: flex;
   align-items: center;
   color: #d1d5db;
   gap: 28px;
   flex-wrap: wrap;
+}
+
+.app-header__nav--stacked {
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .app-header__nav-item {
@@ -83,6 +106,16 @@
   flex-wrap: wrap;
 }
 
+.app-header__actions--stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.app-header__actions--stacked .ant-btn {
+  width: 100%;
+  justify-content: center;
+}
+
 .app-header__icon {
   color: #e5e7eb;
   font-size: 20px;
@@ -108,6 +141,68 @@
   color: #ffffff;
   background: #dc2626;
   border-color: #dc2626;
+}
+
+.app-header__cta--secondary {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.app-header__cta--secondary:hover,
+.app-header__cta--secondary:focus {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.app-header__drawer .ant-drawer-body {
+  background: #0f0f10;
+  padding: 24px;
+}
+
+.app-header__drawer .ant-drawer-header {
+  background: #0f0f10;
+  border-bottom: 1px solid #1f1f1f;
+}
+
+.app-header__drawer .ant-drawer-title {
+  color: #f8fafc;
+}
+
+.app-header__drawer .ant-drawer-close {
+  color: #f8fafc;
+}
+
+.app-header__drawer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.chat-dock {
+  position: fixed;
+  bottom: 12px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  z-index: 1050;
+  pointer-events: none;
+}
+
+.chat-dock__scroll {
+  display: flex;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgba(10, 10, 10, 0.9);
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  overflow-x: auto;
+  max-width: 90%;
+  pointer-events: auto;
+}
+
+.chat-dock__scroll::-webkit-scrollbar {
+  display: none;
 }
 
 @media (max-width: 1200px) {
@@ -143,6 +238,10 @@
     height: auto;
     flex-wrap: wrap;
     row-gap: 12px;
+  }
+
+  .app-header__menu-toggle {
+    display: inline-flex;
   }
 
   .app-header__spacer {

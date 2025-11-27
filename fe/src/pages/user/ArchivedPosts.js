@@ -399,6 +399,8 @@ const ArchivedPosts = () => {
                     color: "#fff",
                     fontSize: 15,
                     lineHeight: 1.6,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
                   }}
                 >
                   {post.textContent}

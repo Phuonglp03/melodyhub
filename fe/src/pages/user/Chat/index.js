@@ -26,8 +26,10 @@ import './Chat.css';
 const { TextArea } = Input;
 
 const ChatPage = () => {
-  const currentUser = useSelector((state) => state.auth.user);
-  const currentUserId = currentUser?.id || currentUser?._id;
+  const authUser = useSelector((state) => state.auth.user);
+  const currentUser = authUser?.user || authUser || null;
+  const currentUserId = currentUser?.id || currentUser?._id || currentUser?.userId;
+  const currentUsername = currentUser?.username;
   const [searchParams, setSearchParams] = useSearchParams();
   
   const { conversations, loading, accept, decline, ensureWith } = useDMConversations();
@@ -101,17 +103,25 @@ const ChatPage = () => {
   
   // Get peer info from conversation
   const getPeer = (conv) => {
-    if (!conv?.participants || !currentUserId) return null;
-    
-    const currentUserIdStr = String(
-      typeof currentUserId === 'object' ? (currentUserId._id || currentUserId.id) : currentUserId
-    );
-    
-    const peer = conv.participants.find((p) => {
-      const pid = typeof p === 'object' ? (p._id || p.id) : p;
-      return String(pid) !== currentUserIdStr;
-    });
-    
+    if (!conv?.participants || conv.participants.length === 0) return null;
+
+    // Hàm so sánh 1 participant có phải là current user không
+    const isMe = (p) => {
+      if (!p || (!currentUserId && !currentUsername)) return false;
+
+      const pid = typeof p === 'object' ? (p._id || p.id || p.userId) : p;
+      if (currentUserId && pid && String(pid) === String(currentUserId)) return true;
+
+      const pUsername = p.username || p.user?.username;
+      if (currentUsername && pUsername && pUsername === currentUsername) return true;
+
+      return false;
+    };
+
+    // Ưu tiên participant không phải mình
+    const peer = conv.participants.find((p) => !isMe(p));
+
+    // Nếu không tìm được (dữ liệu lỗi) thì trả null để UI hiện "Người dùng"
     if (!peer) return null;
     
     // If peer is just an ID string, try to get from cache
@@ -143,6 +153,30 @@ const ChatPage = () => {
     }
     
     return peer;
+  };
+
+  // Safely resolve tên hiển thị cho peer
+  const resolvePeerName = (peer) => {
+    if (!peer) return 'Người dùng';
+
+    const displayName = peer.displayName;
+    const username = peer.username;
+
+    // Nếu displayName bị trống / chỉ là "Người dùng" thì ưu tiên username
+    if ((!displayName || displayName.trim().length === 0 || displayName === 'Người dùng') && username) {
+      return username;
+    }
+
+    // Nếu có cả displayName và username khác nhau, vẫn ưu tiên displayName
+    if (displayName) {
+      return displayName;
+    }
+
+    if (username) {
+      return username;
+    }
+
+    return 'Người dùng';
   };
 
   // Fetch peer info if missing
@@ -466,7 +500,7 @@ const ChatPage = () => {
                   });
                 }
                 
-                const peerName = peer?.displayName || peer?.username || 'Người dùng';
+                const peerName = resolvePeerName(peer);
                 const peerAvatar = peer?.avatarUrl;
 
                 return (
@@ -520,6 +554,7 @@ const ChatPage = () => {
               <div className="chat-header">
                 {(() => {
                   const peer = getPeer(selectedConv);
+                  const peerName = resolvePeerName(peer);
                   return (
                     <>
                       <Avatar 
@@ -529,16 +564,16 @@ const ChatPage = () => {
                       />
                       <div className="chat-header-info">
                         <div className="chat-header-name">
-                          {peer?.displayName || peer?.username || 'Người dùng'}
+                          {peerName}
                         </div>
                         <div className="chat-header-status">
                           {peerTyping ? 'Đang gõ...' : formatTime(peer?.lastSeen || selectedConv?.lastMessageAt)}
                         </div>
                       </div>
                       <div className="chat-header-actions">
-                        <PhoneOutlined className="chat-header-action-icon" />
+                        {/* <PhoneOutlined className="chat-header-action-icon" />
                         <VideoCameraOutlined className="chat-header-action-icon" />
-                        <InfoCircleOutlined className="chat-header-action-icon" />
+                        <InfoCircleOutlined className="chat-header-action-icon" /> */}
                       </div>
                     </>
                   );
