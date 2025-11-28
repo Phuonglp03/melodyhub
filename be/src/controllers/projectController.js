@@ -34,6 +34,32 @@ const normalizeTimelineItemType = (value, fallback = "lick") => {
   return TIMELINE_ITEM_TYPES.includes(normalized) ? normalized : fallback;
 };
 
+const ensureProjectCoreFields = (project) => {
+  if (!project) return;
+
+  const needsKeyNormalization =
+    !project.key ||
+    typeof project.key !== "object" ||
+    typeof project.key.root !== "number" ||
+    project.key.root < 0 ||
+    project.key.root > 11 ||
+    typeof project.key.scale !== "string";
+
+  if (needsKeyNormalization) {
+    project.key = normalizeKeyPayload(project.key);
+  }
+
+  const needsTimeSignatureNormalization =
+    !project.timeSignature ||
+    typeof project.timeSignature !== "object" ||
+    typeof project.timeSignature.numerator !== "number" ||
+    typeof project.timeSignature.denominator !== "number";
+
+  if (needsTimeSignatureNormalization) {
+    project.timeSignature = normalizeTimeSignaturePayload(project.timeSignature);
+  }
+};
+
 const sanitizeInstrumentPayload = (payload) => {
   if (!payload || typeof payload !== "object") return undefined;
   const { instrumentId, settings } = payload;
@@ -385,6 +411,7 @@ export const updateProject = async (req, res) => {
       project.backingInstrumentId = backingInstrumentId || null;
     }
 
+    ensureProjectCoreFields(project);
     await project.save();
 
     res.json({
@@ -394,6 +421,75 @@ export const updateProject = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating project:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update project",
+      error: error.message,
+    });
+  }
+};
+
+export const patchProject = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+    const updates = { ...req.body };
+
+    if (!Object.keys(updates).length) {
+      return res.status(400).json({
+        success: false,
+        message: "No updates provided",
+      });
+    }
+
+    const clientVersion = updates.__version;
+    if (clientVersion !== undefined) {
+      delete updates.__version;
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    if (project.creatorId.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the project owner can update the project",
+      });
+    }
+
+    let updatedProject;
+    if (clientVersion !== undefined) {
+      updatedProject = await Project.findOneAndUpdate(
+        { _id: projectId, version: clientVersion },
+        { $set: updates, $inc: { version: 1 } },
+        { new: true }
+      );
+      if (!updatedProject) {
+        return res.status(409).json({
+          success: false,
+          message: "Project version mismatch",
+        });
+      }
+    } else {
+      updatedProject = await Project.findByIdAndUpdate(
+        projectId,
+        { $set: updates, $inc: { version: 1 } },
+        { new: true }
+      );
+    }
+
+    res.json({
+      success: true,
+      message: "Project updated successfully",
+      data: normalizeProjectResponse(updatedProject),
+    });
+  } catch (error) {
+    console.error("Error patching project:", error);
     res.status(500).json({
       success: false,
       message: "Failed to update project",
@@ -1084,6 +1180,7 @@ export const updateChordProgression = async (req, res) => {
           .filter((name) => !!name)
       : [];
 
+    ensureProjectCoreFields(project);
     project.chordProgression = normalizedChords;
     await project.save();
 

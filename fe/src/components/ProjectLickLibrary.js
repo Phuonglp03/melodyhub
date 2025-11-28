@@ -1,24 +1,25 @@
 // fe/src/components/ProjectLickLibrary.js
 // Lick library sidebar for ProjectDetailPage (inspired by Studio's RightLickLibrary)
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { FaSearch, FaFilter } from 'react-icons/fa';
-import { getCommunityLicks } from '../services/user/lickService';
-import { useDrag } from 'react-dnd';
-import { FaPlay, FaPause, FaGripVertical } from 'react-icons/fa';
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { FaSearch, FaFilter, FaPlay, FaPause, FaGripVertical } from "react-icons/fa";
+import { getCommunityLicks } from "../services/user/lickService";
+import { useDrag } from "react-dnd";
 
 const normalizeLick = (raw) => {
   if (!raw) return null;
   const id = raw._id || raw.id;
-  const title = raw.title || raw.name || 'Untitled Lick';
+  const title = raw.title || raw.name || "Untitled Lick";
   const duration = Number(raw.duration || raw.length || 2);
+  const bpm = Number(raw.bpm || raw.tempo || raw.speed || 0);
   return {
     id,
     _id: id,
     title,
-    key: raw.key || 'C',
-    style: raw.style || raw.genre || 'Swing',
+    key: raw.key || "C",
+    style: raw.style || raw.genre || "Swing",
+    bpm: Number.isFinite(bpm) && bpm > 0 ? Math.round(bpm) : null,
     duration,
-    durationLabel: duration ? `${duration.toFixed(1)}s` : '',
+    durationLabel: duration ? `${duration.toFixed(1)}s` : "",
     waveformData: raw.waveformData || raw.waveform_data || null,
     audioUrl:
       raw.audioUrl ||
@@ -26,12 +27,11 @@ const normalizeLick = (raw) => {
       raw.previewUrl ||
       raw.preview_url ||
       null,
-    searchText: `${title} ${raw.key || ''} ${raw.style || ''}`.toLowerCase(),
+    searchText: `${title} ${raw.key || ""} ${raw.style || ""}`.toLowerCase(),
     original: raw,
   };
 };
 
-// Mini Waveform Component
 const MiniWaveform = ({ data }) => {
   const bars = useMemo(() => {
     if (!Array.isArray(data) || data.length === 0) return [];
@@ -57,11 +57,10 @@ const MiniWaveform = ({ data }) => {
   );
 };
 
-// Lick Card Component
-function LickCard({ lick, onTogglePlay, isPlaying }) {
+function LickRow({ lick, onTogglePlay, isPlaying, onQuickAdd }) {
   const [{ isDragging }, dragRef] = useDrag(
     () => ({
-      type: 'PROJECT_LICK',
+      type: "PROJECT_LICK",
       item: { ...lick },
       collect: (monitor) => ({
         isDragging: monitor.isDragging(),
@@ -73,55 +72,60 @@ function LickCard({ lick, onTogglePlay, isPlaying }) {
   return (
     <div
       ref={dragRef}
-      className={`
-        relative group flex items-center gap-3 p-2
-        bg-gray-900/80 border border-gray-800 rounded-lg cursor-grab
-        hover:border-orange-500/40 hover:bg-gray-850 transition-all active:cursor-grabbing
-        ${isDragging ? 'opacity-40 scale-[0.98]' : 'opacity-100'}
-      `}
+      className={`group relative px-2 py-2 rounded-lg cursor-grab transition-colors ${
+        isDragging ? "opacity-40" : "opacity-100"
+      } hover:bg-gray-900/60`}
     >
       <MiniWaveform data={lick.waveformData} />
-
-      <div className="text-gray-600 group-hover:text-gray-400">
-        <FaGripVertical size={12} />
+      <div className="absolute inset-0 opacity-0 group-hover:opacity-60 transition-opacity pointer-events-none">
+        {lick.waveformData ? (
+          <MiniWaveform data={lick.waveformData} />
+        ) : null}
       </div>
-
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onTogglePlay?.(lick);
-        }}
-        className={`z-10 w-8 h-8 flex items-center justify-center rounded-full border text-xs transition-colors shadow
-          ${
-            isPlaying
-              ? 'bg-orange-600 text-white border-orange-500'
-              : 'bg-gray-850 border-gray-700 text-orange-400 hover:bg-orange-500/10'
-          }
-        `}
-      >
-        {isPlaying ? <FaPause size={10} /> : <FaPlay size={10} className="ml-0.5" />}
-      </button>
-
-      <div className="flex-1 min-w-0 z-10">
-        <div className="flex items-baseline justify-between gap-2">
-          <h4 className="text-sm font-semibold text-gray-100 truncate">{lick.title}</h4>
-          {lick.duration ? (
-            <span className="text-[10px] text-gray-500 font-mono">{lick.duration.toFixed(1)}s</span>
-          ) : null}
+      <div className="grid grid-cols-[16px,1fr,48px,48px,56px,36px] items-center gap-3 text-[11px] text-gray-300 relative z-10">
+        <span className="text-gray-600 group-hover:text-gray-400">
+          <FaGripVertical size={10} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-100 truncate">{lick.title}</p>
+          <p className="text-[10px] text-gray-500 truncate">{lick.style}</p>
         </div>
-        <div className="flex items-center gap-2 mt-1">
-          {lick.key ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded border border-blue-900/60 bg-blue-900/20 text-blue-200">
-              {lick.key}
-            </span>
-          ) : null}
-          {lick.style ? (
-            <span className="text-[10px] px-1.5 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-400">
-              {lick.style}
-            </span>
-          ) : null}
+        <span className="text-center font-mono text-[10px]">
+          {lick.key || "—"}
+        </span>
+        <span className="text-center font-mono text-[10px]">
+          {lick.bpm ? `${lick.bpm}` : "—"}
+        </span>
+        <span className="text-center font-mono text-[10px]">
+          {lick.duration ? `${lick.duration.toFixed(1)}s` : "—"}
+        </span>
+        <div className="flex items-center justify-end gap-1">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onTogglePlay?.(lick);
+            }}
+            className={`w-7 h-7 flex items-center justify-center rounded-full border text-[10px] transition-colors ${
+              isPlaying
+                ? "bg-orange-600 text-white border-orange-500"
+                : "bg-transparent border-gray-700 text-orange-400 hover:bg-orange-500/10"
+            }`}
+          >
+            {isPlaying ? <FaPause size={9} /> : <FaPlay size={9} className="ml-0.5" />}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onQuickAdd?.(lick);
+            }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] px-2 py-1 rounded-md bg-gray-800 text-gray-200 hover:bg-gray-700"
+          >
+            Add
+          </button>
         </div>
       </div>
     </div>
@@ -132,7 +136,7 @@ export default function ProjectLickLibrary({ initialLicks = [], onLickDrop }) {
   const [licks, setLicks] = useState(
     initialLicks.map((lick) => normalizeLick(lick)).filter(Boolean)
   );
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(!initialLicks.length);
   const [error, setError] = useState(null);
   const [currentPreview, setCurrentPreview] = useState(null);
@@ -157,9 +161,9 @@ export default function ProjectLickLibrary({ initialLicks = [], onLickDrop }) {
       }
       setError(null);
       const response = await getCommunityLicks({
-        search: '',
+        search: "",
         limit: 30,
-        sortBy: 'newest',
+        sortBy: "newest",
       });
       const payload =
         response?.data?.licks ||
@@ -174,8 +178,8 @@ export default function ProjectLickLibrary({ initialLicks = [], onLickDrop }) {
         setLicks([]);
       }
     } catch (error) {
-      console.error('Failed to fetch licks:', error);
-      setError('Unable to load licks right now.');
+      console.error("Failed to fetch licks:", error);
+      setError("Unable to load licks right now.");
       if (!initialLicks.length) {
         setLicks([]);
       }
@@ -208,17 +212,19 @@ export default function ProjectLickLibrary({ initialLicks = [], onLickDrop }) {
       audio.onended = () => setCurrentPreview(null);
       await audio.play();
     } catch (previewError) {
-      console.error('Failed to preview lick audio', previewError);
+      console.error("Failed to preview lick audio", previewError);
       setCurrentPreview(null);
     }
   };
 
   return (
-    <div className="w-80 h-full flex flex-col bg-black border-l border-gray-900">
-      <div className="p-4 border-b border-gray-900 bg-gray-950/60 backdrop-blur">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-[11px] uppercase tracking-[0.2em] text-gray-500">Lick Vault</h3>
-          <span className="text-[10px] bg-gray-850 text-gray-300 px-2 py-0.5 rounded-full">
+    <div className="w-80 h-full flex flex-col bg-[#05060b] border-r border-gray-900">
+      <div className="p-3 border-b border-gray-900 bg-gray-950/70 backdrop-blur">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[11px] uppercase tracking-[0.3em] text-gray-500">
+            Lick Vault
+          </h3>
+          <span className="text-[10px] bg-gray-900 text-gray-300 px-2 py-0.5 rounded-full">
             {licks.length}
           </span>
         </div>
@@ -232,16 +238,27 @@ export default function ProjectLickLibrary({ initialLicks = [], onLickDrop }) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by key, style..."
-            className="w-full bg-gray-950 border border-gray-850 rounded-lg py-2 pl-8 pr-8 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-orange-500 transition-colors"
+            className="w-full bg-gray-950 border border-gray-850 rounded-lg py-2 pl-8 pr-10 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-orange-500 transition-colors"
           />
-          <FaFilter
-            size={12}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
-          />
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-orange-400 transition-colors"
+            title="Filter options coming soon"
+          >
+            <FaFilter size={12} />
+          </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-gray-500 flex items-center gap-3 border-b border-gray-900 bg-[#070a13]">
+        <span className="flex-1">Name</span>
+        <span className="w-12 text-center">Key</span>
+        <span className="w-12 text-center">BPM</span>
+        <span className="w-14 text-center">Length</span>
+        <span className="w-9 text-right">Play</span>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3 space-y-1">
         {loading && (
           <div className="text-gray-500 text-center py-8 text-sm">Loading...</div>
         )}
@@ -256,15 +273,17 @@ export default function ProjectLickLibrary({ initialLicks = [], onLickDrop }) {
         {!loading &&
           !error &&
           filteredLicks.map((lick) => (
-            <LickCard
+            <LickRow
               key={lick._id || lick.id}
               lick={lick}
               onTogglePlay={handlePreview}
               isPlaying={currentPreview === lick.audioUrl}
+              onQuickAdd={(selected) => onLickDrop?.(selected)}
             />
           ))}
       </div>
     </div>
   );
 }
+
 

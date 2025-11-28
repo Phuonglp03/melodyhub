@@ -1,40 +1,31 @@
 import React, { memo, useCallback } from "react";
-import {
-  FaPlay,
-  FaPause,
-  FaStop,
-  FaCircle,
-  FaStepBackward,
-  FaSync,
-} from "react-icons/fa";
+import { FaPlay, FaPause, FaStop, FaStepBackward, FaSync } from "react-icons/fa";
 
 /**
- * AudioTransportControls - Transport bar for play/pause/stop/record/loop
+ * AudioTransportControls - Transport bar for play/pause/stop/loop
  * Extracted from ProjectDetailPage to follow separation of concerns.
  *
  * Props:
  * - isPlaying: boolean - current playback state
- * - recordArmed: boolean - whether record is armed
  * - loopEnabled: boolean - whether loop is enabled
  * - formattedPlayTime: string - formatted playback time (e.g., "0:00.0")
  * - onPlay: () => void - callback for play
  * - onPause: () => void - callback for pause
  * - onStop: () => void - callback for stop
  * - onReturnToStart: () => void - callback for return to start
- * - onRecordToggle: () => void - callback for record toggle
  * - onLoopToggle: () => void - callback for loop toggle
+ * - className?: string - optional custom classes for the container
  */
 const AudioTransportControls = memo(function AudioTransportControls({
   isPlaying = false,
-  recordArmed = false,
   loopEnabled = false,
   formattedPlayTime = "0:00.0",
   onPlay,
   onPause,
   onStop,
   onReturnToStart,
-  onRecordToggle,
   onLoopToggle,
+  className = "",
 }) {
   const handlePlayToggle = useCallback(() => {
     if (isPlaying) {
@@ -45,20 +36,24 @@ const AudioTransportControls = memo(function AudioTransportControls({
   }, [isPlaying, onPlay, onPause]);
 
   const buttonBase =
-    "p-1.5 rounded-full transition-all duration-150 hover:bg-gray-700/50";
+    "p-1.5 rounded-full transition-all duration-150 hover:bg-gray-800/70";
 
-  const getButtonClass = (isActive, isRecordButton = false) => {
-    if (isRecordButton && isActive) {
-      return `${buttonBase} text-red-500 bg-red-500/20`;
-    }
+  const getButtonClass = (isActive) => {
     if (isActive) {
-      return `${buttonBase} text-orange-400 bg-orange-500/20`;
+      return `${buttonBase} text-orange-300 bg-orange-500/20 shadow-inner`;
     }
     return `${buttonBase} text-gray-300 hover:text-white`;
   };
 
   return (
-    <div className="flex items-center gap-1 bg-gray-800/70 rounded-full px-3 py-1">
+    <div
+      className={[
+        "flex items-center gap-1 bg-gray-900/60 border border-gray-800 rounded-full px-3 py-1.5 backdrop-blur-sm",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       {/* Return to Start */}
       <button
         type="button"
@@ -87,19 +82,6 @@ const AudioTransportControls = memo(function AudioTransportControls({
         title="Stop"
       >
         <FaStop size={12} />
-      </button>
-
-      {/* Record Arm */}
-      <button
-        type="button"
-        onClick={onRecordToggle}
-        className={getButtonClass(recordArmed, true)}
-        title="Record arm"
-      >
-        <FaCircle
-          size={12}
-          className={recordArmed ? "text-red-500" : "text-gray-200"}
-        />
       </button>
 
       {/* Loop Toggle */}

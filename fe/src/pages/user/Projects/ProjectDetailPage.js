@@ -21,6 +21,8 @@ import {
   FaRedo,
   FaPlay,
   FaPause,
+  FaChevronDown,
+  FaChevronUp,
 } from "react-icons/fa";
 import { RiPulseFill } from "react-icons/ri";
 import {
@@ -70,6 +72,10 @@ import ProjectBandEngine from "../../../components/ProjectBandEngine";
 import ProjectLickLibrary from "../../../components/ProjectLickLibrary";
 import ProjectExportButton from "../../../components/ProjectExportButton";
 import BandConsole from "../../../components/BandConsole";
+import {
+  DEFAULT_BAND_MEMBERS,
+  deriveLegacyMixFromMembers,
+} from "../../../utils/bandDefaults";
 import {
   normalizeKeyPayload,
   normalizeTimeSignaturePayload,
@@ -936,9 +942,16 @@ const ProjectDetailPage = () => {
   const [chordProgression, setChordProgression] = useState([]);
   const [backingTrack, setBackingTrack] = useState(null); // The backing track that holds chords
   const [selectedChordIndex, setSelectedChordIndex] = useState(null); // For chord deck
-  const [bandSettings, setBandSettings] = useState({
-    volumes: { drums: 0.8, bass: 0.8, piano: 0.8 },
-    mutes: { drums: false, bass: false, piano: false },
+  const [bandSettings, setBandSettings] = useState(() => {
+    const members = DEFAULT_BAND_MEMBERS;
+    const legacy = deriveLegacyMixFromMembers(members);
+    return {
+      style: "Swing",
+      swingAmount: 0.6,
+      members,
+      volumes: legacy.volumes,
+      mutes: legacy.mutes,
+    };
   });
   const [currentBeat, setCurrentBeat] = useState(0);
   const [chordLibrary, setChordLibrary] = useState([]);
@@ -953,6 +966,43 @@ const ProjectDetailPage = () => {
   const [playingLickId, setPlayingLickId] = useState(null);
   const [lickAudioRefs, setLickAudioRefs] = useState({});
   const [lickProgress, setLickProgress] = useState({});
+
+  const updateBandSettings = (updater) => {
+    setBandSettings((prev) => {
+      const next =
+        typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      const members = next.members || prev.members || [];
+      const legacy = deriveLegacyMixFromMembers(members);
+      return {
+        ...prev,
+        ...next,
+        members,
+        volumes: legacy.volumes,
+        mutes: legacy.mutes,
+      };
+    });
+  };
+
+  const startPerformanceDeckResize = (e) => {
+    if (!sidePanelOpen) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = sidePanelWidth;
+
+    const handleMouseMove = (moveEvent) => {
+      const diff = startY - moveEvent.clientY; // Inverted for bottom panel
+      const newHeight = Math.max(200, Math.min(500, startHeight + diff));
+      setSidePanelWidth(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  };
 
   // Generate all keys (12 major + 12 minor)
   const allKeys = useMemo(() => {
@@ -1111,6 +1161,17 @@ const ProjectDetailPage = () => {
     () => [...tracks].sort((a, b) => (a.trackOrder ?? 0) - (b.trackOrder ?? 0)),
     [tracks]
   );
+  const userTracks = useMemo(
+    () =>
+      orderedTracks.filter(
+        (track) => !track.isBackingTrack && track.trackType !== "backing"
+      ),
+    [orderedTracks]
+  );
+  const hasAnyUserClips = useMemo(
+    () => userTracks.some((track) => (track.items || []).length > 0),
+    [userTracks]
+  );
   const menuTrack = useMemo(
     () =>
       trackContextMenu.trackId
@@ -1122,7 +1183,6 @@ const ProjectDetailPage = () => {
   const [swingDraft, setSwingDraft] = useState("0");
   const [metronomeEnabled, setMetronomeEnabled] = useState(true);
   const [loopEnabled, setLoopEnabled] = useState(false);
-  const [recordArmed, setRecordArmed] = useState(false);
   const [historyStatus, setHistoryStatus] = useState({
     canUndo: false,
     canRedo: false,
@@ -1287,6 +1347,7 @@ const ProjectDetailPage = () => {
   const basePixelsPerSecond = 50; // Base scale for timeline
   const beatsPerMeasure = 4; // For 4/4 time
   const TRACK_COLUMN_WIDTH = 256; // Tailwind w-64 keeps labels aligned with lanes
+  const COLLAPSED_DECK_HEIGHT = 44;
   const MIN_WORKSPACE_SCALE = 0.75;
   const MAX_WORKSPACE_SCALE = 1.1;
   const WORKSPACE_SCALE_STEP = 0.05;
@@ -1338,6 +1399,9 @@ const ProjectDetailPage = () => {
         const response = await getProjectById(projectId);
         if (response.success) {
           setProject(response.data.project);
+          if (response.data.project.bandSettings?.members?.length) {
+            updateBandSettings(response.data.project.bandSettings);
+          }
           setChordProgression(
             hydrateChordProgression(response.data.project.chordProgression)
           );
@@ -2367,10 +2431,6 @@ const ProjectDetailPage = () => {
     }
   };
 
-  const handleRecordToggle = () => {
-    setRecordArmed((prev) => !prev);
-  };
-
   // Snap time to grid and clip edges
   // Soft magnetic snapping to neighboring clips on the same track
   const applyMagnet = (time, track, itemId) => {
@@ -2778,12 +2838,6 @@ const ProjectDetailPage = () => {
     setIsDraggingItem(false);
     setSelectedItem(null);
     setDragOffset({ x: 0, trackId: null });
-  };
-
-  const handleDragOver = (e, trackId, position) => {
-    e.preventDefault();
-    setDragOverTrack(trackId);
-    setDragOverPosition(position);
   };
 
   const handleDrop = async (e, trackId, startTime) => {
@@ -3748,45 +3802,18 @@ const ProjectDetailPage = () => {
             height: `${(1 / workspaceScale) * 100}%`,
           }}
         >
-          {/* Top Bar - Minimal, Professional */}
-          <div className="bg-gray-950 border-b border-gray-800/50 px-4 py-2">
-            <div className="flex flex-wrap items-center gap-2.5 justify-between">
-              <div className="flex items-center gap-3">
+          {/* Top Bar - Compact Controls */}
+          <div className="bg-gray-950 border-b border-gray-800/60 px-4 py-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   onClick={() => navigate("/projects")}
-                  className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 transition-colors"
+                  className="h-9 px-3 rounded-full bg-gray-900 text-white text-xs font-medium flex items-center gap-2 hover:bg-gray-800 transition-colors"
                 >
                   <FaTimes size={12} className="rotate-45" />
                   Back
                 </button>
-                <button
-                  onClick={handleDeleteProject}
-                  disabled={isDeleting}
-                  className="flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium border border-red-800 text-red-200 bg-red-900/40 hover:bg-red-900/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <FaTrash size={12} />
-                  {isDeleting ? "Deleting..." : "Delete"}
-                </button>
-                <button
-                  onClick={() =>
-                    navigate(`/studio/${projectId}`, { state: { studioSeed } })
-                  }
-                  disabled={!studioSeed}
-                  className="flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium border border-purple-700 text-purple-100 bg-purple-900/30 hover:bg-purple-900/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <FaMusic size={12} />
-                  Open Studio
-                </button>
-                <ProjectExportButton
-                  projectId={projectId}
-                  projectName={project?.name || project?.title || "Untitled"}
-                  chordProgression={chordProgression}
-                  bpm={project?.bpm || 120}
-                  key={projectKey}
-                  style={projectStyle}
-                  bandSettings={bandSettings}
-                />
-                <div className="flex items-center gap-1 bg-gray-800/70 rounded-full px-3 py-1">
+                <div className="flex items-center gap-1 bg-gray-900/70 border border-gray-800 rounded-full px-2 py-1">
                   <button
                     type="button"
                     className={toolbarButtonClasses(
@@ -3823,12 +3850,12 @@ const ProjectDetailPage = () => {
                   >
                     Save
                   </button>
-                  <span className="text-[10px] uppercase tracking-wide text-gray-400">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400 px-1">
                     {isSavingTimeline
                       ? "Saving..."
                       : hasUnsavedTimelineChanges
-                      ? "Unsaved edits"
-                      : "All changes saved"}
+                      ? "Unsaved"
+                      : "Synced"}
                   </span>
                   <button
                     type="button"
@@ -3839,58 +3866,75 @@ const ProjectDetailPage = () => {
                     <RiPulseFill size={12} />
                   </button>
                 </div>
-                <div className="flex items-center gap-1 bg-gray-800/60 rounded-full px-3 py-1 text-xs text-gray-300">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setZoomLevel(Math.max(0.25, zoomLevel - 0.25))
-                    }
-                    className="px-2 py-0.5 rounded-full bg-gray-900 hover:bg-gray-700 text-white"
-                    title="Zoom out"
-                  >
-                    −
-                  </button>
-                  <span className="min-w-[48px] text-center">
-                    {Math.round(zoomLevel * 100)}%
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setZoomLevel(Math.min(4, zoomLevel + 0.25))}
-                    className="px-2 py-0.5 rounded-full bg-gray-900 hover:bg-gray-700 text-white"
-                    title="Zoom in"
-                  >
-                    +
-                  </button>
-                </div>
-                <div className="flex items-center gap-1 bg-gray-800/60 rounded-full px-3 py-1 text-xs text-gray-300">
-                  <span className="uppercase text-gray-400">Display</span>
-                  <button
-                    type="button"
-                    onClick={() => adjustWorkspaceScale(-WORKSPACE_SCALE_STEP)}
-                    disabled={workspaceScale <= MIN_WORKSPACE_SCALE + 0.001}
-                    className="px-2 py-0.5 rounded-full bg-gray-900 hover:bg-gray-700 text-white disabled:opacity-40 disabled:cursor-not-allowed"
-                    title="Scale entire workspace down"
-                  >
-                    −
-                  </button>
-                  <span className="min-w-[48px] text-center">
-                    {workspaceScalePercentage}%
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => adjustWorkspaceScale(WORKSPACE_SCALE_STEP)}
-                    disabled={workspaceScale >= MAX_WORKSPACE_SCALE - 0.001}
-                    className="px-2 py-0.5 rounded-full bg-gray-900 hover:bg-gray-700 text-white disabled:opacity-40 disabled:cursor-not-allowed"
-                    title="Scale entire workspace up"
-                  >
-                    +
-                  </button>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 bg-gray-900/60 border border-gray-800 rounded-full px-2 py-1 text-[11px] text-gray-300">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setZoomLevel(Math.max(0.25, zoomLevel - 0.25))
+                      }
+                      className="px-2 py-0.5 rounded-full bg-gray-950 hover:bg-gray-800 text-white"
+                      title="Zoom out"
+                    >
+                      −
+                    </button>
+                    <span className="min-w-[44px] text-center font-mono">
+                      {Math.round(zoomLevel * 100)}%
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setZoomLevel(Math.min(4, zoomLevel + 0.25))
+                      }
+                      className="px-2 py-0.5 rounded-full bg-gray-950 hover:bg-gray-800 text-white"
+                      title="Zoom in"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1 bg-gray-900/60 border border-gray-800 rounded-full px-2 py-1 text-[11px] text-gray-300">
+                    <span className="uppercase text-gray-500">Display</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        adjustWorkspaceScale(-WORKSPACE_SCALE_STEP)
+                      }
+                      disabled={workspaceScale <= MIN_WORKSPACE_SCALE + 0.001}
+                      className="px-2 py-0.5 rounded-full bg-gray-950 hover:bg-gray-800 text-white disabled:opacity-40"
+                      title="Scale entire workspace down"
+                    >
+                      −
+                    </button>
+                    <span className="min-w-[44px] text-center font-mono">
+                      {workspaceScalePercentage}%
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => adjustWorkspaceScale(WORKSPACE_SCALE_STEP)}
+                      disabled={workspaceScale >= MAX_WORKSPACE_SCALE - 0.001}
+                      className="px-2 py-0.5 rounded-full bg-gray-950 hover:bg-gray-800 text-white disabled:opacity-40"
+                      title="Scale entire workspace up"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 flex-wrap justify-center">
-                <div className="flex items-center bg-gray-800 rounded-full px-3 py-1 text-sm text-white gap-2">
-                  <span className="text-xs uppercase text-gray-400">Tempo</span>
+              <div className="flex items-center gap-2 ml-auto flex-wrap justify-end">
+                <AudioTransportControls
+                  isPlaying={isPlaying}
+                  loopEnabled={loopEnabled}
+                  formattedPlayTime={formattedPlayTime}
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onStop={handleStop}
+                  onReturnToStart={handleReturnToStart}
+                  onLoopToggle={() => setLoopEnabled((prev) => !prev)}
+                  className="shadow-inner"
+                />
+                <div className="flex items-center gap-2 bg-gray-900/70 border border-gray-800 rounded-full px-3 py-1 text-xs text-white">
+                  <span className="uppercase text-gray-400">Tempo</span>
                   <input
                     type="number"
                     min={40}
@@ -3903,16 +3947,16 @@ const ProjectDetailPage = () => {
                         commitTempoChange();
                       }
                     }}
-                    className="bg-transparent w-16 text-white text-sm focus:outline-none"
+                    className="bg-transparent w-14 text-right text-white text-xs focus:outline-none"
                   />
-                  <span className="text-xs text-gray-400">bpm</span>
+                  <span className="text-[10px] text-gray-500">bpm</span>
                 </div>
-                <div className="flex items-center bg-gray-800 rounded-full px-3 py-1 text-sm text-white gap-2">
-                  <span className="text-xs uppercase text-gray-400">Time</span>
+                <div className="flex items-center gap-1 bg-gray-900/70 border border-gray-800 rounded-full px-3 py-1 text-xs text-white">
+                  <span className="uppercase text-gray-400">Time</span>
                   <select
                     value={projectTimeSignatureName}
                     onChange={(e) => handleTimeSignatureChange(e.target.value)}
-                    className="bg-transparent text-white text-sm focus:outline-none"
+                    className="bg-transparent text-white text-xs focus:outline-none"
                   >
                     {TIME_SIGNATURES.map((signature) => (
                       <option
@@ -3925,12 +3969,12 @@ const ProjectDetailPage = () => {
                     ))}
                   </select>
                 </div>
-                <div className="flex items-center bg-gray-800 rounded-full px-3 py-1 text-sm text-white gap-2">
-                  <span className="text-xs uppercase text-gray-400">Key</span>
+                <div className="flex items-center gap-1 bg-gray-900/70 border border-gray-800 rounded-full px-3 py-1 text-xs text-white">
+                  <span className="uppercase text-gray-400">Key</span>
                   <select
                     value={projectKeyName || "C Major"}
                     onChange={(e) => handleKeyChange(e.target.value)}
-                    className="bg-transparent text-white text-sm focus:outline-none"
+                    className="bg-transparent text-white text-xs focus:outline-none"
                   >
                     {KEY_OPTIONS.map((keyOption) => (
                       <option
@@ -3943,53 +3987,28 @@ const ProjectDetailPage = () => {
                     ))}
                   </select>
                 </div>
-                <div className="flex items-center bg-gray-800 rounded-full px-3 py-1 text-sm text-white gap-2">
-                  <span className="text-xs uppercase text-gray-400">Swing</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={Number(swingDraft)}
-                    onChange={(e) => setSwingDraft(e.target.value)}
-                    onMouseUp={commitSwingChange}
-                    onTouchEnd={commitSwingChange}
-                    className="w-24 accent-orange-500"
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={swingDraft}
-                    onChange={(e) => setSwingDraft(e.target.value)}
-                    onBlur={commitSwingChange}
-                    className="bg-transparent w-12 text-white text-sm focus:outline-none"
-                  />
-                  <span className="text-xs text-gray-400">%</span>
-                </div>
+                <ProjectExportButton
+                  variant="compact"
+                  className="shadow-lg"
+                  projectId={projectId}
+                  projectName={project?.name || project?.title || "Untitled"}
+                  chordProgression={chordProgression}
+                  bpm={project?.bpm || 120}
+                  key={projectKey}
+                  style={projectStyle}
+                  bandSettings={bandSettings}
+                />
               </div>
-
-              {/* Transport Controls - Extracted Component */}
-              <AudioTransportControls
-                isPlaying={isPlaying}
-                recordArmed={recordArmed}
-                loopEnabled={loopEnabled}
-                formattedPlayTime={formattedPlayTime}
-                onPlay={handlePlay}
-                onPause={handlePause}
-                onStop={handleStop}
-                onReturnToStart={handleReturnToStart}
-                onRecordToggle={handleRecordToggle}
-                onLoopToggle={() => setLoopEnabled((prev) => !prev)}
-              />
             </div>
-            <div className="flex flex-wrap items-center justify-between text-xs text-gray-400">
+            <div className="flex flex-wrap items-center justify-between text-[11px] text-gray-400 mt-2">
               <span>
                 {project.title} • {formatDate(project.createdAt)}
               </span>
-              <span>
-                Zoom {Math.round(zoomLevel * 100)}% · Display{" "}
-                {workspaceScalePercentage}% · {projectTimeSignatureName} ·{" "}
-                {projectKeyName || "Key"}
+              <span className="flex items-center gap-2">
+                <span>Zoom {Math.round(zoomLevel * 100)}%</span>
+                <span>Display {workspaceScalePercentage}%</span>
+                <span>{projectTimeSignatureName}</span>
+                <span>{projectKeyName || "Key"}</span>
               </span>
             </div>
           </div>
@@ -3997,169 +4016,168 @@ const ProjectDetailPage = () => {
           {/* Main Content Area */}
           <div className="flex flex-1 flex-col overflow-hidden">
             {/* Timeline Area - Always Visible */}
-            <div className="flex-1 flex flex-col bg-gray-900 overflow-hidden min-h-0">
-              <div className="flex border-b border-gray-800 h-6">
-                <div className="w-64 bg-gray-950 border-r border-gray-800 px-3 py-1.5 flex items-center">
-                  <button
-                    onClick={handleAddTrack}
-                    className="w-full bg-gray-800 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs font-medium flex items-center justify-center gap-1.5"
-                  >
-                    <FaPlus size={10} />
-                    Add a track
-                  </button>
-                </div>
-                <div className="flex-1 bg-gray-900 px-3 text-[10px] uppercase tracking-wide text-gray-500 flex items-center">
-                  Drag licks or chords onto any track to build your arrangement
+            <div className="flex-1 flex bg-gray-900 overflow-hidden min-h-0">
+              {/* Lick Vault - Left Edge */}
+              <div className="w-80 border-r border-gray-900 bg-black flex flex-col flex-shrink-0">
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  <ProjectLickLibrary
+                    initialLicks={availableLicks}
+                    onLickDrop={(lick) => {
+                      console.log("Lick dropped:", lick);
+                    }}
+                  />
                 </div>
               </div>
-              {/* Timeline Grid with Right Panel */}
-              <div className="flex-1 flex overflow-hidden">
-                {/* Main Timeline Area - Left/Middle */}
-                <div
-                  className="flex-1 overflow-auto relative min-w-0"
-                  ref={timelineRef}
-                  onClick={() => {
-                    setFocusedClipId(null);
-                    closeTrackMenu();
-                  }}
-                >
-                  {/* Time Ruler with Beat Markers */}
-                  <div className="sticky top-0 z-20 flex">
-                    <div className="w-64 bg-gray-950 border-r border-gray-800 h-6 flex items-center px-4 text-xs font-semibold uppercase tracking-wide text-gray-400 sticky left-0 z-20">
-                      Track
-                    </div>
-                    <div className="flex-1 relative bg-gray-800 border-b border-gray-700 h-6 flex items-end">
-                      {/* Measure markers (every 4 beats) */}
-                      {Array.from({
-                        length:
-                          Math.ceil(
-                            timelineWidth / pixelsPerBeat / beatsPerMeasure
-                          ) + 1,
-                      }).map((_, measureIndex) => {
-                        const measureTime =
-                          measureIndex * beatsPerMeasure * secondsPerBeat;
-                        const measurePosition = measureTime * pixelsPerSecond;
-                        return (
-                          <div
-                            key={`measure-${measureIndex}`}
-                            className="absolute border-l-2 border-blue-500 h-full flex items-end pb-1"
-                            style={{ left: `${measurePosition}px` }}
-                          >
-                            <span className="text-xs text-blue-400 font-medium px-1">
-                              {measureIndex + 1}
-                            </span>
-                          </div>
-                        );
-                      })}
 
-                      {/* Beat markers */}
-                      {Array.from({
-                        length:
-                          Math.ceil(calculateTimelineWidth() / pixelsPerBeat) +
-                          1,
-                      }).map((_, beatIndex) => {
-                        const beatTime = beatIndex * secondsPerBeat;
-                        const beatPosition = beatTime * pixelsPerSecond;
-                        const isMeasureStart =
-                          beatIndex % beatsPerMeasure === 0;
-                        return (
-                          <div
-                            key={`beat-${beatIndex}`}
-                            className={`absolute border-l h-full ${
-                              isMeasureStart
-                                ? "border-blue-500"
-                                : "border-gray-600"
-                            }`}
-                            style={{ left: `${beatPosition}px` }}
-                          />
-                        );
-                      })}
-
-                      {/* Second markers */}
-                      {Array.from({
-                        length:
-                          Math.ceil(
-                            calculateTimelineWidth() / pixelsPerSecond
-                          ) + 1,
-                      }).map((_, i) => (
-                        <div
-                          key={`sec-${i}`}
-                          className="absolute border-l border-gray-700 h-4 bottom-0"
-                          style={{ left: `${i * pixelsPerSecond}px` }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Playhead */}
-                  {(playbackPosition > 0 || isPlaying) && (
-                    <div
-                      ref={playheadRef}
-                      className="absolute top-10 bottom-0 w-0.5 bg-red-500 z-30 pointer-events-none"
-                      style={{
-                        left: `${
-                          TRACK_COLUMN_WIDTH +
-                          playbackPosition * pixelsPerSecond
-                        }px`,
-                      }}
-                    >
-                      <div className="absolute -top-2 -left-2 w-4 h-4 bg-red-500 rounded-full border-2 border-white" />
-                    </div>
-                  )}
-
-                  {/* 1. MASTER CHORD TRACK (Fixed at Top) */}
+              {/* Main Timeline Column */}
+              <div className="flex-1 flex flex-col min-w-0 bg-gray-900">
+                {/* Main Timeline Area */}
+                <div className="flex-1 relative flex flex-col min-w-0">
                   <div
-                    className="flex border-b border-gray-800/50 bg-[#141414]"
-                    style={{ minHeight: "80px" }}
+                    className="flex-1 overflow-auto relative min-w-0"
+                    ref={timelineRef}
+                    style={{
+                      paddingBottom:
+                        (sidePanelOpen
+                          ? sidePanelWidth
+                          : COLLAPSED_DECK_HEIGHT) + 24,
+                    }}
+                    onClick={() => {
+                      setFocusedClipId(null);
+                      closeTrackMenu();
+                    }}
                   >
-                    {/* Header */}
-                    <div className="w-64 border-r border-gray-800/50 p-3 bg-[#1a1a1a] sticky left-0 z-20 flex flex-col justify-center">
-                      <span className="text-sm font-bold text-indigo-400">
-                        Backing Band
-                      </span>
-                      <span className="text-[10px] text-gray-500">
-                        Harmony & Rhythm
-                      </span>
-                    </div>
+                    {/* Time Ruler with Beat Markers */}
+                    <div className="sticky top-0 z-20 flex">
+                      <div className="w-64 bg-gray-950 border-r border-gray-800 h-6 flex items-center px-4 text-xs font-semibold uppercase tracking-wide text-gray-400 sticky left-0 z-20">
+                        Track
+                      </div>
+                      <div className="flex-1 relative bg-gray-800 border-b border-gray-700 h-6 flex items-end">
+                        {/* Measure markers (every 4 beats) */}
+                        {Array.from({
+                          length:
+                            Math.ceil(
+                              timelineWidth / pixelsPerBeat / beatsPerMeasure
+                            ) + 1,
+                        }).map((_, measureIndex) => {
+                          const measureTime =
+                            measureIndex * beatsPerMeasure * secondsPerBeat;
+                          const measurePosition = measureTime * pixelsPerSecond;
+                          return (
+                            <div
+                              key={`measure-${measureIndex}`}
+                              className="absolute border-l-2 border-blue-400/80 h-full flex items-end pb-1"
+                              style={{ left: `${measurePosition}px` }}
+                            >
+                              <span className="text-[11px] text-blue-200 font-medium px-1">
+                                {measureIndex + 1}
+                              </span>
+                            </div>
+                          );
+                        })}
 
-                    {/* Content (The Chord Grid) */}
-                    <div className="flex-1 relative min-w-0">
-                      {/* Draw Chords directly from chordProgression state */}
-                      {chordProgression.map((chord, idx) => {
-                        const startTime = idx * chordDurationSeconds;
-                        const width = chordDurationSeconds * pixelsPerSecond;
-                        const isSelected = selectedChordIndex === idx;
+                        {/* Beat markers */}
+                        {Array.from({
+                          length:
+                            Math.ceil(
+                              calculateTimelineWidth() / pixelsPerBeat
+                            ) + 1,
+                        }).map((_, beatIndex) => {
+                          const beatTime = beatIndex * secondsPerBeat;
+                          const beatPosition = beatTime * pixelsPerSecond;
+                          const isMeasureStart =
+                            beatIndex % beatsPerMeasure === 0;
+                          return (
+                            <div
+                              key={`beat-${beatIndex}`}
+                              className={`absolute border-l h-full ${
+                                isMeasureStart
+                                  ? "border-blue-400/60"
+                                  : "border-gray-700/50"
+                              }`}
+                              style={{ left: `${beatPosition}px` }}
+                            />
+                          );
+                        })}
 
-                        return (
+                        {/* Second markers */}
+                        {Array.from({
+                          length:
+                            Math.ceil(
+                              calculateTimelineWidth() / pixelsPerSecond
+                            ) + 1,
+                        }).map((_, i) => (
                           <div
-                            key={`chord-${idx}`}
-                            className={`absolute top-1 bottom-1 border rounded flex items-center justify-center text-sm font-bold cursor-pointer transition-all ${
-                              isSelected
-                                ? "bg-indigo-600 border-indigo-400 text-white z-10"
-                                : "bg-gray-800 border-gray-700 text-gray-400 hover:bg-gray-750"
-                            }`}
-                            style={{
-                              left: `${startTime * pixelsPerSecond}px`,
-                              width: `${width - 2}px`,
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedChordIndex(idx);
-                            }}
-                          >
-                            {chord.chordName || chord.chord || "Chord"}
-                          </div>
-                        );
-                      })}
+                            key={`sec-${i}`}
+                            className="absolute border-l border-gray-800/70 h-4 bottom-0"
+                            style={{ left: `${i * pixelsPerSecond}px` }}
+                          />
+                        ))}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* 2. USER TRACKS (Licks/Audio) - Filter out backing track */}
-                  {orderedTracks
-                    .filter(
-                      (t) => !t.isBackingTrack && t.trackType !== "backing"
-                    )
-                    .map((track, trackIndex) => {
+                    {/* Playhead */}
+                    {(playbackPosition > 0 || isPlaying) && (
+                      <div
+                        ref={playheadRef}
+                        className="absolute top-0 bottom-0 w-[2px] bg-orange-400 z-30 pointer-events-none shadow-[0_0_14px_rgba(251,191,36,0.6)]"
+                        style={{
+                          left: `${
+                            TRACK_COLUMN_WIDTH +
+                            playbackPosition * pixelsPerSecond
+                          }px`,
+                        }}
+                      >
+                        <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-3 h-3 bg-orange-400 rounded-full border border-white" />
+                      </div>
+                    )}
+
+                    {/* 1. MASTER CHORD TRACK (Fixed at Top) */}
+                    <div
+                      className="flex border-b border-gray-900 bg-[#090d17]"
+                      style={{ minHeight: "78px" }}
+                    >
+                      <div className="w-64 border-r border-gray-900 px-3 py-2 bg-[#070910] sticky left-0 z-20 flex flex-col justify-center gap-1">
+                        <span className="text-[11px] font-semibold text-indigo-200 uppercase tracking-[0.25em]">
+                          Structure
+                        </span>
+                        <span className="text-[10px] text-gray-500">
+                          Chord roadmap
+                        </span>
+                      </div>
+
+                      <div className="flex-1 relative min-w-0 bg-[#05070d]">
+                        {chordProgression.map((chord, idx) => {
+                          const startTime = idx * chordDurationSeconds;
+                          const width = chordDurationSeconds * pixelsPerSecond;
+                          const isSelected = selectedChordIndex === idx;
+
+                          return (
+                            <div
+                              key={`chord-${idx}`}
+                              className={`absolute inset-y-2 rounded-md px-3 flex items-center justify-center text-[11px] font-semibold tracking-wide uppercase cursor-pointer transition-all ${
+                                isSelected
+                                  ? "bg-indigo-500/80 text-white shadow-[0_0_18px_rgba(99,102,241,0.45)]"
+                                  : "bg-indigo-500/20 text-indigo-100 hover:bg-indigo-500/30"
+                              }`}
+                              style={{
+                                left: `${startTime * pixelsPerSecond}px`,
+                                width: `${Math.max(width, 32)}px`,
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedChordIndex(idx);
+                              }}
+                            >
+                              {chord.chordName || chord.chord || "Chord"}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 2. USER TRACKS (Licks/Audio) */}
+                    {userTracks.map((track, trackIndex) => {
                       const isHoveringTrack = dragOverTrack === track._id;
                       const isMenuOpen =
                         trackContextMenu.isOpen &&
@@ -4168,10 +4186,16 @@ const ProjectDetailPage = () => {
                       const readableTrackName = formatTrackTitle(
                         track.trackName || "Track"
                       );
+                      const trackHasClips = (track.items || []).length > 0;
+                      const trackRowBg = isHoveringTrack
+                        ? "bg-gray-900/40"
+                        : trackHasClips
+                        ? "bg-[#0b0f1b]"
+                        : "bg-[#05070d]";
                       return (
                         <div
                           key={track._id}
-                          className="flex border-b border-gray-800"
+                          className={`flex border-b border-gray-900 ${trackRowBg}`}
                           style={{ minHeight: "90px" }}
                         >
                           <div
@@ -4180,7 +4204,9 @@ const ProjectDetailPage = () => {
                                 ? "bg-gray-800/80"
                                 : isHoveringTrack
                                 ? "bg-gray-900/80"
-                                : "bg-gray-950"
+                                : trackHasClips
+                                ? "bg-gray-950"
+                                : "bg-[#05060d]"
                             }`}
                             style={{
                               minHeight: "inherit",
@@ -4205,10 +4231,10 @@ const ProjectDetailPage = () => {
                                   }}
                                 />
                                 <span
-                                  className={`text-white font-medium text-sm truncate ${
+                                  className={`text-sm font-medium truncate ${
                                     selectedTrackId === track._id
                                       ? "text-orange-400"
-                                      : ""
+                                      : "text-gray-200"
                                   }`}
                                 >
                                   {readableTrackName}
@@ -4275,7 +4301,7 @@ const ProjectDetailPage = () => {
                             className="relative flex-1"
                             style={{
                               backgroundColor: isHoveringTrack
-                                ? "rgba(255,255,255,0.05)"
+                                ? "rgba(255,255,255,0.04)"
                                 : "transparent",
                             }}
                             onDragOver={(e) => {
@@ -4288,24 +4314,35 @@ const ProjectDetailPage = () => {
                               const x = e.clientX - trackRect.left + scrollLeft;
                               const startTime = Math.max(
                                 0,
-                                x / pixelsPerSecond
+                                Math.round(
+                                  x / pixelsPerSecond / secondsPerBeat
+                                ) * secondsPerBeat
                               );
-                              handleDragOver(e, track._id, startTime);
+                              setDragOverTrack(track._id);
+                              setDragOverPosition(startTime);
+                            }}
+                            onDragLeave={() => {
+                              setDragOverTrack(null);
+                              setDragOverPosition(null);
                             }}
                             onDrop={(e) => {
+                              e.preventDefault();
                               if (!timelineRef.current) return;
                               const trackRect =
                                 e.currentTarget.getBoundingClientRect();
                               const scrollLeft =
                                 timelineRef.current.scrollLeft || 0;
                               const x = e.clientX - trackRect.left + scrollLeft;
-                              const rawTime = Math.max(0, x / pixelsPerSecond);
-                              const magnetTime = applyMagnet(
-                                rawTime,
-                                track,
-                                null
+                              const rawTime = Math.max(
+                                0,
+                                Math.round(
+                                  x / pixelsPerSecond / secondsPerBeat
+                                ) * secondsPerBeat
                               );
-                              handleDrop(e, track._id, magnetTime);
+                              const snapped = applyMagnet(rawTime, track, null);
+                              handleDrop(e, track._id, snapped);
+                              setDragOverTrack(null);
+                              setDragOverPosition(null);
                             }}
                           >
                             {/* Wavy Background Pattern */}
@@ -4739,7 +4776,7 @@ const ProjectDetailPage = () => {
                                       {showResizeHandles && (
                                         <div
                                           data-resize-handle="left"
-                                          className="absolute left-0 top-0 bottom-0 w-3 cursor-w-resize hover:bg-white/20 z-20 transition-colors"
+                                          className="absolute left-0 top-0 bottom-0 w-4 cursor-ew-resize hover:bg-white/25 z-20 transition-colors border-r border-white/20"
                                           onMouseDown={(e) =>
                                             startClipResize(
                                               e,
@@ -4753,7 +4790,7 @@ const ProjectDetailPage = () => {
                                       {showResizeHandles && (
                                         <div
                                           data-resize-handle="right"
-                                          className="absolute right-0 top-0 bottom-0 w-3 cursor-e-resize hover:bg-white/20 z-20 transition-colors"
+                                          className="absolute right-0 top-0 bottom-0 w-4 cursor-ew-resize hover:bg-white/25 z-20 transition-colors border-l border-white/20"
                                           onMouseDown={(e) =>
                                             startClipResize(
                                               e,
@@ -4809,111 +4846,112 @@ const ProjectDetailPage = () => {
                       );
                     })}
 
-                  {/* Drop Zone Hint */}
-                  {draggedLick && (
-                    <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800/90 border border-gray-700 rounded-lg px-6 py-3 text-gray-300 text-sm">
-                      Drag and drop a loop or audio/MIDI file here
-                    </div>
-                  )}
-                </div>
+                    {!hasAnyUserClips && !draggedLick && (
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="bg-gray-900/85 border border-gray-800 rounded-lg px-6 py-3 text-gray-300 text-sm text-center">
+                          Drag licks or chords onto any track to build your
+                          arrangement
+                        </div>
+                      </div>
+                    )}
 
-                {/* Right Sidebar: Lick Vault - Right Edge */}
-                <div className="w-80 border-l border-gray-900 flex flex-col bg-black flex-shrink-0">
-                  <ProjectLickLibrary
-                    initialLicks={availableLicks}
-                    onLickDrop={(lick) => {
-                      console.log("Lick dropped:", lick);
+                    {/* Drop Zone Hint */}
+                    {draggedLick && (
+                      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800/90 border border-gray-700 rounded-lg px-6 py-3 text-gray-300 text-sm">
+                        Drag and drop a loop or audio/MIDI file here
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex border-t border-gray-850">
+                    <div className="w-64 bg-gray-950 border-r border-gray-850 px-3 py-2">
+                      <button
+                        onClick={handleAddTrack}
+                        className="w-full bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 rounded-full text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <FaPlus size={10} />
+                        Add Track
+                      </button>
+                    </div>
+                    <div className="flex-1 bg-gray-900 px-4 py-2 text-[11px] text-gray-500 flex items-center">
+                      {userTracks.length} tracks •{" "}
+                      {hasAnyUserClips ? "Editing" : "Empty arrangement"}
+                    </div>
+                  </div>
+
+                  {/* Embedded Bottom Panel */}
+                  <div
+                    className="absolute left-0 right-0 transition-all duration-300 ease-in-out"
+                    style={{
+                      height: sidePanelOpen
+                        ? sidePanelWidth
+                        : COLLAPSED_DECK_HEIGHT,
+                      bottom: 0,
                     }}
-                  />
+                  >
+                    <div className="h-full flex flex-col shadow-2xl shadow-black/50">
+                      <div className="flex items-center justify-between h-11 px-4 bg-gray-950 border-t border-gray-800">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                          <FaPalette size={12} className="text-orange-400" />
+                          Performance Deck
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {sidePanelOpen && (
+                            <button
+                              onMouseDown={startPerformanceDeckResize}
+                              className="text-gray-500 hover:text-white px-2 py-1 rounded-md border border-gray-700 text-[11px]"
+                              title="Drag to resize"
+                            >
+                              Resize
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setSidePanelOpen((prev) => !prev)}
+                            className="text-gray-400 hover:text-white p-1 rounded-md border border-gray-700"
+                            title={
+                              sidePanelOpen ? "Collapse panel" : "Expand panel"
+                            }
+                          >
+                            {sidePanelOpen ? (
+                              <FaChevronDown size={12} />
+                            ) : (
+                              <FaChevronUp size={12} />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div
+                        className={`bg-gray-950 border-t border-gray-800 flex-1 flex flex-col transition-opacity duration-200 ${
+                          sidePanelOpen
+                            ? "opacity-100"
+                            : "opacity-0 pointer-events-none"
+                        }`}
+                      >
+                        {sidePanelOpen && (
+                          <BandConsole
+                            selectedChordIndex={selectedChordIndex}
+                            onChordSelect={handleChordSelect}
+                            onAddChord={handleAddChordFromDeck}
+                            projectKey={projectKey}
+                            bandSettings={bandSettings}
+                            onSettingsChange={updateBandSettings}
+                            style={projectStyle}
+                            onStyleChange={(newStyle) => {
+                              if (project) {
+                                updateProject(projectId, { style: newStyle });
+                                setProject({ ...project, style: newStyle });
+                              }
+                            }}
+                            instruments={instruments}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-
-            {/* Horizontal Bottom Panel - Band Console (Unified) */}
-            <div
-              className={`bg-gray-950 border-t border-gray-800 flex flex-col transition-all duration-300 ease-in-out ${
-                sidePanelOpen ? "h-64" : "h-0"
-              } overflow-hidden`}
-              style={{ height: sidePanelOpen ? `${sidePanelWidth}px` : "0px" }}
-            >
-              {sidePanelOpen && (
-                <>
-                  {/* Panel Header */}
-                  <div className="p-2 border-b border-gray-800 flex items-center justify-between">
-                    <h3 className="text-white font-semibold text-sm">
-                      Performance Deck
-                    </h3>
-                    <button
-                      onClick={() => setSidePanelOpen(false)}
-                      className="text-gray-400 hover:text-white p-1"
-                      title="Hide panel"
-                    >
-                      <FaTimes size={14} />
-                    </button>
-                  </div>
-
-                  {/* Unified Band Console */}
-                  <div className="flex-1 overflow-hidden">
-                    <BandConsole
-                      selectedChordIndex={selectedChordIndex}
-                      onChordSelect={handleChordSelect}
-                      onAddChord={handleAddChordFromDeck}
-                      projectKey={projectKey}
-                      bandSettings={bandSettings}
-                      onSettingsChange={setBandSettings}
-                      style={projectStyle}
-                      onStyleChange={(newStyle) => {
-                        if (project) {
-                          updateProject(projectId, { style: newStyle });
-                          setProject({ ...project, style: newStyle });
-                        }
-                      }}
-                      instruments={instruments}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Resize Handle - Horizontal */}
-            {sidePanelOpen && (
-              <div
-                className="h-1 bg-gray-800 hover:bg-gray-700 cursor-row-resize transition-colors"
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  const startY = e.clientY;
-                  const startHeight = sidePanelWidth;
-
-                  const handleMouseMove = (moveEvent) => {
-                    const diff = startY - moveEvent.clientY; // Inverted for bottom panel
-                    const newHeight = Math.max(
-                      200,
-                      Math.min(500, startHeight + diff)
-                    );
-                    setSidePanelWidth(newHeight);
-                  };
-
-                  const handleMouseUp = () => {
-                    document.removeEventListener("mousemove", handleMouseMove);
-                    document.removeEventListener("mouseup", handleMouseUp);
-                  };
-
-                  document.addEventListener("mousemove", handleMouseMove);
-                  document.addEventListener("mouseup", handleMouseUp);
-                }}
-              />
-            )}
-
-            {/* Toggle Bottom Panel Button */}
-            {!sidePanelOpen && (
-              <button
-                onClick={() => setSidePanelOpen(true)}
-                className="absolute bottom-0 left-1/2 -translate-x-1/2 z-50 bg-gray-800 hover:bg-gray-700 text-white p-2 rounded-t-lg border-t border-gray-700 shadow-lg"
-                title="Show tools panel"
-              >
-                <FaPalette size={14} />
-              </button>
-            )}
           </div>
 
           {trackContextMenu.isOpen && menuTrack && (
