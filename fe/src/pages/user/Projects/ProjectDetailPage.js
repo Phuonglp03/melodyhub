@@ -23,6 +23,7 @@ import {
   FaPause,
   FaChevronDown,
   FaChevronUp,
+  FaUserPlus,
 } from "react-icons/fa";
 import { RiPulseFill } from "react-icons/ri";
 import {
@@ -73,6 +74,9 @@ import ProjectLickLibrary from "../../../components/ProjectLickLibrary";
 import ProjectExportButton from "../../../components/ProjectExportButton";
 import ChordBlock from "../../../components/ChordBlock";
 import BandConsole from "../../../components/BandConsole";
+import CollaboratorAvatars from "../../../components/CollaboratorAvatars";
+import InviteCollaboratorModal from "../../../components/InviteCollaboratorModal";
+import { useProjectCollaboration } from "../../../hooks/useProjectCollaboration";
 import {
   DEFAULT_BAND_MEMBERS,
   deriveLegacyMixFromMembers,
@@ -970,6 +974,123 @@ const ProjectDetailPage = () => {
   const navigate = useNavigate();
   const user = useSelector((state) => state.auth.user);
 
+  // Initialize collaboration (Phase 2: Frontend Middleware)
+  const { broadcast, broadcastCursor } = useProjectCollaboration(
+    projectId,
+    user
+  );
+  const isRemoteUpdateRef = useRef(false);
+  const refreshProjectRef = useRef(null);
+
+  // Phase 4: Collaborator presence state
+  const [collaborators, setCollaborators] = useState([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+
+  // Listen for remote collaboration updates
+  useEffect(() => {
+    const handleRemoteChordProgression = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      isRemoteUpdateRef.current = true;
+      const { chords } = e.detail;
+      saveChordProgression(chords, true).finally(() => {
+        isRemoteUpdateRef.current = false;
+      });
+    };
+
+    const handleRemoteLickAdd = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      // Refresh project to get the new lick
+      if (refreshProjectRef.current) {
+        refreshProjectRef.current();
+      }
+    };
+
+    const handleRemoteTimelineUpdate = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      if (refreshProjectRef.current) {
+        refreshProjectRef.current();
+      }
+    };
+
+    const handleRemoteTimelineDelete = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      if (refreshProjectRef.current) {
+        refreshProjectRef.current();
+      }
+    };
+
+    const handleRemoteSettingsUpdate = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      if (refreshProjectRef.current) {
+        refreshProjectRef.current();
+      }
+    };
+
+    const handleRemotePresence = (e) => {
+      const { collaborators: remoteCollaborators } = e.detail;
+      if (remoteCollaborators) {
+        setCollaborators(remoteCollaborators);
+      }
+    };
+
+    const handleRemoteConnection = (e) => {
+      const { connected } = e.detail;
+      setIsConnected(connected);
+    };
+
+    window.addEventListener(
+      "project:remote:chordProgression",
+      handleRemoteChordProgression
+    );
+    window.addEventListener("project:remote:lickAdd", handleRemoteLickAdd);
+    window.addEventListener(
+      "project:remote:timelineUpdate",
+      handleRemoteTimelineUpdate
+    );
+    window.addEventListener(
+      "project:remote:timelineDelete",
+      handleRemoteTimelineDelete
+    );
+    window.addEventListener(
+      "project:remote:settingsUpdate",
+      handleRemoteSettingsUpdate
+    );
+    window.addEventListener("project:remote:presence", handleRemotePresence);
+    window.addEventListener(
+      "project:remote:connection",
+      handleRemoteConnection
+    );
+
+    return () => {
+      window.removeEventListener(
+        "project:remote:chordProgression",
+        handleRemoteChordProgression
+      );
+      window.removeEventListener("project:remote:lickAdd", handleRemoteLickAdd);
+      window.removeEventListener(
+        "project:remote:timelineUpdate",
+        handleRemoteTimelineUpdate
+      );
+      window.removeEventListener(
+        "project:remote:timelineDelete",
+        handleRemoteTimelineDelete
+      );
+      window.removeEventListener(
+        "project:remote:settingsUpdate",
+        handleRemoteSettingsUpdate
+      );
+      window.removeEventListener(
+        "project:remote:presence",
+        handleRemotePresence
+      );
+      window.removeEventListener(
+        "project:remote:connection",
+        handleRemoteConnection
+      );
+    };
+  }, []);
+
   const [project, setProject] = useState(null);
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1531,6 +1652,11 @@ const ProjectDetailPage = () => {
   );
 
   const refreshProject = useCallback(() => fetchProject(false), [fetchProject]);
+
+  // Update ref when refreshProject changes
+  useEffect(() => {
+    refreshProjectRef.current = refreshProject;
+  }, [refreshProject]);
 
   const fetchLicks = useCallback(
     async (page = 1, append = false) => {
@@ -4076,6 +4202,29 @@ const ProjectDetailPage = () => {
                   style={projectStyle}
                   bandSettings={bandSettings}
                 />
+                {/* Phase 4: Collaborator Avatars */}
+                <CollaboratorAvatars
+                  collaborators={collaborators}
+                  currentUserId={user?._id}
+                />
+                {/* Invite Collaborator Button */}
+                <button
+                  onClick={() => setInviteModalOpen(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-xs font-medium transition-colors"
+                  title="Invite collaborators"
+                >
+                  <FaUserPlus size={12} />
+                  <span>Invite</span>
+                </button>
+                {/* Connection Status Indicator */}
+                {isConnected && (
+                  <div className="flex items-center gap-1 px-2 py-1 bg-green-900/20 border border-green-700/50 rounded-full">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-[10px] text-green-400 uppercase">
+                      Live
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-between text-[11px] text-gray-400 mt-2">
@@ -4240,12 +4389,50 @@ const ProjectDetailPage = () => {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedChordIndex(idx);
+                                // Phase 4: Broadcast cursor position
+                                if (broadcastCursor) {
+                                  broadcastCursor(null, idx); // For ProjectDetailPage, use chord index
+                                }
                               }}
                             >
-                              <ChordBlock
-                                chordName={chordName}
-                                isSelected={isSelected}
-                              />
+                              {/* Phase 4: Remote cursor indicators */}
+                              {collaborators
+                                .filter((c) => c.cursor?.barIndex === idx)
+                                .map((collab) => (
+                                  <div
+                                    key={collab.userId}
+                                    className="absolute -top-1 -right-1 z-30 flex items-center gap-1 bg-green-500/90 text-black text-[8px] px-1.5 py-0.5 rounded-full border border-white/50 shadow-lg"
+                                  >
+                                    {collab.user?.avatarUrl ? (
+                                      <img
+                                        src={collab.user.avatarUrl}
+                                        alt={collab.user.displayName}
+                                        className="w-3 h-3 rounded-full"
+                                      />
+                                    ) : (
+                                      <div className="w-3 h-3 rounded-full bg-indigo-600"></div>
+                                    )}
+                                    <span className="font-semibold">
+                                      {collab.user?.displayName ||
+                                        collab.user?.username ||
+                                        "User"}
+                                    </span>
+                                  </div>
+                                ))}
+                              <div
+                                className={`relative ${
+                                  collaborators.some(
+                                    (c) => c.cursor?.barIndex === idx
+                                  )
+                                    ? "ring-2 ring-green-500/50 ring-offset-1 ring-offset-gray-950"
+                                    : ""
+                                }`}
+                              >
+                                <ChordBlock
+                                  chordName={chordName}
+                                  isSelected={isSelected}
+                                />
+                              </div>
                             </div>
                           );
                         })}
@@ -5106,6 +5293,30 @@ const ProjectDetailPage = () => {
           <AIGenerationLoadingModal
             isOpen={isGeneratingAI}
             message="✨ Creating your professional AI backing track..."
+          />
+
+          {/* Invite Collaborator Modal */}
+          <InviteCollaboratorModal
+            isOpen={inviteModalOpen}
+            onClose={() => setInviteModalOpen(false)}
+            projectId={projectId}
+            currentUserId={user?._id}
+            onCollaboratorAdded={(newCollaborator) => {
+              // Refresh project to get updated collaborator list
+              if (refreshProjectRef.current) {
+                refreshProjectRef.current();
+              }
+            }}
+            onCollaboratorRemoved={(userId) => {
+              // Update local state
+              setCollaborators((prev) =>
+                prev.filter((c) => (c.userId || c._id) !== userId)
+              );
+              // Refresh project
+              if (refreshProjectRef.current) {
+                refreshProjectRef.current();
+              }
+            }}
           />
 
           {/* AI Notification Toast */}

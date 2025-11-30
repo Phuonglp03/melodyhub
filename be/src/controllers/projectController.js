@@ -2111,6 +2111,126 @@ export const getInstruments = async (req, res) => {
   }
 };
 
+// Phase 5: Invite collaborator to project
+export const inviteCollaborator = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { email, role = "contributor" } = req.body;
+    const userId = req.userId;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    // Validate role
+    const validRoles = ["viewer", "contributor", "admin"];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+      });
+    }
+
+    // Find project
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    // Check if user is owner or admin
+    const isOwner = String(project.creatorId) === String(userId);
+    const userCollaborator = await ProjectCollaborator.findOne({
+      projectId,
+      userId,
+      role: { $in: ["admin"] },
+    });
+
+    if (!isOwner && !userCollaborator) {
+      return res.status(403).json({
+        success: false,
+        message: "Only project owners and admins can invite collaborators",
+      });
+    }
+
+    // Find user by email
+    const invitedUser = await User.findOne({ email: email.toLowerCase() });
+    if (!invitedUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User with this email not found",
+      });
+    }
+
+    // Check if already a collaborator
+    const existingCollaborator = await ProjectCollaborator.findOne({
+      projectId,
+      userId: invitedUser._id,
+    });
+
+    if (existingCollaborator) {
+      // Update role if different
+      if (existingCollaborator.role !== role) {
+        existingCollaborator.role = role;
+        await existingCollaborator.save();
+        return res.json({
+          success: true,
+          message: "Collaborator role updated",
+          data: {
+            collaborator: existingCollaborator,
+            user: {
+              _id: invitedUser._id,
+              displayName: invitedUser.displayName,
+              username: invitedUser.username,
+              avatarUrl: invitedUser.avatarUrl,
+              email: invitedUser.email,
+            },
+          },
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: "User is already a collaborator with this role",
+      });
+    }
+
+    // Create new collaborator
+    const collaborator = new ProjectCollaborator({
+      projectId,
+      userId: invitedUser._id,
+      role,
+    });
+    await collaborator.save();
+
+    res.status(201).json({
+      success: true,
+      message: "Collaborator invited successfully",
+      data: {
+        collaborator,
+        user: {
+          _id: invitedUser._id,
+          displayName: invitedUser.displayName,
+          username: invitedUser.username,
+          avatarUrl: invitedUser.avatarUrl,
+          email: invitedUser.email,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error inviting collaborator:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to invite collaborator",
+      error: error.message,
+    });
+  }
+};
+
 // Get rhythm patterns
 // export const getRhythmPatterns = async (req, res) => {
 //   try {

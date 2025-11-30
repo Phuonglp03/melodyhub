@@ -19,6 +19,7 @@ import {
   getRhythmPatterns,
   applyRhythmPattern,
   generateBackingTrack,
+  inviteCollaborator,
 } from "../controllers/projectController.js";
 import { generateAIBackingTrack } from "../controllers/sunoAIController.js";
 import middlewareController from "../middleware/auth.js";
@@ -69,6 +70,20 @@ router.get("/instruments", getInstruments);
 
 // Get rhythm patterns - MUST be before /:projectId route
 router.get("/rhythm-patterns", getRhythmPatterns);
+
+// Phase 5: Invite collaborator - MUST be before /:projectId route
+router.post(
+  "/:projectId/invite",
+  [
+    body("email").trim().isEmail().withMessage("Valid email is required"),
+    body("role")
+      .optional()
+      .isIn(["viewer", "contributor", "admin"])
+      .withMessage("Role must be viewer, contributor, or admin"),
+  ],
+  validate,
+  inviteCollaborator
+);
 
 router.get("/:projectId", getProjectById);
 
