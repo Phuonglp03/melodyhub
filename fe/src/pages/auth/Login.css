@@ -97,7 +97,6 @@
   justify-content: space-between;
   align-items: center;
   padding: 1.75rem 3rem;
-  backdrop-filter: blur(12px);
   background: rgba(10, 10, 10, 0.4);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -200,7 +199,6 @@
 /* Enhanced Login Card with Glassmorphism */
 .login-card {
   background: rgba(18, 18, 18, 0.75);
-  backdrop-filter: blur(40px) saturate(150%);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 28px;
   padding: 3.5rem 3rem;
@@ -653,7 +651,6 @@
   display: inline-flex !important;
   align-items: center !important;
   background: rgba(18, 18, 18, 0.95) !important;
-  backdrop-filter: blur(24px) saturate(150%) !important;
   border: 1px solid rgba(139, 92, 246, 0.5) !important;
   border-radius: 14px !important;
   padding: 16px 28px !important;
