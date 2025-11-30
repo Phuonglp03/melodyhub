@@ -602,6 +602,7 @@ export const convertMIDIToAudioJS = async (midiFilePath, options = {}) => {
 
 /**
  * Convert Float32Array audio buffer to WAV file buffer
+ * Internal implementation (not using external audiobuffer-to-wav package)
  * @param {Float32Array} audioBuffer - Audio samples (interleaved stereo)
  * @param {Number} sampleRate - Sample rate (e.g., 44100)
  * @returns {ArrayBuffer} - WAV file buffer

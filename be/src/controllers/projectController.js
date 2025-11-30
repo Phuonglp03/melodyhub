@@ -56,7 +56,9 @@ const ensureProjectCoreFields = (project) => {
     typeof project.timeSignature.denominator !== "number";
 
   if (needsTimeSignatureNormalization) {
-    project.timeSignature = normalizeTimeSignaturePayload(project.timeSignature);
+    project.timeSignature = normalizeTimeSignaturePayload(
+      project.timeSignature
+    );
   }
 };
 
@@ -470,7 +472,9 @@ export const patchProject = async (req, res) => {
       updates.key = normalizeKeyPayload(updates.key);
     }
     if (updates.timeSignature !== undefined) {
-      updates.timeSignature = normalizeTimeSignaturePayload(updates.timeSignature);
+      updates.timeSignature = normalizeTimeSignaturePayload(
+        updates.timeSignature
+      );
     }
     if (updates.swingAmount !== undefined) {
       updates.swingAmount = clampSwingAmount(updates.swingAmount);
@@ -1625,14 +1629,10 @@ export const generateBackingTrack = async (req, res) => {
       });
     }
 
-    // Find or create backing track - check both trackType and isBackingTrack
+    // Find or create backing track - use dedicated fields only (no regex fallback)
     let backingTrack = await ProjectTrack.findOne({
       projectId: project._id,
-      $or: [
-        { trackType: "backing" },
-        { isBackingTrack: true },
-        { trackName: { $regex: /backing track/i } },
-      ],
+      $or: [{ trackType: "backing" }, { isBackingTrack: true }],
     });
 
     console.log(

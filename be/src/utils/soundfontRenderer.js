@@ -1,3 +1,9 @@
+/**
+ * @deprecated This module requires OfflineAudioContext which is not available in Node.js.
+ * It will always throw an error and fall back to the legacy waveform renderer.
+ * This file is kept for reference but should not be used in production.
+ * Use midiToAudioConverter.js instead.
+ */
 import Soundfont from "soundfont-player";
 import audioBufferToWav from "audiobuffer-to-wav";
 import fetch from "node-fetch";
@@ -171,9 +177,9 @@ const midiToNoteName = (midiNumber) => {
 
 const getChordMidiNotes = (chord) => {
   if (Array.isArray(chord?.midiNotes) && chord.midiNotes.length) {
-    return chord.midiNotes.map((note) => Number(note)).filter(
-      (note) => !Number.isNaN(note)
-    );
+    return chord.midiNotes
+      .map((note) => Number(note))
+      .filter((note) => !Number.isNaN(note));
   }
   if (chord?.chordName) {
     return chordNameToMidiNotes(chord.chordName);
@@ -248,15 +254,11 @@ export const renderChordsWithSoundfont = async (chords = [], options = {}) => {
 
     const patchName = resolvePatchName(soundfontKey, instrumentProgram);
 
-    const instrument = await Soundfont.instrument(
-      offlineContext,
-      patchName,
-      {
-        format: "mp3",
-        soundfont: DEFAULT_SOUNDFONT,
-        gain: 1,
-      }
-    );
+    const instrument = await Soundfont.instrument(offlineContext, patchName, {
+      format: "mp3",
+      soundfont: DEFAULT_SOUNDFONT,
+      gain: 1,
+    });
 
     chords.forEach((chord, index) => {
       const midiNotes = getChordMidiNotes(chord);
@@ -297,4 +299,3 @@ export const renderChordsWithSoundfont = async (chords = [], options = {}) => {
 };
 
 export default renderChordsWithSoundfont;
-
