@@ -35,14 +35,18 @@ export const getProjectById = async (projectId) => {
   }
 };
 
-// Update project
+// Update project (partial)
 export const updateProject = async (projectId, projectData) => {
   try {
-    const res = await api.put(`/projects/${projectId}`, projectData);
+    const res = await api.patch(`/projects/${projectId}`, projectData);
     return res.data;
   } catch (error) {
-    console.error("Error updating project:", error);
-    throw error;
+    const message =
+      error?.response?.data?.message ||
+      error?.message ||
+      "Failed to update project";
+    console.error("Error updating project:", error?.response || error);
+    throw new Error(message);
   }
 };
 
@@ -168,7 +172,10 @@ export const getInstruments = async () => {
   } catch (error) {
     console.error("Error fetching instruments:", error);
     // Provide more specific error message
-    const errorMessage = error?.response?.data?.message || error?.message || "Failed to fetch instruments";
+    const errorMessage =
+      error?.response?.data?.message ||
+      error?.message ||
+      "Failed to fetch instruments";
     throw new Error(errorMessage);
   }
 };
@@ -185,7 +192,11 @@ export const getRhythmPatterns = async () => {
 };
 
 // Apply rhythm pattern to timeline item
-export const applyRhythmPattern = async (projectId, itemId, rhythmPatternId) => {
+export const applyRhythmPattern = async (
+  projectId,
+  itemId,
+  rhythmPatternId
+) => {
   try {
     const res = await api.put(
       `/projects/${projectId}/timeline/items/${itemId}/apply-pattern`,
@@ -212,11 +223,13 @@ export const generateBackingTrack = async (projectId, data) => {
 // Generate AI backing track with Suno
 export const generateAIBackingTrack = async (projectId, data) => {
   try {
-    const res = await api.post(`/projects/${projectId}/generate-ai-backing`, data);
+    const res = await api.post(
+      `/projects/${projectId}/generate-ai-backing`,
+      data
+    );
     return res.data;
   } catch (error) {
     console.error("Error generating AI backing track:", error);
     throw error;
   }
 };
-

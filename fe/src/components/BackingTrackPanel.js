@@ -9,6 +9,7 @@ import {
   FaTimes,
 } from "react-icons/fa";
 import { getMidiNotesForChord, midiToNoteNameNoOctave } from "../utils/midi";
+import { getKeyDisplayName } from "../utils/musicTheory";
 
 /**
  * BackingTrackPanel Component - Enhanced UI for easier backing track creation
@@ -51,6 +52,7 @@ const BackingTrackPanel = ({
   const selectedRhythm = rhythmPatterns.find(
     (r) => r._id === selectedRhythmPatternId
   );
+  const projectKeyDisplay = getKeyDisplayName(project?.key);
 
   const handleGenerateFullBackingTrack = () => {
     if (chordProgression.length === 0) {
@@ -101,7 +103,7 @@ const BackingTrackPanel = ({
           instrument: selectedInstrument?.name || "Piano",
           style: aiStyle,
           tempo: project.tempo || 120,
-          key: project.key || "C Major",
+          key: projectKeyDisplay || "C Major",
           duration: chordProgression.length * chordDuration,
         });
       }
