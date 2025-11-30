@@ -77,7 +77,7 @@ const Login = () => {
       }
     } catch (error) {
       console.error('Login error:', error);
-      // Error message will be shown by the useEffect hook
+      messageApi.error(error || 'Login failed. Please try again.');
     }
   };
 
