@@ -234,19 +234,21 @@ const updateInstrumentMix = (instance, member) => {
 };
 
 const triggerPercussion = (instance, pattern, beatInBar, time) => {
+  if (!instance?.nodes) return;
   const drumsPattern = pattern?.drums || {};
   if (drumsPattern.kick?.includes(beatInBar)) {
-    instance.nodes.kick.triggerAttackRelease("C1", "8n", time);
+    instance.nodes.kick?.triggerAttackRelease("C1", "8n", time);
   }
   if (drumsPattern.snare?.includes(beatInBar)) {
-    instance.nodes.snare.triggerAttackRelease("8n", time);
+    instance.nodes.snare?.triggerAttackRelease("8n", time);
   }
   if (drumsPattern.hihat?.includes(beatInBar)) {
-    instance.nodes.hihat.triggerAttackRelease("32n", time);
+    instance.nodes.hihat?.triggerAttackRelease("32n", time);
   }
 };
 
 const triggerBass = (instance, pattern, notes, beatInBar, time) => {
+  if (!instance?.node) return;
   if (!notes || !notes.length) return;
   if (!pattern?.bass?.includes(beatInBar)) return;
   const bassNote = notes[0].replace("3", "2");
@@ -254,6 +256,7 @@ const triggerBass = (instance, pattern, notes, beatInBar, time) => {
 };
 
 const triggerComping = (instance, pattern, notes, beatInBar, time) => {
+  if (!instance?.node) return;
   if (!notes || !notes.length) return;
   const rhythm = pattern?.piano || [0];
   if (!rhythm.includes(beatInBar)) return;
@@ -261,6 +264,7 @@ const triggerComping = (instance, pattern, notes, beatInBar, time) => {
 };
 
 const triggerPad = (instance, notes, beatInBar, time) => {
+  if (!instance?.node) return;
   if (!notes || !notes.length) return;
   if (beatInBar !== 0) return;
   instance.node.triggerAttackRelease(notes, "1m", time, 0.7);

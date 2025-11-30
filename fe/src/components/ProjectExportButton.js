@@ -9,7 +9,7 @@ export default function ProjectExportButton({
   projectName,
   chordProgression = [],
   bpm = 120,
-  key: projectKey = "C",
+  projectKey = "C",
   style = "Swing",
   bandSettings = {
     volumes: { drums: 0.8, bass: 0.8, piano: 0.8 },

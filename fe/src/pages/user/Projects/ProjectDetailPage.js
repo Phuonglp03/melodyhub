@@ -66,11 +66,12 @@ import {
 import { useAudioEngine } from "../../../hooks/useAudioEngine";
 import { useAudioScheduler } from "../../../hooks/useAudioScheduler";
 import { AudioTransportControls } from "../../../components/audio";
-import { DndProvider } from "react-dnd";
+import { DndProvider, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import ProjectBandEngine from "../../../components/ProjectBandEngine";
 import ProjectLickLibrary from "../../../components/ProjectLickLibrary";
 import ProjectExportButton from "../../../components/ProjectExportButton";
+import ChordBlock from "../../../components/ChordBlock";
 import BandConsole from "../../../components/BandConsole";
 import {
   DEFAULT_BAND_MEMBERS,
@@ -885,6 +886,83 @@ const getChordIndexFromId = (itemId) => {
   const parts = itemId.split("-");
   const index = parseInt(parts[1], 10);
   return Number.isNaN(index) ? null : index;
+};
+
+// Component to handle react-dnd drops on tracks
+const TrackDropZone = ({
+  trackId,
+  track,
+  timelineRef,
+  pixelsPerSecond,
+  secondsPerBeat,
+  applyMagnet,
+  handleDrop,
+  setDraggedLick,
+  children,
+  className,
+  style,
+}) => {
+  const [{ isOver }, dropRef] = useDrop(
+    () => ({
+      accept: "PROJECT_LICK",
+      drop: (item, monitor) => {
+        if (!timelineRef.current) return;
+
+        const clientOffset = monitor.getClientOffset();
+        if (!clientOffset) return;
+
+        const trackRect = timelineRef.current.getBoundingClientRect();
+        const scrollLeft = timelineRef.current.scrollLeft || 0;
+        const x = clientOffset.x - trackRect.left + scrollLeft;
+        const rawTime = Math.max(
+          0,
+          Math.round(x / pixelsPerSecond / secondsPerBeat) * secondsPerBeat
+        );
+        const snapped = applyMagnet(rawTime, track, null);
+
+        // Set the dragged lick state so handleDrop can use it
+        setDraggedLick(item);
+
+        // Create a synthetic event for handleDrop
+        const syntheticEvent = {
+          preventDefault: () => {},
+        };
+        // handleDrop will clear draggedLick when it's done
+        handleDrop(syntheticEvent, trackId, snapped).catch((error) => {
+          console.error("Error handling drop:", error);
+          setDraggedLick(null);
+        });
+      },
+      collect: (monitor) => ({
+        isOver: monitor.isOver(),
+      }),
+    }),
+    [
+      trackId,
+      track,
+      timelineRef,
+      pixelsPerSecond,
+      secondsPerBeat,
+      applyMagnet,
+      handleDrop,
+      setDraggedLick,
+    ]
+  );
+
+  return (
+    <div
+      ref={dropRef}
+      className={className}
+      style={{
+        ...style,
+        backgroundColor: isOver
+          ? "rgba(255,255,255,0.06)"
+          : style?.backgroundColor || "transparent",
+      }}
+    >
+      {children}
+    </div>
+  );
 };
 
 const ProjectDetailPage = () => {
@@ -3994,7 +4072,7 @@ const ProjectDetailPage = () => {
                   projectName={project?.name || project?.title || "Untitled"}
                   chordProgression={chordProgression}
                   bpm={project?.bpm || 120}
-                  key={projectKey}
+                  projectKey={projectKey}
                   style={projectStyle}
                   bandSettings={bandSettings}
                 />
@@ -4134,42 +4212,40 @@ const ProjectDetailPage = () => {
 
                     {/* 1. MASTER CHORD TRACK (Fixed at Top) */}
                     <div
-                      className="flex border-b border-gray-900 bg-[#090d17]"
-                      style={{ minHeight: "78px" }}
+                      className="flex border-b border-gray-800/50 bg-gray-950/50"
+                      style={{ minHeight: "56px" }}
                     >
-                      <div className="w-64 border-r border-gray-900 px-3 py-2 bg-[#070910] sticky left-0 z-20 flex flex-col justify-center gap-1">
-                        <span className="text-[11px] font-semibold text-indigo-200 uppercase tracking-[0.25em]">
+                      <div className="w-64 border-r border-gray-800/50 px-3 py-2 bg-gray-950 sticky left-0 z-20 flex flex-col justify-center">
+                        <span className="text-[11px] font-medium text-gray-300 uppercase tracking-wide">
                           Structure
-                        </span>
-                        <span className="text-[10px] text-gray-500">
-                          Chord roadmap
                         </span>
                       </div>
 
-                      <div className="flex-1 relative min-w-0 bg-[#05070d]">
+                      <div className="flex-1 relative min-w-0 bg-gray-950/30">
                         {chordProgression.map((chord, idx) => {
                           const startTime = idx * chordDurationSeconds;
                           const width = chordDurationSeconds * pixelsPerSecond;
                           const isSelected = selectedChordIndex === idx;
+                          const chordName =
+                            chord.chordName || chord.chord || "Chord";
 
                           return (
                             <div
                               key={`chord-${idx}`}
-                              className={`absolute inset-y-2 rounded-md px-3 flex items-center justify-center text-[11px] font-semibold tracking-wide uppercase cursor-pointer transition-all ${
-                                isSelected
-                                  ? "bg-indigo-500/80 text-white shadow-[0_0_18px_rgba(99,102,241,0.45)]"
-                                  : "bg-indigo-500/20 text-indigo-100 hover:bg-indigo-500/30"
-                              }`}
+                              className="absolute inset-0"
                               style={{
                                 left: `${startTime * pixelsPerSecond}px`,
-                                width: `${Math.max(width, 32)}px`,
+                                width: `${Math.max(width, 40)}px`,
                               }}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedChordIndex(idx);
                               }}
                             >
-                              {chord.chordName || chord.chord || "Chord"}
+                              <ChordBlock
+                                chordName={chordName}
+                                isSelected={isSelected}
+                              />
                             </div>
                           );
                         })}
@@ -4297,52 +4373,20 @@ const ProjectDetailPage = () => {
                               />
                             </div>
                           </div>
-                          <div
+                          <TrackDropZone
+                            trackId={track._id}
+                            track={track}
+                            timelineRef={timelineRef}
+                            pixelsPerSecond={pixelsPerSecond}
+                            secondsPerBeat={secondsPerBeat}
+                            applyMagnet={applyMagnet}
+                            handleDrop={handleDrop}
+                            setDraggedLick={setDraggedLick}
                             className="relative flex-1"
                             style={{
                               backgroundColor: isHoveringTrack
                                 ? "rgba(255,255,255,0.04)"
                                 : "transparent",
-                            }}
-                            onDragOver={(e) => {
-                              e.preventDefault();
-                              if (!timelineRef.current) return;
-                              const trackRect =
-                                e.currentTarget.getBoundingClientRect();
-                              const scrollLeft =
-                                timelineRef.current.scrollLeft || 0;
-                              const x = e.clientX - trackRect.left + scrollLeft;
-                              const startTime = Math.max(
-                                0,
-                                Math.round(
-                                  x / pixelsPerSecond / secondsPerBeat
-                                ) * secondsPerBeat
-                              );
-                              setDragOverTrack(track._id);
-                              setDragOverPosition(startTime);
-                            }}
-                            onDragLeave={() => {
-                              setDragOverTrack(null);
-                              setDragOverPosition(null);
-                            }}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              if (!timelineRef.current) return;
-                              const trackRect =
-                                e.currentTarget.getBoundingClientRect();
-                              const scrollLeft =
-                                timelineRef.current.scrollLeft || 0;
-                              const x = e.clientX - trackRect.left + scrollLeft;
-                              const rawTime = Math.max(
-                                0,
-                                Math.round(
-                                  x / pixelsPerSecond / secondsPerBeat
-                                ) * secondsPerBeat
-                              );
-                              const snapped = applyMagnet(rawTime, track, null);
-                              handleDrop(e, track._id, snapped);
-                              setDragOverTrack(null);
-                              setDragOverPosition(null);
                             }}
                           >
                             {/* Wavy Background Pattern */}
@@ -4841,7 +4885,7 @@ const ProjectDetailPage = () => {
                                   }}
                                 />
                               )}
-                          </div>
+                          </TrackDropZone>
                         </div>
                       );
                     })}
