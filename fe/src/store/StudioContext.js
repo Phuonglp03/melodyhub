@@ -45,8 +45,19 @@ const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9
 
 const getDiatonicChords = (key) => {
   const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-  const keyIndex = notes.indexOf(key.replace('m', ''));
-  const isMinor = key.includes('m');
+  
+  // Handle key as object (new format) or string (legacy format)
+  let keyString;
+  if (typeof key === "object" && key !== null) {
+    // New format: { root, scale, name }
+    keyString = key.name || `${notes[key.root || 0]} ${key.scale === "minor" ? "Minor" : "Major"}`;
+  } else {
+    // Legacy format: string
+    keyString = key || "C Major";
+  }
+  
+  const keyIndex = notes.indexOf(keyString.replace('m', '').replace(' Major', '').replace(' Minor', '').split(' ')[0] || 'C');
+  const isMinor = keyString.toLowerCase().includes('minor') || (keyString.toLowerCase().includes('m') && !keyString.toLowerCase().includes('major'));
 
   if (isMinor) {
     const intervals = [0, 2, 3, 5, 7, 8, 10];

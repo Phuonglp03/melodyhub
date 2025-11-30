@@ -462,6 +462,20 @@ export const patchProject = async (req, res) => {
       });
     }
 
+    // Normalize and validate music theory fields before updating
+    if (updates.tempo !== undefined) {
+      updates.tempo = clampTempo(updates.tempo, project.tempo || 120);
+    }
+    if (updates.key !== undefined) {
+      updates.key = normalizeKeyPayload(updates.key);
+    }
+    if (updates.timeSignature !== undefined) {
+      updates.timeSignature = normalizeTimeSignaturePayload(updates.timeSignature);
+    }
+    if (updates.swingAmount !== undefined) {
+      updates.swingAmount = clampSwingAmount(updates.swingAmount);
+    }
+
     let updatedProject;
     if (clientVersion !== undefined) {
       updatedProject = await Project.findOneAndUpdate(
@@ -1187,7 +1201,7 @@ export const updateChordProgression = async (req, res) => {
     res.json({
       success: true,
       message: "Chord progression updated successfully",
-      data: project,
+      data: normalizeProjectResponse(project),
     });
   } catch (error) {
     console.error("Error updating chord progression:", error);

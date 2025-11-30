@@ -2,6 +2,7 @@
 // Chord input deck for ProjectDetailPage (inspired by Studio's MinimalChordDeck)
 import React from "react";
 import { useSelector } from "react-redux";
+import { getKeyDisplayName } from "../utils/musicTheory";
 
 // Get diatonic chords for a key
 const getDiatonicChords = (key) => {
@@ -19,8 +20,19 @@ const getDiatonicChords = (key) => {
     "A#",
     "B",
   ];
-  const keyIndex = notes.indexOf(key?.replace("m", "") || "C");
-  const isMinor = key?.includes("m");
+  
+  // Handle key as object (new format) or string (legacy format)
+  let keyString;
+  if (typeof key === "object" && key !== null) {
+    // New format: { root, scale, name }
+    keyString = getKeyDisplayName(key) || "C Major";
+  } else {
+    // Legacy format: string like "C Major" or "Am"
+    keyString = key || "C Major";
+  }
+  
+  const keyIndex = notes.indexOf(keyString.replace("m", "").replace(" Major", "").replace(" Minor", "").split(" ")[0] || "C");
+  const isMinor = keyString.toLowerCase().includes("minor") || keyString.toLowerCase().includes("m") && !keyString.toLowerCase().includes("major");
 
   if (isMinor) {
     const intervals = [0, 2, 3, 5, 7, 8, 10];

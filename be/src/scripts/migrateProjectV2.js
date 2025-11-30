@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import mongoose from "mongoose";
-import Project from "../be/src/models/Project.js";
+import Project from "../models/Project.js";
 
 const DEFAULT_MEMBERS = [
   {
@@ -93,7 +93,7 @@ const buildMembersFromLegacy = (project) => {
 };
 
 const migrateProjects = async () => {
-  await mongoose.connect(process.env.MONGODB_URI);
+  await mongoose.connect(process.env.MONGO_URI);
   console.log("[migrate] Connected, scanning projects…");
 
   const cursor = Project.find({ version: { $lt: 2 } }).cursor();

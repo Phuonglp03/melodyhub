@@ -44,14 +44,14 @@ const formatChordNotation = (chordName) => {
     return `${root}+`;
   }
 
-  // Major 7th: maj7, M7, Δ7, Δ
-  if (/maj7|^m7$|^Δ7$|^Δ$/.test(q) || q === "maj7" || q === "m7") {
+  // Major 7th: maj7, M7, Δ7, Δ (exclude m7 which is minor 7th)
+  if (/maj7|M7|^Δ7$|^Δ$/.test(q) || q === "maj7" || q === "M7") {
     // Check if it's specifically maj7 or just major
-    if (/maj7|^m7$|^Δ7$/.test(q) || q === "maj7" || q === "m7") {
+    if (/maj7|M7|^Δ7$/.test(q) || q === "maj7" || q === "M7") {
       return `${root}Δ7`;
     }
     // Just major (no 7th)
-    if (/maj$|^m$/.test(q) && !/maj7|m7/.test(q)) {
+    if (/maj$|^M$/.test(q) && !/maj7|M7|m7/.test(q)) {
       return root; // Just show root for plain major
     }
     return `${root}Δ`;
