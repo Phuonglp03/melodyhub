@@ -109,6 +109,15 @@ export const getFollowingList = async (search = '', limit = 50) => {
   return res.data;
 };
 
-export default { getMyProfile, updateMyProfile, uploadMyAvatar, uploadMyCoverPhoto, followUser, unfollowUser, getFollowSuggestions, getFollowingList };
+export const searchUsers = async (query, limit = 10) => {
+  const q = (query || '').trim();
+  if (!q) {
+    return { success: true, data: [] };
+  }
+  const res = await api.get('/users/search', { params: { q, limit } });
+  return res.data;
+};
+
+export default { getMyProfile, updateMyProfile, uploadMyAvatar, uploadMyCoverPhoto, followUser, unfollowUser, getFollowSuggestions, getFollowingList, searchUsers };
 
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Badge, Popover, Empty, Spin, Button, Typography, Avatar, Space, Divider } from 'antd';
 import { BellOutlined, CheckOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -17,16 +17,55 @@ const NotificationBell = () => {
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(1);
+  const hasInitializedUnread = useRef(false);
 
-  // Lấy số lượng thông báo chưa đọc
+  // Gửi notification cho toast container (qua window event)
+  const showToast = useCallback((notification) => {
+    try {
+      if (!notification) return;
+      window.dispatchEvent(
+        new CustomEvent('notification:toast', {
+          detail: notification,
+        })
+      );
+    } catch (e) {
+      console.warn('[NotificationBell] Không thể dispatch notification:toast', e);
+    }
+  }, []);
+
+  // Lấy số lượng thông báo chưa đọc (chủ yếu để cập nhật badge; nếu socket lỗi sẽ dùng để bắn toast fallback)
   const fetchUnreadCount = useCallback(async () => {
     try {
       const result = await getUnreadNotificationCount();
-      setUnreadCount(result.data?.unreadCount || 0);
+      const serverUnread = result.data?.unreadCount || 0;
+
+      // Lần đầu tiên load trang: chỉ sync badge, KHÔNG hiện toast cho các thông báo cũ
+      if (!hasInitializedUnread.current) {
+        hasInitializedUnread.current = true;
+        setUnreadCount(serverUnread);
+        return;
+      }
+
+      setUnreadCount((prev) => {
+        if (serverUnread > prev) {
+          // Fallback: lấy thông báo mới nhất và bắn toast nếu socket không bắt kịp
+          getNotifications({ page: 1, limit: 1 })
+            .then((res) => {
+              const newest = res.data?.notifications?.[0];
+              if (newest) {
+                showToast(newest);
+              }
+            })
+            .catch((err) => {
+              console.warn('[NotificationBell] Không thể load thông báo mới nhất:', err);
+            });
+        }
+        return serverUnread;
+      });
     } catch (error) {
       console.error('Lỗi khi lấy số lượng thông báo chưa đọc:', error);
     }
-  }, []);
+  }, [showToast]);
 
   // Lấy danh sách thông báo
   const fetchNotifications = useCallback(async (pageNum = 1, append = false) => {
@@ -163,6 +202,8 @@ const NotificationBell = () => {
       console.log('[Notification] Nhận thông báo mới:', notification);
       setNotifications(prev => [notification, ...prev]);
       setUnreadCount(prev => prev + 1);
+      // Hiển thị toast ngay khi có notification qua socket
+      showToast(notification);
     };
 
     onNotificationNew(handleNewNotification);
@@ -170,7 +211,7 @@ const NotificationBell = () => {
     return () => {
       offNotificationNew(handleNewNotification);
     };
-  }, []);
+  }, [showToast]);
 
   // Load dữ liệu khi mở popover
   useEffect(() => {
@@ -183,8 +224,8 @@ const NotificationBell = () => {
   // Load unread count khi component mount
   useEffect(() => {
     fetchUnreadCount();
-    // Refresh unread count mỗi 30 giây
-    const interval = setInterval(fetchUnreadCount, 30000);
+    // Refresh unread count định kỳ (backup nếu socket lỗi)
+    const interval = setInterval(fetchUnreadCount, 3000);
     return () => clearInterval(interval);
   }, [fetchUnreadCount]);
 

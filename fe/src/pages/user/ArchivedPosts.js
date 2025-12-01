@@ -17,11 +17,21 @@ import {
   UndoOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
-import { listArchivedPosts, restorePost, permanentlyDeletePost } from "../../services/user/post";
-import { likePost, unlikePost, getPostStats, getAllPostComments } from "../../services/user/post";
+import {
+  listArchivedPosts,
+  restorePost,
+  permanentlyDeletePost,
+} from "../../services/user/post";
+import {
+  likePost,
+  unlikePost,
+  getPostStats,
+  getAllPostComments,
+} from "../../services/user/post";
 import { useNavigate } from "react-router-dom";
 import PostLickEmbed from "../../components/PostLickEmbed";
 import { onPostDeleted, offPostDeleted } from "../../services/user/socketService";
+import "./ArchivedPostsResponsive.css";
 
 const { Text } = Typography;
 
@@ -260,21 +270,13 @@ const ArchivedPosts = () => {
   };
 
   return (
-    <div
-      style={{
-        maxWidth: 1200,
-        margin: "0 auto",
-        padding: "24px",
-        background: "#0a0a0a",
-        minHeight: "100vh",
-      }}
-    >
+    <div className="archived-posts-page">
       <div style={{ marginBottom: 24 }}>
         <Button
           icon={<ArrowLeftOutlined />}
           onClick={() => navigate(-1)}
           style={{ marginBottom: 16 }}
-        >
+            >
           Quay lại
         </Button>
         <Typography.Title level={2} style={{ color: "#fff", margin: 0 }}>
@@ -326,6 +328,7 @@ const ArchivedPosts = () => {
               }}
             >
               <div
+                className="archived-post-card-header"
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -370,7 +373,7 @@ const ArchivedPosts = () => {
                     </div>
                   </div>
                 </Space>
-                <Space>
+                <Space className="archived-post-card-header-actions">
                   <Button
                     icon={<UndoOutlined />}
                     loading={restoringPostId === post._id}
@@ -393,16 +396,7 @@ const ArchivedPosts = () => {
               </div>
 
               {post?.textContent && (
-                <div
-                  style={{
-                    marginBottom: 10,
-                    color: "#fff",
-                    fontSize: 15,
-                    lineHeight: 1.6,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
+                <div className="archived-post-content">
                   {post.textContent}
                 </div>
               )}
@@ -438,23 +432,8 @@ const ArchivedPosts = () => {
                   rel="noreferrer"
                   style={{ textDecoration: "none" }}
                 >
-                  <div
-                    style={{
-                      border: "1px solid #303030",
-                      borderRadius: 8,
-                      padding: 12,
-                      background: "#111",
-                      color: "#e5e7eb",
-                      marginTop: 8,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 12,
-                        alignItems: "center",
-                      }}
-                    >
+                  <div className="archived-post-link-preview">
+                    <div className="archived-post-link-preview-body">
                       {post.linkPreview?.thumbnailUrl ? (
                         <img
                           src={post.linkPreview.thumbnailUrl}
@@ -507,6 +486,7 @@ const ArchivedPosts = () => {
               )}
 
               <Space
+                className="archived-post-footer-actions"
                 style={{
                   marginTop: 14,
                   display: "flex",

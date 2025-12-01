@@ -180,6 +180,24 @@ const ProfilePage = () => {
     }
   };
 
+  const handleBackToProfile = () => {
+    try {
+      const raw = localStorage.getItem('user');
+      if (raw) {
+        const obj = JSON.parse(raw);
+        const u = obj?.user || obj;
+        const userId = u?.id || u?.userId || u?._id;
+        if (userId) {
+          navigate(`/users/${userId}/newfeeds`);
+          return;
+        }
+      }
+    } catch (e) {
+      // ignore and use fallback
+    }
+    navigate('/newfeeds');
+  };
+
   const onFinish = async (values) => {
     setSaving(true);
     try {
@@ -287,7 +305,7 @@ const ProfilePage = () => {
       <div className="profile-settings-layout">
         <div className="profile-settings-sider">
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Button icon={<ArrowLeftOutlined />} style={{ height: 44 }} block>
+            <Button icon={<ArrowLeftOutlined />} style={{ height: 44 }} block onClick={handleBackToProfile}>
               Back to Profile
             </Button>
             <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f', padding: 0 }} bodyStyle={{ padding: 0 }}>
@@ -394,9 +412,9 @@ const ProfilePage = () => {
             <Input disabled style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
           </Form.Item>
 
-          {/* <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Location</Text>} name="location">
+          <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Location</Text>} name="location">
             <Input placeholder="Search City" style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
-          </Form.Item> */}
+          </Form.Item>
 
           <Form.Item
             label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Address Line</Text>}

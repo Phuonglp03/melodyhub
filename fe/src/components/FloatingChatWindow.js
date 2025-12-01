@@ -130,7 +130,8 @@ const FloatingChatWindow = ({
   const peerAvatar = peerInfo?.avatarUrl || peer?.avatarUrl;
 
   // Check if current user is requester
-  const isRequester = conversation?.requestedBy && String(conversation.requestedBy) === String(currentUserId);
+  const isRequester =
+    conversation?.requestedBy && String(conversation.requestedBy) === String(currentUserId);
 
   // Messages hook
   const {
@@ -348,8 +349,8 @@ const FloatingChatWindow = ({
         </div>
       </div>
 
-      {/* Pending banner for receiver */}
-      {(conversation?.status === 'pending' && !isRequester) && (
+      {/* Pending / declined banner trong cửa sổ chat */}
+      {conversation?.status === 'pending' && !isRequester && (
         <div className="floating-chat-pending-banner">
           <div className="floating-chat-pending-banner-content">
             <div className="floating-chat-pending-banner-text">
@@ -410,6 +411,30 @@ const FloatingChatWindow = ({
               >
                 Từ chối
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {conversation?.status === 'pending' && isRequester && (
+        <div className="floating-chat-pending-banner floating-chat-pending-banner--requester">
+          <div className="floating-chat-pending-banner-content">
+            <div className="floating-chat-pending-banner-text">
+              <div className="floating-chat-pending-banner-title">Đang chờ chấp nhận yêu cầu</div>
+              <div className="floating-chat-pending-banner-subtitle">
+                Khi người kia chấp nhận, bạn sẽ có thể tiếp tục trò chuyện tại đây.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {conversation?.status === 'declined' && isRequester && (
+        <div className="floating-chat-pending-banner floating-chat-pending-banner--declined">
+          <div className="floating-chat-pending-banner-content">
+            <div className="floating-chat-pending-banner-text">
+              <div className="floating-chat-pending-banner-title">Yêu cầu đã bị từ chối</div>
+              <div className="floating-chat-pending-banner-subtitle">
+                Bạn không thể tiếp tục nhắn tin trong cuộc trò chuyện này.
+              </div>
             </div>
           </div>
         </div>

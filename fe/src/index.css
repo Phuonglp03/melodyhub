@@ -17,8 +17,13 @@
 }
 
 .dark-select-dropdown .ant-select-item-option-selected {
-  background: #2f2f2f !important;
+  background: #7c3aed !important;
   color: #fff !important;
+  font-weight: 500 !important;
+}
+
+.dark-select-dropdown .ant-select-item-option-selected:hover {
+  background: #8b5cf6 !important;
 }
 
 /* Custom Scrollbar */

@@ -16,6 +16,7 @@ import {
   Dropdown,
   Radio,
   Drawer,
+  Tag,
 } from "antd";
 import { 
   LikeOutlined, 
@@ -37,13 +38,42 @@ import {
 } from "../../../services/user/post";
 import { getProfileById, followUser, unfollowUser, uploadMyCoverPhoto } from "../../../services/user/profile";
 import { onPostCommentNew, offPostCommentNew, onPostArchived, offPostArchived, joinRoom } from "../../../services/user/socketService";
-import { getMyLicks } from "../../../services/user/lickService";
+import {
+  getMyLicks,
+  getLicksByUser,
+  playLickAudio,
+} from "../../../services/user/lickService";
+import {
+  getPlaylistsByUser,
+  getPlaylistById,
+} from "../../../services/user/playlistService";
+import { getUserProjects } from "../../../services/user/projectService";
+import SimpleWaveform from "../../../components/SimpleWaveform";
+import LickCard from "../../../components/LickCard";
 import { reportPost, checkPostReport } from "../../../services/user/reportService";
 import PostLickEmbed from "../../../components/PostLickEmbed";
 import "./newFeedResponsive.css";
 import { useNavigate, useParams } from "react-router-dom";
 
 const { Text } = Typography;
+
+const composerSectionStyle = {
+  background: "#141414",
+  border: "1px solid #262626",
+  borderRadius: 16,
+  padding: "18px 20px",
+};
+
+const composerLabelStyle = {
+  color: "#f8fafc",
+  fontWeight: 600,
+  fontSize: 15,
+};
+
+const composerHintStyle = {
+  color: "#9ca3af",
+  fontSize: 13,
+};
 
 const WavePlaceholder = () => (
   <div
@@ -239,6 +269,9 @@ const UserFeed = () => {
   const [availableLicks, setAvailableLicks] = useState([]);
   const [loadingLicks, setLoadingLicks] = useState(false);
   const [selectedLickIds, setSelectedLickIds] = useState([]);
+  const [availableProjects, setAvailableProjects] = useState([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [uploadingCoverPhoto, setUploadingCoverPhoto] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingPost, setEditingPost] = useState(null);
@@ -282,6 +315,18 @@ const UserFeed = () => {
   });
   const isAdminUser = (currentUserRole || '').toLowerCase() === 'admin';
   const [commentModal, commentModalContextHolder] = Modal.useModal();
+  const [activeTab, setActiveTab] = useState("activity"); // activity | licks | projects | playlists
+  const [userLicks, setUserLicks] = useState([]);
+  const [userLicksLoading, setUserLicksLoading] = useState(false);
+  const [userPlaylists, setUserPlaylists] = useState([]);
+  const [userPlaylistsLoading, setUserPlaylistsLoading] = useState(false);
+  const [userProjects, setUserProjectsState] = useState([]);
+  const [userProjectsLoading, setUserProjectsLoading] = useState(false);
+  const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
+  const [playlistModalLoading, setPlaylistModalLoading] = useState(false);
+  const [playlistDetail, setPlaylistDetail] = useState(null);
+  const [playingLickId, setPlayingLickId] = useState(null);
+  const playlistAudioRef = React.useRef(null);
   const isOwnProfile = !!currentUserId && userId && (currentUserId.toString() === userId.toString());
   const getAuthorId = (post) => {
     if (!post) return '';
@@ -300,6 +345,11 @@ const UserFeed = () => {
     return ownerId.toString() === currentUserId.toString();
   };
   const canDeleteComment = (_, post) => isAdminUser || isPostOwner(post);
+
+  const usedChars = newText?.length || 0;
+  const charPercent = maxChars
+    ? Math.min(100, Math.round((usedChars / maxChars) * 100))
+    : 0;
 
   const fetchProfile = async (id) => {
     try {
@@ -754,6 +804,17 @@ const UserFeed = () => {
   };
 
   useEffect(() => {
+    // Nếu đã chọn lick hoặc project thì không xử lý link preview nữa
+    if (selectedLickIds && selectedLickIds.length > 0) {
+      setLinkPreview(null);
+      setLinkLoading(false);
+      return;
+    }
+    if (selectedProjectId) {
+      setLinkPreview(null);
+      setLinkLoading(false);
+      return;
+    }
     const url = extractFirstUrl(newText);
     if (!url) {
       setLinkPreview(null);
@@ -762,10 +823,16 @@ const UserFeed = () => {
     let aborted = false;
     setLinkLoading(true);
     resolvePreview(url)
-      .then((data) => { if (!aborted) setLinkPreview({ url, ...data }); })
-      .finally(() => { if (!aborted) setLinkLoading(false); });
-    return () => { aborted = true; };
-  }, [newText]);
+      .then((data) => {
+        if (!aborted) setLinkPreview({ url, ...data });
+      })
+      .finally(() => {
+        if (!aborted) setLinkLoading(false);
+      });
+    return () => {
+      aborted = true;
+    };
+  }, [newText, selectedLickIds, selectedProjectId]);
 
   const fetchActiveLicks = async () => {
     try {
@@ -789,10 +856,33 @@ const UserFeed = () => {
     }
   };
 
+  const fetchActiveProjects = async () => {
+    try {
+      setLoadingProjects(true);
+      const res = await getUserProjects("all", "active");
+      if (res?.success && Array.isArray(res.data)) {
+        const formattedProjects = res.data.map((project) => ({
+          value: project._id,
+          label: project.title || "Untitled Project",
+          ...project
+        }));
+        setAvailableProjects(formattedProjects);
+      } else {
+        setAvailableProjects([]);
+      }
+    } catch (e) {
+      console.error("Error fetching active projects:", e);
+      setAvailableProjects([]);
+    } finally {
+      setLoadingProjects(false);
+    }
+  };
+
   const handleModalOpen = () => {
     setIsModalOpen(true);
     if (currentUserId) {
       fetchActiveLicks();
+      fetchActiveProjects();
     }
   };
 
@@ -800,6 +890,7 @@ const UserFeed = () => {
     if (!posting) {
       setIsModalOpen(false);
       setSelectedLickIds([]);
+      setSelectedProjectId(null);
     }
   };
 
@@ -807,11 +898,54 @@ const UserFeed = () => {
 
   const handleCreatePost = async () => {
     const trimmed = newText.trim();
-    if (!trimmed) {
-      message.warning("Vui lòng nhập nội dung");
+    const hasUrl = !!extractFirstUrl(trimmed);
+    const hasLinkPreview = hasUrl && linkPreview;
+    const hasLicks = selectedLickIds.length > 0;
+    const hasProject = !!selectedProjectId;
+    
+    // Kiểm tra: nếu có URL trong text và đã chọn lick, không cho đăng
+    if (hasUrl && hasLicks) {
+      commentModal.warning({
+        title: "Chỉ được chọn 1 loại đính kèm",
+        content:
+          "Bạn đã chọn Lick và có Link trong nội dung. Chỉ được chọn 1 trong 3: Project, Lick, hoặc Link. Vui lòng xóa link trong nội dung hoặc bỏ chọn Lick trước khi đăng.",
+      });
       return;
     }
-    if (trimmed.length > MAX_POST_TEXT_LENGTH) {
+    
+    // Kiểm tra: nếu có URL trong text và đã chọn project, không cho đăng
+    if (hasUrl && hasProject) {
+      commentModal.warning({
+        title: "Chỉ được chọn 1 loại đính kèm",
+        content:
+          "Bạn đã chọn Project và có Link trong nội dung. Chỉ được chọn 1 trong 3: Project, Lick, hoặc Link. Vui lòng xóa link trong nội dung hoặc bỏ chọn Project trước khi đăng.",
+      });
+      return;
+    }
+    
+    // Đếm số lượng loại đính kèm được chọn
+    const attachmentCount = (hasLinkPreview ? 1 : 0) + (hasLicks ? 1 : 0) + (hasProject ? 1 : 0);
+    
+    // Kiểm tra: chỉ được chọn 1 trong 3: project, licks, hoặc linkPreview
+    if (attachmentCount > 1) {
+      commentModal.warning({
+        title: "Chỉ được chọn 1 loại đính kèm",
+        content:
+          "Bạn chỉ được chọn 1 trong 3: Project, Lick, hoặc Link. Vui lòng bỏ chọn các mục khác trước khi đăng.",
+      });
+      return;
+    }
+    
+    // Kiểm tra: phải có ít nhất text hoặc 1 trong 3 loại đính kèm
+    if (!trimmed && attachmentCount === 0) {
+      commentModal.warning({
+        title: "Thiếu nội dung",
+        content: "Vui lòng nhập nội dung hoặc chọn ít nhất 1 trong 3: Project, Lick, hoặc Link.",
+      });
+      return;
+    }
+    
+    if (trimmed && trimmed.length > MAX_POST_TEXT_LENGTH) {
       commentModal.warning({
         title: "Nội dung quá dài",
         content: `Nội dung không được vượt quá ${MAX_POST_TEXT_LENGTH} ký tự (hiện tại: ${trimmed.length}). Vui lòng rút gọn trước khi đăng.`,
@@ -824,12 +958,19 @@ const UserFeed = () => {
       if (files.length > 0) {
         const form = new FormData();
         form.append("postType", "status_update");
-        form.append("textContent", trimmed);
-        if (linkPreview) {
+        // Chỉ thêm textContent nếu có text
+        if (trimmed) {
+          form.append("textContent", trimmed);
+        }
+        // Chỉ cho phép 1 trong 3: linkPreview, licks, hoặc project
+        if (hasLinkPreview && !hasLicks && !hasProject) {
           form.append("linkPreview", JSON.stringify(linkPreview));
         }
-        if (selectedLickIds.length > 0) {
+        if (hasLicks && !hasLinkPreview && !hasProject) {
           form.append("attachedLickIds", JSON.stringify(selectedLickIds));
+        }
+        if (hasProject && !hasLinkPreview && !hasLicks) {
+          form.append("projectId", selectedProjectId);
         }
         files.forEach((f) => {
           if (f.originFileObj) form.append("media", f.originFileObj);
@@ -837,9 +978,22 @@ const UserFeed = () => {
         const response = await createPost(form);
         newPost = response?.data || response;
       } else {
-        const payload = { postType: "status_update", textContent: trimmed, linkPreview };
-        if (selectedLickIds.length > 0) {
+        const payload = {
+          postType: "status_update",
+        };
+        // Chỉ thêm textContent nếu có text
+        if (trimmed) {
+          payload.textContent = trimmed;
+        }
+        // Chỉ cho phép 1 trong 3: linkPreview, licks, hoặc project
+        if (hasLinkPreview && !hasLicks && !hasProject) {
+          payload.linkPreview = linkPreview;
+        }
+        if (hasLicks && !hasLinkPreview && !hasProject) {
           payload.attachedLickIds = selectedLickIds;
+        }
+        if (hasProject && !hasLinkPreview && !hasLicks) {
+          payload.projectId = selectedProjectId;
         }
         const response = await createPost(payload);
         newPost = response?.data || response;
@@ -869,6 +1023,7 @@ const UserFeed = () => {
       setNewText("");
       setFiles([]);
       setSelectedLickIds([]);
+      setSelectedProjectId(null);
       setIsModalOpen(false);
       message.success("Đăng bài thành công");
       commentModal.success({
@@ -1083,6 +1238,131 @@ const UserFeed = () => {
       if (el) observer.unobserve(el);
     };
   }, [loading, hasMore, page, userId]);
+
+  // ----- Profile tabs data loaders -----
+
+  const fetchUserLicks = async () => {
+    if (!userId) return;
+    try {
+      setUserLicksLoading(true);
+      const res = await getLicksByUser(userId, { status: "active", limit: 20 });
+      const list = Array.isArray(res?.data) ? res.data : res?.licks || [];
+      setUserLicks(list);
+    } catch (e) {
+      console.error("Error loading user licks:", e);
+      setUserLicks([]);
+    } finally {
+      setUserLicksLoading(false);
+    }
+  };
+
+  const fetchUserPlaylists = async () => {
+    if (!userId) return;
+    try {
+      setUserPlaylistsLoading(true);
+      const res = await getPlaylistsByUser(userId, { page: 1, limit: 20 });
+      const list = Array.isArray(res?.data) ? res.data : res?.playlists || [];
+      setUserPlaylists(list);
+    } catch (e) {
+      console.error("Error loading user playlists:", e);
+      setUserPlaylists([]);
+    } finally {
+      setUserPlaylistsLoading(false);
+    }
+  };
+
+  const openPlaylistDetail = async (playlist) => {
+    const id = playlist?.playlist_id || playlist?._id;
+    if (!id) return;
+    try {
+      setPlaylistModalOpen(true);
+      setPlaylistModalLoading(true);
+      setPlaylistDetail(null);
+      const res = await getPlaylistById(id);
+      // BE thường trả { success, data: { playlist, licks } } hoặc { playlist, licks }
+      const payload = res?.data || res;
+      setPlaylistDetail(payload);
+    } catch (e) {
+      console.error("Error loading playlist detail:", e);
+      message.error(e.message || "Không tải được chi tiết playlist");
+    } finally {
+      setPlaylistModalLoading(false);
+    }
+  };
+
+  const handlePlayLickFromPlaylist = async (lickId) => {
+    if (!lickId) return;
+    try {
+      // Stop current audio if any
+      if (playlistAudioRef.current) {
+        playlistAudioRef.current.pause();
+        playlistAudioRef.current = null;
+      }
+      setPlayingLickId(lickId);
+      const res = await playLickAudio(lickId);
+      const payload = res?.data || res;
+      const url =
+        payload?.audioUrl ||
+        payload?.url ||
+        payload?.audio_url ||
+        payload?.playbackUrl;
+      if (!url) {
+        setPlayingLickId(null);
+        message.warning("Không tìm thấy file audio cho lick này");
+        return;
+      }
+      const audio = new Audio(url);
+      playlistAudioRef.current = audio;
+      audio.onended = () => {
+        setPlayingLickId((prev) => (prev === lickId ? null : prev));
+      };
+      await audio.play();
+    } catch (e) {
+      console.error("Error playing lick from playlist:", e);
+      message.error(e.message || "Không phát được audio");
+      setPlayingLickId(null);
+    }
+  };
+
+  const fetchUserProjectsForProfile = async () => {
+    // Backend chỉ hỗ trợ dự án của chính user đăng nhập
+    if (!isOwnProfile) {
+      setUserProjectsState([]);
+      return;
+    }
+    try {
+      setUserProjectsLoading(true);
+      const res = await getUserProjects("all");
+      const list = Array.isArray(res?.data) ? res.data : res?.projects || [];
+      setUserProjectsState(list);
+    } catch (e) {
+      console.error("Error loading user projects:", e);
+      setUserProjectsState([]);
+    } finally {
+      setUserProjectsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "licks") {
+      fetchUserLicks();
+    } else if (activeTab === "playlists") {
+      fetchUserPlaylists();
+    } else if (activeTab === "projects") {
+      fetchUserProjectsForProfile();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, userId, isOwnProfile]);
+
+  // Stop audio when component unmounts or modal is closed
+  useEffect(() => {
+    return () => {
+      if (playlistAudioRef.current) {
+        playlistAudioRef.current.pause();
+        playlistAudioRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <>
@@ -1300,8 +1580,9 @@ const UserFeed = () => {
                 Xem mạng xã hội
               </Button>
             )}
+
             {/* Post composer - only show if own profile */}
-            {isOwnProfile && (
+            {isOwnProfile && activeTab === "activity" && (
               <div className="composer-card" style={{ 
                 marginBottom: 20, 
                 background: "#0f0f10", 
@@ -1341,6 +1622,30 @@ const UserFeed = () => {
               </div>
             )}
 
+            <div className="profile-tabs">
+              {[
+                { key: "activity", label: "Activity" },
+                { key: "licks", label: "Licks" },
+                { key: "projects", label: "Projects" },
+                { key: "playlists", label: "Playlists" },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  className={
+                    "profile-tab-btn" +
+                    (activeTab === tab.key ? " profile-tab-btn--active" : "")
+                  }
+                  onClick={() => setActiveTab(tab.key)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {activeTab === "activity" && (
+              <>
+
             <Modal
               open={isModalOpen}
               title={<span style={{ color: "#fff", fontWeight: 600 }}>Tạo bài đăng</span>}
@@ -1366,69 +1671,322 @@ const UserFeed = () => {
                 header: { background: "#0f0f10", borderBottom: "1px solid #1f1f1f" }
               }}
             >
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <Input.TextArea
-                  placeholder="Chia sẻ điều gì đó..."
-                  autoSize={{ minRows: 3, maxRows: 8 }}
-                  value={newText}
-                  onChange={(e) => setNewText(e.target.value)}
-                  showCount
-                />
-                <div>
-                  <Text style={{ color: "#e5e7eb", marginBottom: 8, display: "block" }}>Đính kèm lick (chỉ licks active của bạn)</Text>
-                  <Select
-                    mode="multiple"
-                    placeholder="Chọn lick để đính kèm..."
-                    value={selectedLickIds}
-                    onChange={setSelectedLickIds}
-                    loading={loadingLicks}
-                    style={{ width: "100%" }}
-                    options={availableLicks}
-                    notFoundContent={loadingLicks ? <Spin size="small" /> : <Empty description="Không có lick active nào" />}
-                    filterOption={(input, option) =>
-                      (option?.label ?? "").toLowerCase().includes(input.toLowerCase())
-                    }
-                    popupClassName="dark-select-dropdown"
-                  />
-                </div>
-                <Upload.Dragger
-                  multiple
-                  fileList={files}
-                  accept="audio/*,video/*"
-                  beforeUpload={() => false}
-                  onChange={({ fileList }) => setFiles(fileList)}
-                  listType="text"
-                  style={{ padding: 8, borderColor: "#303030", background: "#0f0f10", color: "#e5e7eb", minHeight: 150 }}
-                  itemRender={(originNode, file, fileList, actions) => (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", color: "#e5e7eb", padding: "6px 8px", borderBottom: "1px dashed #303030" }}>
-                      <span style={{ color: "#e5e7eb", fontSize: 16, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginRight: 12 }}>{file.name}</span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <Button danger size="small" onClick={actions.remove}>Xóa</Button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <Space size={12} align="center">
+                    <Avatar
+                      size={48}
+                      src={getValidAvatarUrl(profile?.avatarUrl)}
+                      style={{ background: "#7c3aed" }}
+                    >
+                      {(profile?.displayName || profile?.username || "U")[0]}
+                    </Avatar>
+                    <div>
+                      <Text style={{ color: "#fff", fontWeight: 600 }}>
+                        {profile?.displayName || profile?.username || "User"}
+                      </Text>
+                      <div style={{ color: "#9ca3af", fontSize: 13 }}>
+                        Sẵn sàng chia sẻ cảm hứng với cộng đồng
                       </div>
                     </div>
-                  )}
+                  </Space>
+                  <Tag
+                    color="#7c3aed"
+                    style={{
+                      borderRadius: 999,
+                      margin: 0,
+                      color: "#fff",
+                      border: "none",
+                    }}
+                  >
+                    Bài viết mới
+                  </Tag>
+                </div>
+
+                <div
+                  style={{
+                    ...composerSectionStyle,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
                 >
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                    <p style={{ margin: 0, color: "#e5e7eb" }}>Kéo thả hoặc bấm để chọn file (audio/video)</p>
-                    <Text style={{ color: "#bfbfbf" }}>Hỗ trợ tối đa 10 file, 100MB mỗi file</Text>
+                  <Input.TextArea
+                    placeholder="Chia sẻ điều gì đó..."
+                    autoSize={{ minRows: 4, maxRows: 10 }}
+                    value={newText}
+                    onChange={(e) => setNewText(e.target.value)}
+                    allowClear
+                    style={{
+                      background: "#0b0b0f",
+                      border: "1px solid #222",
+                      borderRadius: 14,
+                      padding: 16,
+                      color: "#f8fafc",
+                      fontSize: 16,
+                      boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.02)",
+                    }}
+                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ color: "#9ca3af", fontSize: 13 }}>
+                      Bạn có thể chèn link lick hoặc video để auto preview
+                    </span>
+                    <span style={{ color: "#fff", fontWeight: 600 }}>
+                      {usedChars}/{maxChars}
+                    </span>
                   </div>
-                </Upload.Dragger>
-                {extractFirstUrl(newText) && (
-                  <div style={{ border: "1px solid #303030", borderRadius: 8, padding: 12, background: "#111", color: "#e5e7eb" }}>
+                  <div
+                    style={{
+                      height: 6,
+                      width: "100%",
+                      background: "#1f1f1f",
+                      borderRadius: 999,
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${charPercent}%`,
+                        background: charPercent > 80 ? "#f97316" : "#7c3aed",
+                        borderRadius: 999,
+                        transition: "width 0.2s ease",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div
+                  className="composer-section"
+                  style={{
+                    ...composerSectionStyle,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 16,
+                    border: "1px solid #2a2a2a",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ ...composerLabelStyle, marginBottom: 6, fontSize: 16 }}>Đính kèm lick</div>
+                      <div style={{ ...composerHintStyle, lineHeight: "1.5" }}>
+                        Chỉ hiển thị các lick đang active trong tài khoản. Chỉ
+                        chọn 1 trong 3: Project, Lick, hoặc Link.
+                      </div>
+                    </div>
+                    <Tag
+                      color="#1f1f1f"
+                      style={{
+                        borderRadius: 999,
+                        color: "#9ca3af",
+                        border: "none",
+                        marginLeft: 12,
+                      }}
+                    >
+                      Tùy chọn
+                    </Tag>
+                  </div>
+                  <Select
+                    mode="multiple"
+                    placeholder="Chọn 1 lick để đính kèm..."
+                    value={selectedLickIds}
+                    onChange={(values) => {
+                      const next = Array.isArray(values)
+                        ? values.slice(0, 1)
+                        : [];
+                      setSelectedLickIds(next);
+                      if (next.length > 0) {
+                        setLinkPreview(null);
+                        setSelectedProjectId(null);
+                      }
+                    }}
+                    loading={loadingLicks}
+                    style={{ 
+                      width: "100%",
+                      backgroundColor: "#1a1a1a",
+                      border: "1px solid #3a3a3a",
+                      borderRadius: 8,
+                    }}
+                    options={availableLicks}
+                    notFoundContent={
+                      loadingLicks ? (
+                        <Spin size="small" />
+                      ) : (
+                        <Empty description="Không có lick active nào" />
+                      )
+                    }
+                    filterOption={(input, option) =>
+                      (option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                    }
+                    popupClassName="dark-select-dropdown"
+                    allowClear
+                    disabled={!!extractFirstUrl(newText) || !!selectedProjectId}
+                  />
+                </div>
+
+                <div
+                  className="composer-section"
+                  style={{
+                    ...composerSectionStyle,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 16,
+                    border: "1px solid #2a2a2a",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ ...composerLabelStyle, marginBottom: 6, fontSize: 16 }}>Chọn project</div>
+                      <div style={{ ...composerHintStyle, lineHeight: "1.5" }}>
+                        Chỉ hiển thị các project có trạng thái active. Chỉ
+                        chọn 1 trong 3: Project, Lick, hoặc Link.
+                      </div>
+                    </div>
+                    <Tag
+                      color="#1f1f1f"
+                      style={{
+                        borderRadius: 999,
+                        color: "#9ca3af",
+                        border: "none",
+                        marginLeft: 12,
+                      }}
+                    >
+                      Tùy chọn
+                    </Tag>
+                  </div>
+                  <Select
+                    placeholder="Chọn project để đính kèm..."
+                    value={selectedProjectId}
+                    onChange={(value) => {
+                      setSelectedProjectId(value);
+                      if (value) {
+                        setSelectedLickIds([]);
+                        setLinkPreview(null);
+                      }
+                    }}
+                    loading={loadingProjects}
+                    style={{ 
+                      width: "100%",
+                      backgroundColor: "#1a1a1a",
+                      border: "1px solid #3a3a3a",
+                      borderRadius: 8,
+                    }}
+                    options={availableProjects}
+                    notFoundContent={
+                      loadingProjects ? (
+                        <Spin size="small" />
+                      ) : (
+                        <Empty description="Không có project active nào" />
+                      )
+                    }
+                    filterOption={(input, option) =>
+                      (option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                    }
+                    popupClassName="dark-select-dropdown"
+                    allowClear
+                    disabled={selectedLickIds.length > 0 || !!extractFirstUrl(newText)}
+                  />
+                </div>
+
+                {extractFirstUrl(newText) && selectedLickIds.length === 0 && (
+                  <div
+                    style={{
+                      ...composerSectionStyle,
+                      border: "1px solid #303030",
+                      background: "#111",
+                      color: "#e5e7eb",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
                     {linkLoading ? (
-                      <Text style={{ color: "#bfbfbf" }}>Đang tải preview…</Text>
+                      <Text style={{ color: "#bfbfbf" }}>
+                        Đang tải preview…
+                      </Text>
                     ) : (
-                      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 12,
+                          alignItems: "center",
+                        }}
+                      >
                         {linkPreview?.thumbnailUrl ? (
-                          <img src={linkPreview.thumbnailUrl} alt="preview" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 6 }} />
+                          <img
+                            src={linkPreview.thumbnailUrl}
+                            alt="preview"
+                            style={{
+                              width: 64,
+                              height: 64,
+                              objectFit: "cover",
+                              borderRadius: 6,
+                            }}
+                          />
                         ) : (
-                          <div style={{ width: 64, height: 64, borderRadius: 6, background: "#1f1f1f" }} />
+                          <div
+                            style={{
+                              width: 64,
+                              height: 64,
+                              borderRadius: 6,
+                              background: "#1f1f1f",
+                            }}
+                          />
                         )}
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, color: "#fff", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{linkPreview?.title || extractFirstUrl(newText)}</div>
-                          <div style={{ color: "#9ca3af", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{extractFirstUrl(newText)}</div>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              color: "#fff",
+                              marginBottom: 4,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {linkPreview?.title || extractFirstUrl(newText)}
+                          </div>
+                          <div
+                            style={{
+                              color: "#9ca3af",
+                              fontSize: 12,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {extractFirstUrl(newText)}
+                          </div>
                         </div>
-                        <Button size="small" onClick={() => setLinkPreview(null)}>Ẩn</Button>
+                        <Button
+                          size="small"
+                          onClick={() => setLinkPreview(null)}
+                        >
+                          Ẩn
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -1802,6 +2360,244 @@ const UserFeed = () => {
               })}
 
             <div ref={loaderRef} style={{ height: 1 }} />
+            </>
+            )}
+
+            {activeTab === "licks" && (
+              <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
+                <div
+                  style={{ marginBottom: 16, color: "#e5e7eb", fontWeight: 600 }}
+                >
+                  Licks của {profile?.displayName || profile?.username}
+                </div>
+                {userLicksLoading && (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      padding: 24,
+                    }}
+                  >
+                    <Spin />
+                  </div>
+                )}
+                {!userLicksLoading && userLicks.length === 0 && (
+                  <Empty
+                    description={
+                      <span style={{ color: "#9ca3af" }}>Chưa có lick nào</span>
+                    }
+                  />
+                )}
+                {!userLicksLoading && userLicks.length > 0 && (
+                  <div
+                    className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+                  >
+                    {userLicks.map((lick) => (
+                      <LickCard
+                        key={lick.lick_id || lick._id}
+                        lick={lick}
+                        onClick={(id) => navigate(`/licks/${id}`)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {activeTab === "projects" && (
+              <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
+                <div style={{ marginBottom: 12, color: "#e5e7eb", fontWeight: 600 }}>
+                  Projects của {isOwnProfile ? "bạn" : profile?.displayName || profile?.username}
+                </div>
+                {!isOwnProfile && (
+                  <Text style={{ color: "#9ca3af" }}>
+                    Chỉ chủ sở hữu mới xem được danh sách project của mình.
+                  </Text>
+                )}
+                {isOwnProfile && (
+                  <>
+                    {userProjectsLoading && (
+                      <div
+                        style={{ display: "flex", justifyContent: "center", padding: 24 }}
+                      >
+                        <Spin />
+                      </div>
+                    )}
+                    {!userProjectsLoading && userProjects.length === 0 && (
+                      <Empty
+                        description={
+                          <span style={{ color: "#9ca3af" }}>Chưa có project nào</span>
+                        }
+                      />
+                    )}
+                    {!userProjectsLoading && userProjects.length > 0 && (
+                      <List
+                        dataSource={userProjects}
+                        renderItem={(project) => (
+                          <List.Item
+                            style={{
+                              borderBottom: "1px solid #1f1f1f",
+                              cursor: "pointer",
+                            }}
+                            onClick={() => navigate(`/projects/${project._id}`)}
+                          >
+                            <List.Item.Meta
+                              title={
+                                <span style={{ color: "#fff" }}>
+                                  {project.title || "Untitled Project"}
+                                </span>
+                              }
+                              description={
+                                <span style={{ color: "#9ca3af", fontSize: 12 }}>
+                                  {project.description || "Không có mô tả"}
+                                </span>
+                              }
+                            />
+                          </List.Item>
+                        )}
+                      />
+                    )}
+                  </>
+                )}
+              </Card>
+            )}
+
+            {activeTab === "playlists" && (
+              <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
+                <div style={{ marginBottom: 16, color: "#e5e7eb", fontWeight: 600 }}>
+                  Playlists của {profile?.displayName || profile?.username}
+                </div>
+                {userPlaylistsLoading && (
+                  <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
+                    <Spin />
+                  </div>
+                )}
+                {!userPlaylistsLoading && userPlaylists.length === 0 && (
+                  <Empty
+                    description={
+                      <span style={{ color: "#9ca3af" }}>Chưa có playlist nào</span>
+                    }
+                  />
+                )}
+                {!userPlaylistsLoading && userPlaylists.length > 0 && (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                      gap: 16,
+                    }}
+                  >
+                    {userPlaylists.map((pl) => (
+                      <div
+                        key={pl.playlist_id || pl._id}
+                        style={{
+                          background: "#111827",
+                          borderRadius: 12,
+                          border: "1px solid #1f2937",
+                          overflow: "hidden",
+                          cursor: "pointer",
+                          display: "flex",
+                          flexDirection: "column",
+                          minHeight: 220,
+                        }}
+                        onClick={() => openPlaylistDetail(pl)}
+                      >
+                        <div
+                          style={{
+                            position: "relative",
+                            height: 120,
+                            background:
+                              "linear-gradient(135deg, #111827, #1f2937, #4b5563)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          {pl.cover_image_url ? (
+                            <img
+                              src={pl.cover_image_url}
+                              alt={pl.name}
+                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            />
+                          ) : (
+                            <span style={{ fontSize: 40 }}>🎵</span>
+                          )}
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: 8,
+                              right: 8,
+                              display: "flex",
+                              gap: 6,
+                            }}
+                          >
+                            <span
+                              style={{
+                                padding: "2px 8px",
+                                borderRadius: 999,
+                                fontSize: 11,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 4,
+                                backgroundColor: pl.is_public ? "#16a34a" : "#374151",
+                                color: "#f9fafb",
+                              }}
+                            >
+                              {pl.is_public ? "Public" : "Private"}
+                            </span>
+                          </div>
+                        </div>
+                        <div style={{ padding: "10px 12px 12px 12px", flex: 1 }}>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              color: "#f9fafb",
+                              marginBottom: 4,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {pl.name || "Untitled Playlist"}
+                          </div>
+                          {pl.description && (
+                            <div
+                              style={{
+                                color: "#9ca3af",
+                                fontSize: 12,
+                                marginBottom: 6,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {pl.description}
+                            </div>
+                          )}
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              fontSize: 11,
+                              color: "#9ca3af",
+                              marginTop: 4,
+                            }}
+                          >
+                            <span>{pl.licks_count || 0} licks</span>
+                            {pl.updated_at && (
+                              <span>
+                                {new Date(pl.updated_at).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            )}
           </div>
 
           {!isMobileSidebar && (
@@ -1900,6 +2696,262 @@ const UserFeed = () => {
               );
             }}
           />
+        )}
+      </Modal>
+
+      {/* Playlist detail modal */}
+      <Modal
+        open={playlistModalOpen}
+        onCancel={() => {
+          if (!playlistModalLoading) {
+            if (playlistAudioRef.current) {
+              playlistAudioRef.current.pause();
+              playlistAudioRef.current = null;
+            }
+            setPlayingLickId(null);
+            setPlaylistModalOpen(false);
+            setPlaylistDetail(null);
+          }
+        }}
+        footer={null}
+        width={720}
+        styles={{
+          header: { background: "#0f0f10", borderBottom: "1px solid #1f1f1f" },
+          content: { background: "#0f0f10", borderRadius: 12 },
+          body: { background: "#0f0f10" },
+        }}
+        title={
+          <span style={{ color: "#fff", fontWeight: 600 }}>
+            Playlist detail
+          </span>
+        }
+      >
+        {playlistModalLoading && (
+          <div style={{ display: "flex", justifyContent: "center", padding: 32 }}>
+            <Spin />
+          </div>
+        )}
+        {!playlistModalLoading && playlistDetail && (
+          <div style={{ color: "#e5e7eb" }}>
+            {(() => {
+              const playlist =
+                playlistDetail.playlist || playlistDetail.data || playlistDetail;
+              const tracks =
+                playlistDetail.licks ||
+                playlistDetail.tracks ||
+                playlistDetail.items ||
+                [];
+              return (
+                <>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 16,
+                      marginBottom: 16,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 96,
+                        height: 96,
+                        borderRadius: 16,
+                        background:
+                          "linear-gradient(135deg, #111827, #1f2937, #4b5563)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        overflow: "hidden",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {playlist?.cover_image_url ? (
+                        <img
+                          src={playlist.cover_image_url}
+                          alt={playlist.name}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
+                        />
+                      ) : (
+                        <span style={{ fontSize: 42 }}>🎵</span>
+                      )}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 20,
+                          fontWeight: 700,
+                          color: "#fff",
+                          marginBottom: 4,
+                        }}
+                      >
+                        {playlist?.name || "Untitled Playlist"}
+                      </div>
+                      {playlist?.description && (
+                        <div
+                          style={{
+                            color: "#9ca3af",
+                            fontSize: 13,
+                            marginBottom: 6,
+                          }}
+                        >
+                          {playlist.description}
+                        </div>
+                      )}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          fontSize: 12,
+                          color: "#9ca3af",
+                          marginTop: 4,
+                        }}
+                      >
+                        <span>
+                          {(playlist.licks_count ||
+                            playlist.tracks?.length ||
+                            tracks.length) || 0}{" "}
+                          licks
+                        </span>
+                        {playlist.updated_at && (
+                          <>
+                            <span>•</span>
+                            <span>
+                              Cập nhật{" "}
+                              {new Date(
+                                playlist.updated_at
+                              ).toLocaleDateString()}
+                            </span>
+                          </>
+                        )}
+                        {typeof playlist.is_public === "boolean" && (
+                          <>
+                            <span>•</span>
+                            <span>
+                              {playlist.is_public ? "Public" : "Private"}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      borderTop: "1px solid #1f2937",
+                      paddingTop: 12,
+                      marginTop: 8,
+                    }}
+                  >
+                    <div
+                      style={{
+                        marginBottom: 8,
+                        fontWeight: 600,
+                        fontSize: 14,
+                      }}
+                    >
+                      Các bài trong playlist
+                    </div>
+                    {tracks.length === 0 ? (
+                      <Empty
+                        description={
+                          <span style={{ color: "#9ca3af" }}>
+                            Playlist chưa có bài nào
+                          </span>
+                        }
+                      />
+                    ) : (
+                      <>
+                        {/* Waveform preview cho bài đang phát */}
+                        {playingLickId && (
+                          <div style={{ marginBottom: 12 }}>
+                            {(() => {
+                              const current =
+                                tracks.find((t) => {
+                                  const l =
+                                    t.lick || t.lickId || t;
+                                  const id =
+                                    l?._id || l?.lick_id || t?.lickId;
+                                  return (
+                                    id &&
+                                    id.toString() ===
+                                      playingLickId.toString()
+                                  );
+                                }) || null;
+                              const currentLick =
+                                current?.lick || current?.lickId || current;
+                              const wfData =
+                                currentLick?.waveform_data ||
+                                currentLick?.waveformData ||
+                                [];
+                              return (
+                                <SimpleWaveform
+                                  waveformData={wfData}
+                                  isPlaying={true}
+                                  height={70}
+                                  style={{
+                                    background:
+                                      "linear-gradient(180deg,#020617,#020617)",
+                                  }}
+                                />
+                              );
+                            })()}
+                          </div>
+                        )}
+
+                        <List
+                        size="small"
+                        dataSource={tracks}
+                        renderItem={(item, index) => {
+                          const lick = item.lick || item.lickId || item;
+                          const lickId = lick?._id || lick?.lick_id || item?.lickId;
+                          return (
+                            <List.Item
+                              style={{
+                                borderBottom: "1px solid #111827",
+                                cursor: lickId ? "pointer" : "default",
+                              }}
+                              onClick={() => handlePlayLickFromPlaylist(lickId)}
+                            >
+                              <List.Item.Meta
+                                title={
+                                  <span
+                                    style={{
+                                      color: "#f9fafb",
+                                      fontWeight:
+                                        playingLickId === lickId ? 700 : 500,
+                                    }}
+                                  >
+                                    {index + 1}.{" "}
+                                    {lick?.title ||
+                                      item.title ||
+                                      "Untitled Lick"}
+                                  </span>
+                                }
+                                description={
+                                  <span
+                                    style={{ color: "#9ca3af", fontSize: 12 }}
+                                  >
+                                    {lick?.description ||
+                                      item.description ||
+                                      "Không có mô tả"}
+                                  </span>
+                                }
+                              />
+                            </List.Item>
+                          );
+                        }}
+                        />
+                      </>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         )}
       </Modal>
 

@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
+import { message } from 'antd';
 import dm from '../services/dmService';
-import { onDmBadge, offDmBadge, onDmNew, offDmNew, onDmConversationUpdated, offDmConversationUpdated } from '../services/user/socketService';
+import {
+  onDmBadge,
+  offDmBadge,
+  onDmNew,
+  offDmNew,
+  onDmConversationUpdated,
+  offDmConversationUpdated,
+  onDmRequestAccepted,
+  offDmRequestAccepted,
+  onDmRequestDeclined,
+  offDmRequestDeclined,
+} from '../services/user/socketService';
 
 export default function useDMConversations() {
   const [conversations, setConversations] = useState([]);
@@ -87,13 +99,32 @@ export default function useDMConversations() {
       // Also refresh to ensure consistency
       refresh();
     };
+    const handleRequestAccepted = ({ conversationId }) => {
+      console.log('[DM] request accepted for conversation', conversationId);
+      try {
+        message.success('Yêu cầu tin nhắn của bạn đã được chấp nhận', 3);
+      } catch (e) {
+        console.error('[DM] Error showing accept message:', e);
+      }
+      refresh();
+    };
+    const handleRequestDeclined = ({ conversationId }) => {
+      console.log('[DM] request declined for conversation', conversationId);
+      // Refresh để nhận status mới từ server
+      // Conversation sẽ được update qua handleConversationUpdated khi nhận dm:conversation:updated
+      refresh();
+    };
     onDmBadge(handleRefresh);
     onDmNew(handleRefresh);
     onDmConversationUpdated(handleConversationUpdated);
+    onDmRequestAccepted(handleRequestAccepted);
+    onDmRequestDeclined(handleRequestDeclined);
     return () => {
       offDmBadge(handleRefresh);
       offDmNew(handleRefresh);
       offDmConversationUpdated(handleConversationUpdated);
+      offDmRequestAccepted(handleRequestAccepted);
+      offDmRequestDeclined(handleRequestDeclined);
     };
   }, [refresh]);
 
