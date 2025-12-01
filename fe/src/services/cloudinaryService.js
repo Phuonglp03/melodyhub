@@ -10,11 +10,13 @@ export const uploadToCloudinary = async (
     const formData = new FormData();
     formData.append("file", file);
     formData.append("upload_preset", preset);
-    formData.append("cloud_name", CLOUDINARY_CONFIG.cloud_name);
+    // Note: cloud_name is in the URL, not FormData
 
     // Add additional options
     Object.entries(options).forEach(([key, value]) => {
-      formData.append(key, value);
+      if (value !== undefined && value !== null) {
+        formData.append(key, String(value));
+      }
     });
 
     const response = await fetch(
@@ -29,7 +31,17 @@ export const uploadToCloudinary = async (
 
     if (!response.ok) {
       const errorMessage =
-        data?.error?.message || response.statusText || "Bad Request";
+        data?.error?.message ||
+        data?.error ||
+        response.statusText ||
+        "Bad Request";
+      console.error("[Cloudinary] Upload error details:", {
+        status: response.status,
+        statusText: response.statusText,
+        error: data,
+        preset,
+        options,
+      });
       throw new Error(`Upload failed: ${errorMessage}`);
     }
 

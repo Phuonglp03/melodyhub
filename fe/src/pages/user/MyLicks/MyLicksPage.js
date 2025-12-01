@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaSearch, FaPlus, FaFilter, FaLock, FaTimes } from "react-icons/fa";
+import { FaSearch, FaPlus, FaFilter, FaLock, FaTimes, FaInfoCircle, FaCheckCircle } from "react-icons/fa";
 import {
   deleteLick,
   updateLick as apiUpdateLick,
@@ -379,6 +379,8 @@ const MyLicksPage = () => {
     e.preventDefault();
     if (!editingLick) return;
     setSaving(true);
+    // ⭐ LOGIC: Chỉ cho phép gửi isPublic/isFeatured nếu đã active
+    const canEditSettings = editingLick.status === 'active';
     try {
       const payload = {
         title: editForm.title,
@@ -387,9 +389,14 @@ const MyLicksPage = () => {
         tempo: editForm.tempo,
         difficulty: editForm.difficulty,
         status: editForm.status,
-        isPublic: editForm.isPublic,
-        isFeatured: editForm.isFeatured,
+        // isPublic: editForm.isPublic,
+        // isFeatured: editForm.isFeatured,
       };
+// ⭐ LOGIC: Chỉ gửi settings nếu được phép
+      if (canEditSettings) {
+        payload.isPublic = editForm.isPublic;
+        payload.isFeatured = editForm.isFeatured;
+      }
 
       const res = await apiUpdateLick(editingLick.lick_id, payload);
       let updatedTags = editingLick.tags || [];
@@ -479,14 +486,8 @@ const MyLicksPage = () => {
                   tempo: updated.tempo ?? editForm.tempo,
                   difficulty: updated.difficulty ?? editForm.difficulty,
                   status: updated.status ?? editForm.status,
-                  is_public:
-                    typeof updated.isPublic === "boolean"
-                      ? updated.isPublic
-                      : editForm.isPublic,
-                  is_featured:
-                    typeof updated.isFeatured === "boolean"
-                      ? updated.isFeatured
-                      : editForm.isFeatured,
+                  is_public: canEditSettings && typeof updated.isPublic === 'boolean' ? updated.isPublic : l.is_public,
+                  is_featured: canEditSettings && typeof updated.isFeatured === 'boolean' ? updated.isFeatured : l.is_featured,
                   tags: updatedTags,
                 }
               : l
@@ -514,6 +515,7 @@ const MyLicksPage = () => {
       setSaving(false);
     }
   };
+  const canEditSettings = editingLick?.status === 'active';
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -849,66 +851,69 @@ const MyLicksPage = () => {
                     <option value="advanced">Advanced</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm text-gray-300 mb-1">
-                    Status
-                  </label>
-                  <select
-                    name="status"
-                    value={editForm.status}
-                    onChange={handleEditChange}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  >
-                    <option value="">Select</option>
-                    <option value="active">Active</option>
-                    <option value="draft">Draft</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
+               {/* Status (Read-only) */}
+               <div>
+                   <label className="block text-sm text-gray-300 mb-1">Status</label>
+                   <div className={`w-full px-3 py-2 text-sm font-bold uppercase rounded-md border border-gray-700 ${
+                        editingLick.status === 'active' ? 'bg-green-900/30 text-green-400' :
+                        editingLick.status === 'pending' ? 'bg-yellow-900/30 text-yellow-400' : 
+                        'bg-gray-800 text-gray-400'
+                   }`}>
+                        {editingLick.status}
+                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-6">
-                <label className="inline-flex items-center gap-2 text-sm text-gray-300">
-                  <input
-                    type="checkbox"
-                    name="isPublic"
-                    checked={editForm.isPublic}
-                    onChange={handleEditChange}
-                    className="form-checkbox h-4 w-4 text-orange-500 bg-gray-800 border-gray-700"
-                  />
-                  Public
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm text-gray-300">
-                  <input
-                    type="checkbox"
-                    name="isFeatured"
-                    checked={editForm.isFeatured}
-                    onChange={handleEditChange}
-                    className="form-checkbox h-4 w-4 text-orange-500 bg-gray-800 border-gray-700"
-                  />
-                  Featured
-                </label>
+
+              {/* ⭐ SETTINGS SECTION: PUBLIC & FEATURED ⭐ */}
+              <div className={`mt-4 p-4 rounded-lg border ${
+                  canEditSettings ? 'bg-gray-800/30 border-gray-700' : 'bg-gray-800/50 border-gray-700/50 opacity-75'
+              }`}>
+                <div className="flex items-center gap-6">
+                    {/* Public Checkbox */}
+                    <label className={`inline-flex items-center gap-3 text-sm ${canEditSettings ? 'text-gray-300 cursor-pointer' : 'text-gray-500 cursor-not-allowed'}`}>
+                        <input
+                            type="checkbox"
+                            name="isPublic"
+                            checked={editForm.isPublic}
+                            onChange={handleEditChange}
+                            disabled={!canEditSettings} // Disable nếu pending
+                            className="form-checkbox h-5 w-5 text-orange-500 bg-gray-800 border-gray-600 rounded disabled:opacity-50"
+                        />
+                        <span className="font-medium">Public</span>
+                    </label>
+
+                    {/* Featured Checkbox */}
+                    <label className={`inline-flex items-center gap-3 text-sm ${canEditSettings ? 'text-gray-300 cursor-pointer' : 'text-gray-500 cursor-not-allowed'}`}>
+                        <input
+                            type="checkbox"
+                            name="isFeatured"
+                            checked={editForm.isFeatured}
+                            onChange={handleEditChange}
+                            disabled={!canEditSettings} // Disable nếu pending
+                            className="form-checkbox h-5 w-5 text-orange-500 bg-gray-800 border-gray-600 rounded disabled:opacity-50"
+                        />
+                        <span className="font-medium">Featured</span>
+                    </label>
+                </div>
+
+                {/* Helper Text */}
+                {!canEditSettings && (
+                    <div className="mt-3 flex items-start gap-2 text-xs text-yellow-500 bg-yellow-900/10 p-2 rounded">
+                        <FaLock size={12} className="mt-0.5 flex-shrink-0" />
+                        <span>Visibility settings are locked while <strong>Pending Approval</strong>. Once approved, you can change these.</span>
+                    </div>
+                )}
+                {canEditSettings && (
+                    <div className="mt-3 flex items-center gap-2 text-xs text-green-400">
+                        <FaCheckCircle size={12} />
+                        <span>Lick is active. You can update visibility settings.</span>
+                    </div>
+                )}
               </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  className="px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-700"
-                  onClick={() => {
-                    if (!saving) {
-                      setIsEditOpen(false);
-                      setEditingLick(null);
-                    }
-                  }}
-                  disabled={saving}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md disabled:opacity-50"
-                  disabled={saving}
-                >
-                  {saving ? "Saving..." : "Save Changes"}
-                </button>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-800 mt-4">
+                <button type="button" className="px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-700" onClick={() => !saving && setIsEditOpen(false)}>Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md disabled:opacity-50" disabled={saving}>{saving ? "Saving..." : "Save Changes"}</button>
               </div>
             </form>
           </div>
