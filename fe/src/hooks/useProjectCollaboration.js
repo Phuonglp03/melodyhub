@@ -66,9 +66,49 @@ export const useProjectCollaboration = (projectId, user) => {
             );
             break;
 
+          case "TIMELINE_ITEMS_BULK_UPDATE":
+            window.dispatchEvent(
+              new CustomEvent("project:remote:timelineBulkUpdate", {
+                detail: payload.data,
+              })
+            );
+            break;
+
+          case "TIMELINE_ITEM_POSITION_UPDATE":
+            window.dispatchEvent(
+              new CustomEvent("project:remote:timelinePositionUpdate", {
+                detail: payload.data,
+              })
+            );
+            break;
+
           case "PROJECT_SETTINGS_UPDATE":
             window.dispatchEvent(
               new CustomEvent("project:remote:settingsUpdate", {
+                detail: payload.data,
+              })
+            );
+            break;
+
+          case "TRACK_ADD":
+            window.dispatchEvent(
+              new CustomEvent("project:remote:trackAdd", {
+                detail: payload.data,
+              })
+            );
+            break;
+
+          case "TRACK_UPDATE":
+            window.dispatchEvent(
+              new CustomEvent("project:remote:trackUpdate", {
+                detail: payload.data,
+              })
+            );
+            break;
+
+          case "TRACK_DELETE":
+            window.dispatchEvent(
+              new CustomEvent("project:remote:trackDelete", {
                 detail: payload.data,
               })
             );
@@ -97,6 +137,15 @@ export const useProjectCollaboration = (projectId, user) => {
       if (data.userId !== user._id) {
         window.dispatchEvent(
           new CustomEvent("project:remote:cursor", { detail: data })
+        );
+      }
+    });
+
+    // Listen for editing activity updates
+    socket.on("project:editing_activity", (data) => {
+      if (data.userId !== user._id) {
+        window.dispatchEvent(
+          new CustomEvent("project:remote:editingActivity", { detail: data })
         );
       }
     });
@@ -158,5 +207,19 @@ export const useProjectCollaboration = (projectId, user) => {
     });
   }, []);
 
-  return { broadcast, broadcastCursor };
+  // Broadcast editing activity (who is editing what)
+  const broadcastEditingActivity = useCallback(
+    (itemId, isEditing) => {
+      if (!socketRef.current || isRemoteUpdate.current) return;
+
+      socketRef.current.emit("project:editing_activity", {
+        itemId,
+        isEditing,
+        projectId,
+      });
+    },
+    [projectId]
+  );
+
+  return { broadcast, broadcastCursor, broadcastEditingActivity };
 };

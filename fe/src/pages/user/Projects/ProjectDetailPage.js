@@ -975,17 +975,20 @@ const ProjectDetailPage = () => {
   const user = useSelector((state) => state.auth.user);
 
   // Initialize collaboration (Phase 2: Frontend Middleware)
-  const { broadcast, broadcastCursor } = useProjectCollaboration(
-    projectId,
-    user
-  );
+  const { broadcast, broadcastCursor, broadcastEditingActivity } =
+    useProjectCollaboration(projectId, user);
   const isRemoteUpdateRef = useRef(false);
   const refreshProjectRef = useRef(null);
 
   // Phase 4: Collaborator presence state
   const [collaborators, setCollaborators] = useState([]);
+  const [activeEditors, setActiveEditors] = useState(new Map()); // Track who is editing what: { itemId: { userId, userName, avatarUrl } }
   const [isConnected, setIsConnected] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [addTrackModalOpen, setAddTrackModalOpen] = useState(false);
+  const [newTrackName, setNewTrackName] = useState("");
+  const [addTrackError, setAddTrackError] = useState(null);
+  const [addTrackSuccess, setAddTrackSuccess] = useState(null);
 
   // Listen for remote collaboration updates
   useEffect(() => {
@@ -1000,31 +1003,209 @@ const ProjectDetailPage = () => {
 
     const handleRemoteLickAdd = (e) => {
       if (isRemoteUpdateRef.current) return;
-      // Refresh project to get the new lick
-      if (refreshProjectRef.current) {
-        refreshProjectRef.current();
+      const { trackId, item } = e.detail;
+
+      // Optimistically add the item immediately (Google Docs-like)
+      if (trackId && item) {
+        setTracks((prevTracks) =>
+          prevTracks.map((track) =>
+            track._id === trackId
+              ? {
+                  ...track,
+                  items: [...(track.items || []), normalizeTimelineItem(item)],
+                }
+              : track
+          )
+        );
       }
+
+      // No delay - updates are already optimistic, refresh only for final sync
+      // Removed delay for instant updates
     };
 
     const handleRemoteTimelineUpdate = (e) => {
       if (isRemoteUpdateRef.current) return;
+      const { itemId, customMidiEvents, isCustomized } = e.detail;
+
+      // Optimistically update the item immediately
+      if (itemId) {
+        setTracks((prevTracks) =>
+          prevTracks.map((track) => {
+            const hasClip = (track.items || []).some(
+              (item) => item._id === itemId
+            );
+            if (!hasClip) return track;
+
+            return {
+              ...track,
+              items: (track.items || []).map((item) =>
+                item._id === itemId
+                  ? normalizeTimelineItem({
+                      ...item,
+                      customMidiEvents,
+                      isCustomized,
+                    })
+                  : item
+              ),
+            };
+          })
+        );
+      }
+
+      // Silent refresh in background
       if (refreshProjectRef.current) {
-        refreshProjectRef.current();
+        setTimeout(() => refreshProjectRef.current(), 500);
       }
     };
 
     const handleRemoteTimelineDelete = (e) => {
       if (isRemoteUpdateRef.current) return;
+      const { itemId } = e.detail;
+
+      // Optimistically remove the item immediately
+      if (itemId) {
+        setTracks((prevTracks) =>
+          prevTracks.map((track) => ({
+            ...track,
+            items: (track.items || []).filter((item) => item._id !== itemId),
+          }))
+        );
+      }
+
+      // Silent refresh in background
       if (refreshProjectRef.current) {
-        refreshProjectRef.current();
+        setTimeout(() => refreshProjectRef.current(), 500);
       }
     };
 
     const handleRemoteSettingsUpdate = (e) => {
       if (isRemoteUpdateRef.current) return;
+      const {
+        tempo,
+        swingAmount,
+        timeSignature,
+        key,
+        style,
+        backingInstrumentId,
+      } = e.detail;
+
+      // Apply settings updates optimistically
+      if (project) {
+        const updates = {};
+        if (tempo !== undefined) updates.tempo = tempo;
+        if (swingAmount !== undefined) updates.swingAmount = swingAmount;
+        if (timeSignature !== undefined) updates.timeSignature = timeSignature;
+        if (key !== undefined) updates.key = key;
+        if (style !== undefined) updates.style = style;
+        if (backingInstrumentId !== undefined)
+          updates.backingInstrumentId = backingInstrumentId;
+
+        if (Object.keys(updates).length > 0) {
+          setProject((prev) => (prev ? { ...prev, ...updates } : prev));
+
+          // Update draft values if they exist
+          if (tempo !== undefined) setTempoDraft(String(tempo));
+          if (swingAmount !== undefined) setSwingDraft(String(swingAmount));
+        }
+      }
+
       if (refreshProjectRef.current) {
         refreshProjectRef.current();
       }
+    };
+
+    const handleRemoteTrackAdd = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      if (refreshProjectRef.current) {
+        refreshProjectRef.current();
+      }
+    };
+
+    const handleRemoteTrackUpdate = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      const { trackId, updates } = e.detail;
+
+      // Optimistically update track in local state
+      if (trackId && updates) {
+        setTracks((prevTracks) =>
+          prevTracks.map((track) =>
+            track._id === trackId ? { ...track, ...updates } : track
+          )
+        );
+      }
+
+      if (refreshProjectRef.current) {
+        refreshProjectRef.current();
+      }
+    };
+
+    const handleRemoteTrackDelete = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      const { trackId } = e.detail;
+
+      // Optimistically remove track from local state
+      if (trackId) {
+        setTracks((prev) => prev.filter((t) => t._id !== trackId));
+      }
+
+      if (refreshProjectRef.current) {
+        refreshProjectRef.current();
+      }
+    };
+
+    const handleRemoteTimelineBulkUpdate = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      if (refreshProjectRef.current) {
+        refreshProjectRef.current();
+      }
+    };
+
+    const handleRemoteTimelinePositionUpdate = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      const { itemId, updates } = e.detail;
+
+      if (!itemId || !updates) return;
+
+      // Optimistically update timeline item position immediately (Google Docs-like)
+      setTracks((prevTracks) =>
+        prevTracks.map((track) => {
+          const hasClip = (track.items || []).some(
+            (item) => item._id === itemId
+          );
+          if (!hasClip) return track;
+
+          const currentItem = (track.items || []).find(
+            (item) => item._id === itemId
+          );
+          if (!currentItem) return track;
+
+          // Check if update is needed
+          const needsUpdate =
+            (updates.startTime !== undefined &&
+              currentItem.startTime !== updates.startTime) ||
+            (updates.duration !== undefined &&
+              currentItem.duration !== updates.duration) ||
+            (updates.offset !== undefined &&
+              currentItem.offset !== updates.offset);
+
+          if (!needsUpdate) return track;
+
+          // Apply updates optimistically
+          const updatedItem = {
+            ...currentItem,
+            ...updates,
+          };
+
+          return {
+            ...track,
+            items: (track.items || []).map((item) =>
+              item._id === itemId ? normalizeTimelineItem(updatedItem) : item
+            ),
+          };
+        })
+      );
+
+      // Note: Remote updates don't need to be marked dirty since they're already saved on server
     };
 
     const handleRemotePresence = (e) => {
@@ -1037,6 +1218,40 @@ const ProjectDetailPage = () => {
     const handleRemoteConnection = (e) => {
       const { connected } = e.detail;
       setIsConnected(connected);
+    };
+
+    const handleRemoteEditingActivity = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      const { userId, itemId, isEditing } = e.detail;
+
+      if (!userId || !itemId) return;
+
+      setActiveEditors((prev) => {
+        const next = new Map(prev);
+
+        if (isEditing) {
+          // Find user info from collaborators
+          const collaborator = collaborators.find((c) => c.userId === userId);
+          if (collaborator) {
+            next.set(itemId, {
+              userId,
+              userName:
+                collaborator.user?.displayName ||
+                collaborator.user?.username ||
+                "Someone",
+              avatarUrl: collaborator.user?.avatarUrl,
+            });
+          }
+        } else {
+          // Remove editing indicator
+          const current = next.get(itemId);
+          if (current && current.userId === userId) {
+            next.delete(itemId);
+          }
+        }
+
+        return next;
+      });
     };
 
     window.addEventListener(
@@ -1056,10 +1271,31 @@ const ProjectDetailPage = () => {
       "project:remote:settingsUpdate",
       handleRemoteSettingsUpdate
     );
+    window.addEventListener("project:remote:trackAdd", handleRemoteTrackAdd);
+    window.addEventListener(
+      "project:remote:trackUpdate",
+      handleRemoteTrackUpdate
+    );
+    window.addEventListener(
+      "project:remote:trackDelete",
+      handleRemoteTrackDelete
+    );
+    window.addEventListener(
+      "project:remote:timelineBulkUpdate",
+      handleRemoteTimelineBulkUpdate
+    );
+    window.addEventListener(
+      "project:remote:timelinePositionUpdate",
+      handleRemoteTimelinePositionUpdate
+    );
     window.addEventListener("project:remote:presence", handleRemotePresence);
     window.addEventListener(
       "project:remote:connection",
       handleRemoteConnection
+    );
+    window.addEventListener(
+      "project:remote:editingActivity",
+      handleRemoteEditingActivity
     );
 
     return () => {
@@ -1081,6 +1317,26 @@ const ProjectDetailPage = () => {
         handleRemoteSettingsUpdate
       );
       window.removeEventListener(
+        "project:remote:trackAdd",
+        handleRemoteTrackAdd
+      );
+      window.removeEventListener(
+        "project:remote:trackUpdate",
+        handleRemoteTrackUpdate
+      );
+      window.removeEventListener(
+        "project:remote:trackDelete",
+        handleRemoteTrackDelete
+      );
+      window.removeEventListener(
+        "project:remote:timelineBulkUpdate",
+        handleRemoteTimelineBulkUpdate
+      );
+      window.removeEventListener(
+        "project:remote:timelinePositionUpdate",
+        handleRemoteTimelinePositionUpdate
+      );
+      window.removeEventListener(
         "project:remote:presence",
         handleRemotePresence
       );
@@ -1088,13 +1344,18 @@ const ProjectDetailPage = () => {
         "project:remote:connection",
         handleRemoteConnection
       );
+      window.removeEventListener(
+        "project:remote:editingActivity",
+        handleRemoteEditingActivity
+      );
     };
-  }, []);
+  }, [collaborators]);
 
   const [project, setProject] = useState(null);
   const [tracks, setTracks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [userRole, setUserRole] = useState("viewer");
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSavingTimeline, setIsSavingTimeline] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -1445,7 +1706,7 @@ const ProjectDetailPage = () => {
         const found = (track.items || []).find((item) => item._id === itemId);
         if (found) {
           const normalized = normalizeTimelineItem(found);
-          return {
+          const snapshot = {
             _id: normalized._id,
             startTime: normalized.startTime,
             duration: normalized.duration,
@@ -1454,6 +1715,24 @@ const ProjectDetailPage = () => {
             playbackRate: normalized.playbackRate,
             sourceDuration: normalized.sourceDuration,
           };
+
+          // Include chord-related fields for chord timeline items
+          if (normalized.type === "chord") {
+            if (normalized.chordName !== undefined) {
+              snapshot.chordName = normalized.chordName;
+            }
+            if (normalized.rhythmPatternId !== undefined) {
+              snapshot.rhythmPatternId = normalized.rhythmPatternId;
+            }
+            if (normalized.isCustomized !== undefined) {
+              snapshot.isCustomized = normalized.isCustomized;
+            }
+            if (normalized.customMidiEvents !== undefined) {
+              snapshot.customMidiEvents = normalized.customMidiEvents;
+            }
+          }
+
+          return snapshot;
         }
       }
       return null;
@@ -1496,13 +1775,18 @@ const ProjectDetailPage = () => {
 
     try {
       await bulkUpdateTimelineItems(projectId, payload);
+
+      // Broadcast to collaborators
+      if (broadcast) {
+        broadcast("TIMELINE_ITEMS_BULK_UPDATE", { items: payload });
+      }
     } catch (error) {
       console.error("Timeline items bulk save failed:", error);
       ids.forEach((id) => dirtyTimelineItemsRef.current.add(id));
     } finally {
       setIsSavingTimeline(false);
     }
-  }, [projectId, collectTimelineItemSnapshot]);
+  }, [projectId, collectTimelineItemSnapshot, broadcast]);
 
   const scheduleTimelineAutosave = useCallback(() => {
     clearTimeout(autosaveTimeoutRef.current);
@@ -1606,6 +1890,11 @@ const ProjectDetailPage = () => {
           );
           const normalized = normalizeTracks(response.data.tracks || []);
           setTracks(normalized);
+
+          // Store userRole if available
+          if (response.data.userRole) {
+            setUserRole(response.data.userRole);
+          }
 
           // Initialize backingTrack state if a backing track exists
           const existingBackingTrack = normalized.find(
@@ -2201,6 +2490,14 @@ const ProjectDetailPage = () => {
 
       const response = await addLickToTimeline(projectId, timelineData);
       if (response.success) {
+        // Broadcast to collaborators
+        if (broadcast) {
+          broadcast("LICK_ADD_TO_TIMELINE", {
+            trackId: timelineData.trackId,
+            item: response.data,
+          });
+        }
+
         await refreshProject();
         alert("Chord added to timeline!");
       }
@@ -2216,10 +2513,20 @@ const ProjectDetailPage = () => {
   const handleOpenMidiEditor = (timelineItem) => {
     setEditingTimelineItem(timelineItem);
     setMidiEditorOpen(true);
+
+    // Broadcast that we're editing this item
+    if (broadcastEditingActivity && timelineItem?._id) {
+      broadcastEditingActivity(timelineItem._id, true);
+    }
   };
 
   // Handle closing MIDI editor
   const handleCloseMidiEditor = () => {
+    // Broadcast that we're done editing
+    if (broadcastEditingActivity && editingTimelineItem?._id) {
+      broadcastEditingActivity(editingTimelineItem._id, false);
+    }
+
     setMidiEditorOpen(false);
     setEditingTimelineItem(null);
   };
@@ -2233,6 +2540,15 @@ const ProjectDetailPage = () => {
       });
 
       if (response.success) {
+        // Broadcast to collaborators
+        if (broadcast) {
+          broadcast("TIMELINE_ITEM_UPDATE", {
+            itemId: updatedItem._id,
+            customMidiEvents: updatedItem.customMidiEvents,
+            isCustomized: updatedItem.isCustomized,
+          });
+        }
+
         await refreshProject();
         handleCloseMidiEditor();
       }
@@ -2764,7 +3080,7 @@ const ProjectDetailPage = () => {
     return Math.max(maxTime * pixelsPerSecond + 200, 1000);
   };
 
-  const saveChordProgression = async (chords) => {
+  const saveChordProgression = async (chords, isRemote = false) => {
     try {
       pushHistory();
       const normalized = (chords || [])
@@ -2774,6 +3090,12 @@ const ProjectDetailPage = () => {
       // Optimistic update - update chord progression in local state immediately
       setChordProgression(normalized);
       await updateChordProgressionAPI(projectId, normalized);
+
+      // Broadcast to collaborators (if not a remote update)
+      if (!isRemote && broadcast) {
+        broadcast("CHORD_PROGRESSION_UPDATE", { chords: normalized });
+      }
+
       // Silent refresh in background
       refreshProject();
     } catch (err) {
@@ -2790,6 +3112,14 @@ const ProjectDetailPage = () => {
       backingInstrumentId: instrumentId,
     }));
     await updateProject(projectId, { backingInstrumentId: instrumentId });
+
+    // Broadcast to collaborators
+    if (broadcast) {
+      broadcast("PROJECT_SETTINGS_UPDATE", {
+        backingInstrumentId: instrumentId,
+      });
+    }
+
     refreshProject();
   };
 
@@ -2915,11 +3245,16 @@ const ProjectDetailPage = () => {
     setProject((prev) => (prev ? { ...prev, tempo } : prev));
     try {
       await updateProject(projectId, { tempo });
+
+      // Broadcast to collaborators
+      if (broadcast) {
+        broadcast("PROJECT_SETTINGS_UPDATE", { tempo });
+      }
     } catch (err) {
       console.error("Error updating tempo:", err);
       refreshProject();
     }
-  }, [project, tempoDraft, projectId, refreshProject]);
+  }, [project, tempoDraft, projectId, refreshProject, broadcast]);
 
   const commitSwingChange = useCallback(async () => {
     if (!project) return;
@@ -2931,11 +3266,16 @@ const ProjectDetailPage = () => {
     setProject((prev) => (prev ? { ...prev, swingAmount: parsed } : prev));
     try {
       await updateProject(projectId, { swingAmount: parsed });
+
+      // Broadcast to collaborators
+      if (broadcast) {
+        broadcast("PROJECT_SETTINGS_UPDATE", { swingAmount: parsed });
+      }
     } catch (err) {
       console.error("Error updating swing amount:", err);
       refreshProject();
     }
-  }, [project, swingDraft, projectId, refreshProject]);
+  }, [project, swingDraft, projectId, refreshProject, broadcast]);
 
   const handleTimeSignatureChange = async (value) => {
     if (!project || !value) return;
@@ -2950,6 +3290,11 @@ const ProjectDetailPage = () => {
     );
     try {
       await updateProject(projectId, { timeSignature: normalized });
+
+      // Broadcast to collaborators
+      if (broadcast) {
+        broadcast("PROJECT_SETTINGS_UPDATE", { timeSignature: normalized });
+      }
     } catch (err) {
       console.error("Error updating time signature:", err);
       refreshProject();
@@ -2966,6 +3311,11 @@ const ProjectDetailPage = () => {
     setProject((prev) => (prev ? { ...prev, key: normalized } : prev));
     try {
       await updateProject(projectId, { key: normalized });
+
+      // Broadcast to collaborators
+      if (broadcast) {
+        broadcast("PROJECT_SETTINGS_UPDATE", { key: normalized });
+      }
     } catch (err) {
       console.error("Error updating key:", err);
       refreshProject();
@@ -3142,6 +3492,14 @@ const ProjectDetailPage = () => {
         );
         setError(null);
 
+        // Broadcast to collaborators
+        if (broadcast) {
+          broadcast("LICK_ADD_TO_TIMELINE", {
+            trackId: trackId.toString(),
+            item: newItem,
+          });
+        }
+
         // --- FIX BUG 1: BỎ DÒNG refreshProject() ---
         // Không gọi refreshProject() ngay lập tức vì server có thể chưa lưu kịp.
         // State cục bộ (newItem) đã đủ để hiển thị rồi.
@@ -3208,6 +3566,12 @@ const ProjectDetailPage = () => {
       );
 
       await deleteTimelineItem(projectId, itemId);
+
+      // Broadcast to collaborators
+      if (broadcast) {
+        broadcast("TIMELINE_ITEM_DELETE", { itemId });
+      }
+
       // Silent refresh in background to ensure sync
       refreshProject();
     } catch (err) {
@@ -3256,46 +3620,52 @@ const ProjectDetailPage = () => {
     }
   };
 
-  const handleAddTrack = async () => {
-    const typeInput = prompt(
-      "Create which type of track? Enter 'backing', 'audio', or 'midi':",
-      "audio"
-    );
-    if (!typeInput) return;
-    const normalizedType = typeInput.trim().toLowerCase();
-    const trackTypeValue =
-      normalizedType === "backing"
-        ? "backing"
-        : normalizedType === "midi"
-        ? "midi"
-        : "audio";
-    const isBackingTrack = trackTypeValue === "backing";
+  const handleAddTrack = () => {
+    // Check track limit (max 10 tracks per project)
+    if (tracks.length >= 10) {
+      setAddTrackError(
+        "Maximum of 10 tracks allowed per project. Please remove a track before adding a new one."
+      );
+      setAddTrackModalOpen(true);
+      return;
+    }
+    setNewTrackName(`New Audio Track ${tracks.length + 1}`);
+    setAddTrackError(null);
+    setAddTrackSuccess(null);
+    setAddTrackModalOpen(true);
+  };
 
-    if (isBackingTrack && backingTrack) {
-      alert(
-        "A backing track already exists. Remove it before creating another."
+  const handleConfirmAddTrack = async () => {
+    if (!newTrackName.trim()) {
+      setAddTrackError("Please enter a track name");
+      return;
+    }
+
+    // Check track limit again
+    if (tracks.length >= 10) {
+      setAddTrackError(
+        "Maximum of 10 tracks allowed per project. Please remove a track before adding a new one."
       );
       return;
     }
 
-    const defaultName =
-      trackTypeValue === "backing"
-        ? "Backing Track"
-        : trackTypeValue === "midi"
-        ? "New MIDI Track"
-        : "New Audio Track";
-    const trackName = prompt("Enter track name:", defaultName);
-    if (!trackName) return;
+    // Default to audio track type
+    const trackTypeValue = "audio";
+    const isBackingTrack = false;
 
     try {
+      setAddTrackError(null);
+      setAddTrackSuccess(null);
+
       const defaultColor =
         TRACK_COLOR_PALETTE[tracks.length % TRACK_COLOR_PALETTE.length];
       const response = await addTrack(projectId, {
-        trackName,
+        trackName: newTrackName.trim(),
         isBackingTrack,
         trackType: trackTypeValue,
         color: defaultColor,
       });
+
       if (response.success) {
         const [normalizedTrack] = normalizeTracks([
           {
@@ -3308,15 +3678,21 @@ const ProjectDetailPage = () => {
         if (normalizedTrack) {
           pushHistory();
           setTracks((prevTracks) => [...prevTracks, normalizedTrack]);
-          if (isBackingTrack) {
-            setBackingTrack(normalizedTrack);
-          }
+
+          setAddTrackSuccess(
+            `Track "${newTrackName.trim()}" added successfully!`
+          );
+          setTimeout(() => {
+            setAddTrackModalOpen(false);
+            setNewTrackName("");
+            setAddTrackSuccess(null);
+          }, 1500);
         }
         refreshProject();
       }
     } catch (err) {
       console.error("Error adding track:", err);
-      setError(err.message || "Failed to add track");
+      setAddTrackError(err.message || "Failed to add track");
     }
   };
 
@@ -3331,6 +3707,12 @@ const ProjectDetailPage = () => {
       );
 
       await updateTrack(projectId, trackId, updates);
+
+      // Broadcast to collaborators
+      if (broadcast) {
+        broadcast("TRACK_UPDATE", { trackId, updates });
+      }
+
       // Silent refresh in background to ensure sync
       refreshProject();
     } catch (err) {
@@ -3410,6 +3792,19 @@ const ProjectDetailPage = () => {
         updateTrack(projectId, track._id, { trackOrder: targetOrder }),
         updateTrack(projectId, targetTrack._id, { trackOrder: currentOrder }),
       ]);
+
+      // Broadcast to collaborators
+      if (broadcast) {
+        broadcast("TRACK_UPDATE", {
+          trackId: track._id,
+          updates: { trackOrder: targetOrder },
+        });
+        broadcast("TRACK_UPDATE", {
+          trackId: targetTrack._id,
+          updates: { trackOrder: currentOrder },
+        });
+      }
+
       refreshProject();
     } catch (err) {
       console.error("Error reordering tracks:", err);
@@ -3441,6 +3836,12 @@ const ProjectDetailPage = () => {
       ) {
         setFocusedClipId(null);
       }
+
+      // Broadcast to collaborators
+      if (broadcast) {
+        broadcast("TRACK_DELETE", { trackId: track._id });
+      }
+
       refreshProject();
     } catch (err) {
       console.error("Error deleting track:", err);
@@ -3643,11 +4044,19 @@ const ProjectDetailPage = () => {
         })
       );
 
+      // Broadcast position update in real-time (debounced)
+      if (broadcast) {
+        broadcast("TIMELINE_ITEM_POSITION_UPDATE", {
+          itemId,
+          updates: sanitized,
+        });
+      }
+
       // mark dirty & schedule autosave; actual DB write is deferred
       markTimelineItemDirty(itemId);
       scheduleTimelineAutosave();
     },
-    [markTimelineItemDirty, scheduleTimelineAutosave]
+    [markTimelineItemDirty, scheduleTimelineAutosave, broadcast]
   );
 
   useEffect(() => {
@@ -3900,6 +4309,14 @@ const ProjectDetailPage = () => {
         };
       })
     );
+
+    // Broadcast position update in real-time (for Google Docs-like experience)
+    if (broadcast) {
+      broadcast("TIMELINE_ITEM_POSITION_UPDATE", {
+        itemId,
+        updates: { startTime: newStartTime },
+      });
+    }
 
     // mark dirty & schedule autosave; actual DB write is deferred
     markTimelineItemDirty(itemId);
@@ -4206,6 +4623,7 @@ const ProjectDetailPage = () => {
                 <CollaboratorAvatars
                   collaborators={collaborators}
                   currentUserId={user?._id}
+                  activeEditors={activeEditors}
                 />
                 {/* Invite Collaborator Button */}
                 <button
@@ -4770,6 +5188,14 @@ const ProjectDetailPage = () => {
                                     loopRepeats - 1
                                   );
 
+                                  // Check if someone is editing this item
+                                  const activeEditor = activeEditors.get(
+                                    item._id
+                                  );
+                                  const isBeingEdited =
+                                    activeEditor &&
+                                    activeEditor.userId !== user?._id;
+
                                   return (
                                     <div
                                       key={item._id}
@@ -4784,6 +5210,8 @@ const ProjectDetailPage = () => {
                                     ${
                                       isSelected
                                         ? "border-yellow-400 shadow-md z-50"
+                                        : isBeingEdited
+                                        ? "border-blue-400 shadow-lg z-40"
                                         : "border-transparent z-10"
                                     }
                                   `}
@@ -4822,6 +5250,26 @@ const ProjectDetailPage = () => {
                                         handleOpenMidiEditor(item);
                                       }}
                                     >
+                                      {/* Active Editor Indicator */}
+                                      {isBeingEdited && activeEditor && (
+                                        <div className="absolute top-1 right-1 z-50 flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/90 rounded text-white text-[9px] font-medium shadow-lg">
+                                          {activeEditor.avatarUrl ? (
+                                            <img
+                                              src={activeEditor.avatarUrl}
+                                              alt={activeEditor.userName}
+                                              className="w-3 h-3 rounded-full"
+                                            />
+                                          ) : (
+                                            <div className="w-3 h-3 rounded-full bg-blue-600"></div>
+                                          )}
+                                          <span className="truncate max-w-[60px]">
+                                            {activeEditor.userName}
+                                          </span>
+                                          <span className="animate-pulse">
+                                            ●
+                                          </span>
+                                        </div>
+                                      )}
                                       {/* 1. THE RENDERED CANVAS (The Data Layer) */}
                                       <div className="absolute inset-0 w-full h-full">
                                         {showWaveform ? (
@@ -5077,6 +5525,33 @@ const ProjectDetailPage = () => {
                       );
                     })}
 
+                    {/* Add Track Button - Under the last track */}
+                    <div
+                      className="flex border-b border-gray-900 bg-[#05070d]"
+                      style={{ minHeight: "90px" }}
+                    >
+                      <div className="w-64 border-r border-gray-800/50 p-2 flex items-center justify-center sticky left-0 z-10 bg-[#05060d]">
+                        <button
+                          onClick={handleAddTrack}
+                          disabled={tracks.length >= 10}
+                          className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
+                            tracks.length >= 10
+                              ? "bg-gray-800 text-gray-500 cursor-not-allowed"
+                              : "bg-green-600 hover:bg-green-500 text-white"
+                          }`}
+                          title={
+                            tracks.length >= 10
+                              ? "Maximum of 10 tracks allowed per project"
+                              : "Add a new track"
+                          }
+                        >
+                          <FaPlus size={12} />
+                          Add Track
+                        </button>
+                      </div>
+                      <div className="flex-1 bg-[#05070d]"></div>
+                    </div>
+
                     {!hasAnyUserClips && !draggedLick && (
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <div className="bg-gray-900/85 border border-gray-800 rounded-lg px-6 py-3 text-gray-300 text-sm text-center">
@@ -5098,14 +5573,24 @@ const ProjectDetailPage = () => {
                     <div className="w-64 bg-gray-950 border-r border-gray-850 px-3 py-2">
                       <button
                         onClick={handleAddTrack}
-                        className="w-full bg-gray-900 hover:bg-gray-800 text-white px-3 py-1.5 rounded-full text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+                        disabled={tracks.length >= 10}
+                        className={`w-full px-3 py-1.5 rounded-full text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                          tracks.length >= 10
+                            ? "bg-gray-800 text-gray-500 cursor-not-allowed"
+                            : "bg-gray-900 hover:bg-gray-800 text-white"
+                        }`}
+                        title={
+                          tracks.length >= 10
+                            ? "Maximum of 10 tracks allowed per project"
+                            : "Add a new track"
+                        }
                       >
                         <FaPlus size={10} />
                         Add Track
                       </button>
                     </div>
                     <div className="flex-1 bg-gray-900 px-4 py-2 text-[11px] text-gray-500 flex items-center">
-                      {userTracks.length} tracks •{" "}
+                      {userTracks.length} / 10 tracks •{" "}
                       {hasAnyUserClips ? "Editing" : "Empty arrangement"}
                     </div>
                   </div>
@@ -5172,6 +5657,13 @@ const ProjectDetailPage = () => {
                               if (project) {
                                 updateProject(projectId, { style: newStyle });
                                 setProject({ ...project, style: newStyle });
+
+                                // Broadcast to collaborators
+                                if (broadcast) {
+                                  broadcast("PROJECT_SETTINGS_UPDATE", {
+                                    style: newStyle,
+                                  });
+                                }
                               }
                             }}
                             instruments={instruments}
@@ -5301,6 +5793,7 @@ const ProjectDetailPage = () => {
             onClose={() => setInviteModalOpen(false)}
             projectId={projectId}
             currentUserId={user?._id}
+            userRole={userRole}
             onCollaboratorAdded={(newCollaborator) => {
               // Refresh project to get updated collaborator list
               if (refreshProjectRef.current) {
@@ -5347,6 +5840,91 @@ const ProjectDetailPage = () => {
           {error && (
             <div className="fixed bottom-4 right-4 bg-red-900/20 border border-red-800 rounded-lg p-4 max-w-md">
               <p className="text-red-400 text-sm">{error}</p>
+            </div>
+          )}
+
+          {/* Add Track Modal */}
+          {addTrackModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+              <div className="bg-gray-900 border border-gray-800 rounded-lg w-full max-w-md mx-4 shadow-2xl">
+                {/* Header */}
+                <div className="flex items-center justify-between p-4 border-b border-gray-800">
+                  <h2 className="text-lg font-semibold text-white">
+                    Add New Track
+                  </h2>
+                  <button
+                    onClick={() => {
+                      setAddTrackModalOpen(false);
+                      setNewTrackName("");
+                      setAddTrackError(null);
+                      setAddTrackSuccess(null);
+                    }}
+                    className="text-gray-400 hover:text-white transition-colors"
+                  >
+                    <FaTimes size={20} />
+                  </button>
+                </div>
+
+                {/* Content */}
+                <div className="p-4 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      Track Name
+                    </label>
+                    <input
+                      type="text"
+                      value={newTrackName}
+                      onChange={(e) => setNewTrackName(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === "Enter" && newTrackName.trim()) {
+                          handleConfirmAddTrack();
+                        }
+                      }}
+                      placeholder="Enter track name"
+                      className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                      autoFocus
+                    />
+                    <p className="mt-2 text-xs text-gray-500">
+                      Track type: Audio (default)
+                    </p>
+                  </div>
+
+                  {/* Messages */}
+                  {addTrackError && (
+                    <div className="p-3 bg-red-900/20 border border-red-700/50 rounded-lg text-red-400 text-sm">
+                      {addTrackError}
+                    </div>
+                  )}
+                  {addTrackSuccess && (
+                    <div className="p-3 bg-green-900/20 border border-green-700/50 rounded-lg text-green-400 text-sm">
+                      {addTrackSuccess}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="p-4 border-t border-gray-800 flex justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setAddTrackModalOpen(false);
+                      setNewTrackName("");
+                      setAddTrackError(null);
+                      setAddTrackSuccess(null);
+                    }}
+                    className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmAddTrack}
+                    disabled={!newTrackName.trim() || !!addTrackSuccess}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2"
+                  >
+                    <FaPlus size={14} />
+                    {addTrackSuccess ? "Added!" : "Add Track"}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

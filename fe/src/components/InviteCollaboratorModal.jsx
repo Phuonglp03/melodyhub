@@ -12,6 +12,7 @@ export default function InviteCollaboratorModal({
   onClose,
   projectId,
   currentUserId,
+  userRole, // "owner", "admin", "contributor", "viewer"
   onCollaboratorAdded,
   onCollaboratorRemoved,
 }) {
@@ -239,26 +240,38 @@ export default function InviteCollaboratorModal({
                               {user.email}
                             </div>
                           )}
-                          {collab.role && (
-                            <div className="text-gray-500 text-xs capitalize">
-                              {collab.role}
-                            </div>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {collab.role && (
+                              <div className="text-gray-500 text-xs capitalize">
+                                {collab.role}
+                              </div>
+                            )}
+                            {collab.status === "pending" && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                                Pending
+                              </span>
+                            )}
+                            {collab.status === "accepted" && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
+                                Accepted
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      {/* Remove button - disabled until backend implements endpoint */}
-                      <button
-                        onClick={() => {
-                          setError(
-                            "Remove collaborator feature not yet available"
-                          );
-                        }}
-                        className="p-2 text-gray-500 hover:text-gray-400 rounded-lg transition-colors cursor-not-allowed"
-                        title="Remove collaborator (coming soon)"
-                        disabled
-                      >
-                        <FaUserMinus size={16} />
-                      </button>
+                      {/* Remove button - only for owners and admins */}
+                      {(userRole === "owner" || userRole === "admin") && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemove(userId);
+                          }}
+                          className="p-2 text-gray-500 hover:text-red-400 rounded-lg transition-colors"
+                          title="Remove collaborator"
+                        >
+                          <FaUserMinus size={16} />
+                        </button>
+                      )}
                     </div>
                   );
                 })}

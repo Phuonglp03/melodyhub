@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaPlus, FaTrash, FaEdit, FaMusic } from "react-icons/fa";
+import { FaPlus, FaTrash, FaEdit, FaMusic, FaCheck, FaTimes } from "react-icons/fa";
 import { getUserProjects, deleteProject } from "../../../services/user/projectService";
+import { acceptProjectInvitation, declineProjectInvitation } from "../../../services/user/notificationService";
+import { getNotifications, markNotificationAsRead } from "../../../services/user/notificationService";
 import { useSelector } from "react-redux";
 
 const ProjectListPage = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
+  const [pendingInvitations, setPendingInvitations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState("all");
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [processingInvitation, setProcessingInvitation] = useState(null);
 
   const user = useSelector((state) => state.auth.user);
 
@@ -26,6 +30,7 @@ const ProjectListPage = () => {
       const response = await getUserProjects(filter);
       if (response.success) {
         setProjects(response.data || []);
+        setPendingInvitations(response.pendingInvitations || []);
       } else {
         setError(response.message || "Failed to load projects");
       }
@@ -62,6 +67,67 @@ const ProjectListPage = () => {
       month: "short",
       day: "numeric",
     });
+  };
+
+  const handleAcceptInvitation = async (projectId, e) => {
+    if (e) e.stopPropagation();
+    try {
+      setProcessingInvitation(projectId);
+      await acceptProjectInvitation(projectId);
+      
+      // Mark related notifications as read
+      try {
+        const notifications = await getNotifications({ page: 1, limit: 100 });
+        const relatedNotifications = notifications.data?.notifications?.filter(
+          (n) => n.type === "project_invite" && n.linkUrl?.includes(`/projects/${projectId}`) && !n.isRead
+        ) || [];
+        
+        for (const notif of relatedNotifications) {
+          await markNotificationAsRead(notif._id);
+        }
+      } catch (err) {
+        console.error("Error marking notifications as read:", err);
+      }
+      
+      // Remove from pending list and refresh
+      setPendingInvitations((prev) => prev.filter((inv) => inv._id !== projectId));
+      fetchProjects(); // Refresh to show in collaborations
+    } catch (error) {
+      console.error("Error accepting invitation:", error);
+      alert(error?.response?.data?.message || "Failed to accept invitation");
+    } finally {
+      setProcessingInvitation(null);
+    }
+  };
+
+  const handleDeclineInvitation = async (projectId, e) => {
+    if (e) e.stopPropagation();
+    try {
+      setProcessingInvitation(projectId);
+      await declineProjectInvitation(projectId);
+      
+      // Mark related notifications as read
+      try {
+        const notifications = await getNotifications({ page: 1, limit: 100 });
+        const relatedNotifications = notifications.data?.notifications?.filter(
+          (n) => n.type === "project_invite" && n.linkUrl?.includes(`/projects/${projectId}`) && !n.isRead
+        ) || [];
+        
+        for (const notif of relatedNotifications) {
+          await markNotificationAsRead(notif._id);
+        }
+      } catch (err) {
+        console.error("Error marking notifications as read:", err);
+      }
+      
+      // Remove from pending list
+      setPendingInvitations((prev) => prev.filter((inv) => inv._id !== projectId));
+    } catch (error) {
+      console.error("Error declining invitation:", error);
+      alert(error?.response?.data?.message || "Failed to decline invitation");
+    } finally {
+      setProcessingInvitation(null);
+    }
   };
 
   if (loading) {
@@ -142,8 +208,85 @@ const ProjectListPage = () => {
         </div>
       </div>
 
+      {/* Pending Invitations Section - Show in Collaborations tab */}
+      {filter === "collaborations" && pendingInvitations.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-white mb-4">Pending Invitations</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mb-6">
+            {pendingInvitations.map((invitation) => (
+              <div
+                key={invitation._id}
+                className="bg-yellow-900/20 border-2 border-yellow-500/50 rounded-xl overflow-hidden"
+              >
+                {/* Invitation Header */}
+                <div className="relative h-32 bg-gradient-to-br from-yellow-500/20 to-orange-600/20 flex items-center justify-center overflow-hidden">
+                  <div className="text-4xl text-yellow-600">
+                    <FaMusic />
+                  </div>
+                  <div className="absolute top-2 right-2">
+                    <span className="px-2 py-1 rounded-full bg-yellow-500/30 text-yellow-400 text-xs font-semibold border border-yellow-500/50">
+                      Pending
+                    </span>
+                  </div>
+                </div>
+
+                {/* Invitation Info */}
+                <div className="p-4">
+                  <h3 className="text-base font-semibold text-white mb-1 truncate">
+                    {invitation.title}
+                  </h3>
+                  {invitation.description && (
+                    <p className="text-sm text-gray-400 mb-2 line-clamp-2">
+                      {invitation.description}
+                    </p>
+                  )}
+                  <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
+                    <span>by {invitation.creatorId?.displayName || invitation.creatorId?.username || "Unknown"}</span>
+                    <span className="px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400 text-xs">
+                      {invitation.invitationRole}
+                    </span>
+                  </div>
+                  
+                  {/* Accept/Decline Buttons */}
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={(e) => handleAcceptInvitation(invitation._id, e)}
+                      disabled={processingInvitation === invitation._id}
+                      className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    >
+                      {processingInvitation === invitation._id ? (
+                        <span className="animate-spin">⏳</span>
+                      ) : (
+                        <>
+                          <FaCheck size={12} />
+                          Accept
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={(e) => handleDeclineInvitation(invitation._id, e)}
+                      disabled={processingInvitation === invitation._id}
+                      className="flex-1 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed text-white px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    >
+                      {processingInvitation === invitation._id ? (
+                        <span className="animate-spin">⏳</span>
+                      ) : (
+                        <>
+                          <FaTimes size={12} />
+                          Decline
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Projects Grid */}
-      {projects.length === 0 ? (
+      {projects.length === 0 && (filter !== "collaborations" || pendingInvitations.length === 0) ? (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center">
           <FaMusic className="mx-auto mb-4 opacity-50" size={48} />
           <h5 className="text-xl font-semibold text-white mb-2">No projects found</h5>
@@ -152,7 +295,9 @@ const ProjectListPage = () => {
               ? "You haven't created or joined any projects yet."
               : filter === "my-projects"
               ? "You haven't created any projects yet."
-              : "You haven't joined any projects as a collaborator yet."}
+              : filter === "collaborations" && pendingInvitations.length === 0
+              ? "You haven't joined any projects as a collaborator yet."
+              : "No accepted collaborations yet."}
           </p>
           <button
             className="bg-gradient-to-r from-orange-500 to-red-600 text-white px-6 py-3 rounded-md font-semibold hover:opacity-90 transition-opacity inline-flex items-center"
@@ -173,10 +318,22 @@ const ProjectListPage = () => {
                 onClick={() => navigate(`/projects/${project._id}`)}
               >
                 {/* Project Header */}
-                <div className="relative h-32 bg-gradient-to-br from-orange-500/20 to-red-600/20 flex items-center justify-center">
-                  <div className="text-4xl text-gray-600">
-                    <FaMusic />
-                  </div>
+                <div className="relative h-32 bg-gradient-to-br from-orange-500/20 to-red-600/20 flex items-center justify-center overflow-hidden">
+                  {project.audioUrl && project.waveformData ? (
+                    <div className="absolute inset-0 flex items-end gap-[1px] px-2 pb-1">
+                      {project.waveformData.slice(0, 40).map((height, idx) => (
+                        <div
+                          key={idx}
+                          className="w-[2px] flex-1 bg-orange-400 rounded-t-sm"
+                          style={{ height: `${height * 100}%` }}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-4xl text-gray-600">
+                      <FaMusic />
+                    </div>
+                  )}
                   {isOwner && (
                     <div className="absolute top-2 right-2 flex items-center gap-2">
                       <button

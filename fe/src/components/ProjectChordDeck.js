@@ -25,14 +25,20 @@ const getDiatonicChords = (key) => {
   let keyString;
   if (typeof key === "object" && key !== null) {
     // New format: { root, scale, name }
-    keyString = getKeyDisplayName(key) || "C Major";
+    const displayName = getKeyDisplayName(key);
+    keyString = typeof displayName === "string" ? displayName : "C Major";
   } else {
     // Legacy format: string like "C Major" or "Am"
-    keyString = key || "C Major";
+    keyString = typeof key === "string" ? key : "C Major";
+  }
+  
+  // Ensure keyString is a string before calling string methods
+  if (typeof keyString !== "string") {
+    keyString = "C Major";
   }
   
   const keyIndex = notes.indexOf(keyString.replace("m", "").replace(" Major", "").replace(" Minor", "").split(" ")[0] || "C");
-  const isMinor = keyString.toLowerCase().includes("minor") || keyString.toLowerCase().includes("m") && !keyString.toLowerCase().includes("major");
+  const isMinor = keyString.toLowerCase().includes("minor") || (keyString.toLowerCase().includes("m") && !keyString.toLowerCase().includes("major"));
 
   if (isMinor) {
     const intervals = [0, 2, 3, 5, 7, 8, 10];

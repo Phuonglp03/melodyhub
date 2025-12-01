@@ -174,13 +174,11 @@ export const socketServer = (httpServer) => {
 
     socket.on("dm:typing", ({ conversationId, typing }) => {
       if (!conversationId) return;
-      socket
-        .to(conversationId)
-        .emit("dm:typing", {
-          conversationId,
-          typing: !!typing,
-          userId: tempUserId,
-        });
+      socket.to(conversationId).emit("dm:typing", {
+        conversationId,
+        typing: !!typing,
+        userId: tempUserId,
+      });
       console.log(
         `[Socket.IO] dm:typing from ${tempUserId} -> room ${conversationId} typing=${!!typing}`
       );
@@ -418,6 +416,18 @@ export const socketServer = (httpServer) => {
       socket.to(`project:${projectId}`).emit("project:cursor_update", {
         userId,
         cursor: data,
+      });
+    });
+
+    socket.on("project:editing_activity", (data) => {
+      const { projectId, userId } = socket.data;
+      if (!projectId || !userId) return;
+
+      // Broadcast editing activity to others
+      socket.to(`project:${projectId}`).emit("project:editing_activity", {
+        userId,
+        itemId: data.itemId,
+        isEditing: data.isEditing,
       });
     });
 

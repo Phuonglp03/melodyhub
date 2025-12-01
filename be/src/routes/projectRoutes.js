@@ -20,6 +20,9 @@ import {
   applyRhythmPattern,
   generateBackingTrack,
   inviteCollaborator,
+  acceptInvitation,
+  declineInvitation,
+  removeCollaborator,
 } from "../controllers/projectController.js";
 import { generateAIBackingTrack } from "../controllers/sunoAIController.js";
 import middlewareController from "../middleware/auth.js";
@@ -84,6 +87,13 @@ router.post(
   validate,
   inviteCollaborator
 );
+
+// Accept/Decline invitation routes - MUST be before /:projectId route
+router.post("/:projectId/invite/accept", acceptInvitation);
+router.post("/:projectId/invite/decline", declineInvitation);
+
+// Remove collaborator route - MUST be before /:projectId route
+router.delete("/:projectId/collaborators/:userId", removeCollaborator);
 
 router.get("/:projectId", getProjectById);
 

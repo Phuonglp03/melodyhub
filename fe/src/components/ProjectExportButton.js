@@ -1,6 +1,7 @@
 // fe/src/components/ProjectExportButton.js
 // Export button for ProjectDetailPage
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { FaDownload } from "react-icons/fa";
 import { saveProjectWithAudio } from "../services/studioExportService";
 
@@ -18,6 +19,7 @@ export default function ProjectExportButton({
   variant = "default",
   className = "",
 }) {
+  const navigate = useNavigate();
   const [isExporting, setIsExporting] = useState(false);
 
   const handleExport = async () => {
@@ -60,11 +62,8 @@ export default function ProjectExportButton({
       const result = await saveProjectWithAudio(projectState, projectId);
 
       if (result.success) {
-        alert(
-          `Project exported successfully! Audio saved to: ${
-            result.audioUrl || "Cloudinary"
-          }`
-        );
+        // Navigate to project list after successful export
+        navigate("/projects");
       } else {
         throw new Error("Export failed");
       }

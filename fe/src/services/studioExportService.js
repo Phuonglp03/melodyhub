@@ -53,6 +53,35 @@ const audioBufferToWav = (buffer) => {
   return new Blob([arrayBuffer], { type: "audio/wav" });
 };
 
+// Generate waveform data from AudioBuffer
+const generateWaveformFromBuffer = (buffer) => {
+  try {
+    const channelData = buffer.getChannelData(0); // Use first channel
+    const samples = 100; // Number of waveform bars
+    const blockSize = Math.floor(channelData.length / samples);
+    const waveform = [];
+
+    for (let i = 0; i < samples; i++) {
+      let sum = 0;
+      for (let j = 0; j < blockSize; j++) {
+        const index = i * blockSize + j;
+        if (index < channelData.length) {
+          sum += Math.abs(channelData[index]);
+        }
+      }
+      const average = sum / blockSize;
+      // Normalize to 0-1 range
+      waveform.push(Math.min(1, Math.max(0.1, average * 2)));
+    }
+
+    return waveform;
+  } catch (error) {
+    console.error("[Export] Error generating waveform:", error);
+    // Return default waveform if generation fails
+    return Array.from({ length: 100 }, () => 0.5);
+  }
+};
+
 /**
  * Export project to WAV and upload to Cloudinary
  * @param {Object} projectState - Full studio state { song, bandSettings }
@@ -167,16 +196,21 @@ export const saveProjectWithAudio = async (projectState, projectId) => {
       throw new Error("Upload succeeded but no URL returned from Cloudinary");
     }
 
+    console.log("[Export] Generating waveform data...");
+    // Generate waveform data from audio buffer
+    const waveformData = generateWaveformFromBuffer(buffer);
+
     console.log("[Export] Saving project metadata...");
     await api.put(`/projects/${projectId}`, {
       ...projectState.song,
       bandSettings: projectState.bandSettings,
       audioUrl,
       audioDuration: duration,
+      waveformData,
     });
 
     console.log("[Export] Complete!", audioUrl);
-    return { success: true, audioUrl };
+    return { success: true, audioUrl, waveformData };
   } catch (error) {
     console.error("[Export] Failed:", error);
     throw error;
