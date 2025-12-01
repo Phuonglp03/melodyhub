@@ -5,6 +5,7 @@ import DirectMessage from "../models/DirectMessage.js";
 import LiveRoom from "../models/LiveRoom.js";
 import Project from "../models/Project.js";
 import ProjectCollaborator from "../models/ProjectCollaborator.js";
+import User from "../models/User.js";
 import {
   uploadMessageText,
   downloadMessageText,
@@ -310,7 +311,8 @@ export const socketServer = (httpServer) => {
         const collaborator = await ProjectCollaborator.findOne({
           projectId,
           userId,
-          role: { $in: ["admin", "editor", "viewer"] },
+          role: { $in: ["admin", "contributor", "viewer"] },
+          status: "accepted",
         });
         const hasAccess = isOwner || !!collaborator;
 
@@ -339,19 +341,28 @@ export const socketServer = (httpServer) => {
         collaborators.get(userId).socketIds.add(socket.id);
 
         // Get user info for presence
-        const User = (await import("../models/User.js")).default;
         const user = await User.findById(userId).select(
           "displayName username avatarUrl"
         );
 
-        if (user) {
-          collaborators.get(userId).user = {
-            _id: user._id,
-            displayName: user.displayName || user.username,
-            username: user.username,
-            avatarUrl: user.avatarUrl,
-          };
+        if (!user) {
+          collaborators.get(userId).socketIds.delete(socket.id);
+          if (collaborators.get(userId).socketIds.size === 0) {
+            collaborators.delete(userId);
+          }
+          if (collaborators.size === 0) {
+            projectCollaborators.delete(projectId);
+          }
+          socket.leave(`project:${projectId}`);
+          return socket.emit("project:error", { message: "User not found" });
         }
+
+        collaborators.get(userId).user = {
+          _id: user._id,
+          displayName: user.displayName || user.username,
+          username: user.username,
+          avatarUrl: user.avatarUrl,
+        };
 
         // Broadcast presence update to others in room
         const activeCollaborators = Array.from(collaborators.values()).map(
@@ -383,8 +394,8 @@ export const socketServer = (httpServer) => {
     });
 
     socket.on("project:action", (payload) => {
-      const { projectId } = socket.data;
-      if (!projectId) {
+      const { projectId, userId } = socket.data;
+      if (!projectId || !userId) {
         return socket.emit("project:error", {
           message: "Not in a project room",
         });
@@ -393,12 +404,12 @@ export const socketServer = (httpServer) => {
       // Broadcast to all others in the project room (excluding sender)
       socket.to(`project:${projectId}`).emit("project:update", {
         ...payload,
-        senderId: socket.data.userId,
+        senderId: userId,
         timestamp: Date.now(),
       });
 
       console.log(
-        `[Socket.IO] project:action ${payload.type} from ${socket.data.userId} in project ${projectId}`
+        `[Socket.IO] project:action ${payload.type} from ${userId} in project ${projectId}`
       );
     });
 

@@ -82,12 +82,13 @@ export const useProjectChords = ({
 
         // Optimistic update - update chord progression in local state immediately
         setChordProgression(normalized);
-        await updateChordProgressionAPI(projectId, normalized);
 
-        // Broadcast to collaborators (if not a remote update)
+        // Broadcast to collaborators immediately (before API call) for instant sync
         if (!isRemote && broadcast) {
           broadcast("CHORD_PROGRESSION_UPDATE", { chords: normalized });
         }
+
+        await updateChordProgressionAPI(projectId, normalized);
 
         // Silent refresh in background
         if (refreshProject) refreshProject();

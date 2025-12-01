@@ -291,8 +291,14 @@ export const getUserProjects = async (req, res) => {
       userId: new mongoose.Types.ObjectId(userId),
       status: "pending",
     })
-      .populate("projectId", "title description creatorId updatedAt")
-      .populate("projectId.creatorId", "username displayName avatarUrl")
+      .populate({
+        path: "projectId",
+        select: "title description creatorId updatedAt",
+        populate: {
+          path: "creatorId",
+          select: "username displayName avatarUrl",
+        },
+      })
       .lean();
 
     const pendingInvitationsData = pendingInvitations
@@ -361,9 +367,10 @@ export const getProjectById = async (req, res) => {
     if (pendingOrDeclined) {
       return res.status(403).json({
         success: false,
-        message: pendingOrDeclined.status === "pending" 
-          ? "Please accept the invitation first to access this project"
-          : "Your invitation to this project was declined",
+        message:
+          pendingOrDeclined.status === "pending"
+            ? "Please accept the invitation first to access this project"
+            : "Your invitation to this project was declined",
       });
     }
 
@@ -711,11 +718,12 @@ export const addLickToTimeline = async (req, res) => {
 
     // Check edit permission - only owner and accepted collaborators (not viewers) can edit
     const { canEdit } = await checkEditPermission(projectId, userId);
-    
+
     if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project. Please accept the invitation first.",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -842,11 +850,12 @@ export const updateTimelineItem = async (req, res) => {
 
     // Check edit permission - only owner and accepted collaborators (not viewers) can edit
     const { canEdit } = await checkEditPermission(projectId, userId);
-    
+
     if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project. Please accept the invitation first.",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -1023,11 +1032,12 @@ export const bulkUpdateTimelineItems = async (req, res) => {
 
     // Check edit permission - only owner and accepted collaborators (not viewers) can edit
     const { canEdit } = await checkEditPermission(projectId, userId);
-    
+
     if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project. Please accept the invitation first.",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -1172,11 +1182,12 @@ export const deleteTimelineItem = async (req, res) => {
 
     // Check edit permission - only owner and accepted collaborators (not viewers) can edit
     const { canEdit } = await checkEditPermission(projectId, userId);
-    
+
     if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project. Please accept the invitation first.",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -1232,11 +1243,12 @@ export const updateChordProgression = async (req, res) => {
 
     // Check edit permission - only owner and accepted collaborators (not viewers) can edit
     const { canEdit } = await checkEditPermission(projectId, userId);
-    
+
     if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project. Please accept the invitation first.",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -1304,20 +1316,24 @@ export const addTrack = async (req, res) => {
 
     // Check edit permission - only owner and accepted collaborators (not viewers) can edit
     const { canEdit } = await checkEditPermission(projectId, userId);
-    
+
     if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project. Please accept the invitation first.",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
     // Check track limit (max 10 tracks per project)
-    const trackCount = await ProjectTrack.countDocuments({ projectId: project._id });
+    const trackCount = await ProjectTrack.countDocuments({
+      projectId: project._id,
+    });
     if (trackCount >= 10) {
       return res.status(400).json({
         success: false,
-        message: "Maximum of 10 tracks allowed per project. Please remove a track before adding a new one.",
+        message:
+          "Maximum of 10 tracks allowed per project. Please remove a track before adding a new one.",
       });
     }
 
@@ -1412,11 +1428,12 @@ export const updateTrack = async (req, res) => {
 
     // Check edit permission - only owner and accepted collaborators (not viewers) can edit
     const { canEdit } = await checkEditPermission(projectId, userId);
-    
+
     if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project. Please accept the invitation first.",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -1514,11 +1531,12 @@ export const deleteTrack = async (req, res) => {
 
     // Check edit permission - only owner and accepted collaborators (not viewers) can edit
     const { canEdit } = await checkEditPermission(projectId, userId);
-    
+
     if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project. Please accept the invitation first.",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -1675,11 +1693,12 @@ export const generateBackingTrack = async (req, res) => {
 
     // Check edit permission - only owner and accepted collaborators (not viewers) can edit
     const { canEdit } = await checkEditPermission(projectId, userId);
-    
+
     if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project. Please accept the invitation first.",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -2233,18 +2252,20 @@ export const inviteCollaborator = async (req, res) => {
         existingCollaborator.status = "pending";
         existingCollaborator.role = role;
         await existingCollaborator.save();
-        
+
         // Create new notification
         const inviter = await User.findById(userId);
         const notification = new Notification({
           userId: invitedUser._id,
           type: "project_invite",
           actorId: userId,
-          message: `${inviter?.displayName || inviter?.username || "Someone"} invited you to collaborate on "${project.title}"`,
+          message: `${
+            inviter?.displayName || inviter?.username || "Someone"
+          } invited you to collaborate on "${project.title}"`,
           linkUrl: `/projects/${projectId}`,
         });
         await notification.save();
-        
+
         return res.json({
           success: true,
           message: "Invitation sent successfully",
@@ -2260,25 +2281,27 @@ export const inviteCollaborator = async (req, res) => {
           },
         });
       }
-      
+
       // If pending, update role if different and resend notification
       if (existingCollaborator.status === "pending") {
         if (existingCollaborator.role !== role) {
           existingCollaborator.role = role;
           await existingCollaborator.save();
         }
-        
+
         // Create new notification to remind them
         const inviter = await User.findById(userId);
         const notification = new Notification({
           userId: invitedUser._id,
           type: "project_invite",
           actorId: userId,
-          message: `${inviter?.displayName || inviter?.username || "Someone"} invited you to collaborate on "${project.title}"`,
+          message: `${
+            inviter?.displayName || inviter?.username || "Someone"
+          } invited you to collaborate on "${project.title}"`,
           linkUrl: `/projects/${projectId}`,
         });
         await notification.save();
-        
+
         return res.json({
           success: true,
           message: "Invitation updated and resent",
@@ -2294,7 +2317,7 @@ export const inviteCollaborator = async (req, res) => {
           },
         });
       }
-      
+
       // If already accepted, check if role needs updating
       if (existingCollaborator.status === "accepted") {
         if (existingCollaborator.role !== role) {
@@ -2339,7 +2362,9 @@ export const inviteCollaborator = async (req, res) => {
       userId: invitedUser._id,
       type: "project_invite",
       actorId: userId,
-      message: `${inviter?.displayName || inviter?.username || "Someone"} invited you to collaborate on "${project.title}"`,
+      message: `${
+        inviter?.displayName || inviter?.username || "Someone"
+      } invited you to collaborate on "${project.title}"`,
       linkUrl: `/projects/${projectId}`,
     });
     await notification.save();
@@ -2552,6 +2577,14 @@ export const removeCollaborator = async (req, res) => {
       });
     }
 
+    // Prevent removing yourself before auth checks
+    if (String(collaboratorUserId) === String(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot remove yourself from your own project",
+      });
+    }
+
     // Check if current user is owner or admin
     const isOwner = String(project.creatorId) === String(userId);
     const userCollaborator = await ProjectCollaborator.findOne({
@@ -2565,14 +2598,6 @@ export const removeCollaborator = async (req, res) => {
       return res.status(403).json({
         success: false,
         message: "Only project owners and admins can remove collaborators",
-      });
-    }
-
-    // Prevent owner from removing themselves
-    if (String(collaboratorUserId) === String(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: "You cannot remove yourself from your own project",
       });
     }
 

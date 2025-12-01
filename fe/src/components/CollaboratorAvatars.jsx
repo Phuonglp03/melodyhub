@@ -31,16 +31,6 @@ export default function CollaboratorAvatars({
 
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900/60 border border-gray-800 rounded-full">
-      <span className="text-[10px] uppercase text-gray-400 mr-1">
-        {otherCollaborators.length}{" "}
-        {otherCollaborators.length === 1 ? "online" : "online"}
-        {editingUserIds.size > 0 && (
-          <span className="ml-1 text-blue-400">
-            • {editingUserIds.size}{" "}
-            {editingUserIds.size === 1 ? "editing" : "editing"}
-          </span>
-        )}
-      </span>
       <div className="flex items-center -space-x-2">
         {otherCollaborators.slice(0, 5).map((collab) => {
           const isEditing = editingUserIds.has(collab.userId);
@@ -96,6 +86,12 @@ export default function CollaboratorAvatars({
           </div>
         )}
       </div>
+      {editingUserIds.size > 0 && (
+        <span className="text-[10px] uppercase text-blue-400">
+          {editingUserIds.size}{" "}
+          {editingUserIds.size === 1 ? "editing" : "editing"}
+        </span>
+      )}
     </div>
   );
 }

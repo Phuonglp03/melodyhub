@@ -135,6 +135,16 @@ const ProjectDetailPage = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const user = useSelector((state) => state.auth.user);
+  const currentUserProfile =
+    (user?.user && typeof user.user === "object" ? user.user : user) || {};
+  const currentUserId =
+    user?._id ||
+    user?.id ||
+    user?.user?._id ||
+    user?.user?.id ||
+    currentUserProfile?._id ||
+    currentUserProfile?.id ||
+    null;
 
   // Initialize collaboration (Phase 2: Frontend Middleware)
   const { broadcast, broadcastCursor, broadcastEditingActivity } =
@@ -352,7 +362,6 @@ const ProjectDetailPage = () => {
     setDraggedChord,
     chordItems,
     chordPalette,
-    chordDurationSeconds,
     reorderChordProgression,
     saveChordProgression,
     handleAddChord,
@@ -421,6 +430,8 @@ const ProjectDetailPage = () => {
     [project?.timeSignature]
   );
   const beatsPerMeasure = normalizedTimeSignature?.numerator || 4;
+  // Each chord in the STRUCTURE lane spans exactly one bar
+  const chordDurationSeconds = beatsPerMeasure * secondsPerBeat;
   const projectSwingAmount = useMemo(
     () => clampSwingAmount(project?.swingAmount ?? 0),
     [project?.swingAmount]
@@ -644,57 +655,82 @@ const ProjectDetailPage = () => {
 
     const handleRemoteTimelineUpdate = (e) => {
       if (isRemoteUpdateRef.current) return;
-      const { itemId, customMidiEvents, isCustomized } = e.detail;
+      const { itemId, customMidiEvents, isCustomized, updates = {} } = e.detail;
 
-      // Optimistically update the item immediately
-      if (itemId) {
-        setTracks((prevTracks) =>
-          prevTracks.map((track) => {
-            const hasClip = (track.items || []).some(
-              (item) => item._id === itemId
-            );
-            if (!hasClip) return track;
+      if (!itemId) return;
+      console.log("[Collaboration] Remote timeline update:", itemId);
 
-            return {
-              ...track,
-              items: (track.items || []).map((item) =>
-                item._id === itemId
-                  ? normalizeTimelineItem({
-                      ...item,
-                      customMidiEvents,
-                      isCustomized,
-                    })
-                  : item
-              ),
-            };
-          })
-        );
-      }
+      setTracks((prevTracks) =>
+        prevTracks.map((track) => {
+          const hasClip = (track.items || []).some(
+            (item) => item._id === itemId
+          );
+          if (!hasClip) return track;
 
-      // Silent refresh in background
-      if (refreshProjectRef.current) {
-        setTimeout(() => refreshProjectRef.current(), 500);
-      }
+          return {
+            ...track,
+            items: (track.items || []).map((item) =>
+              item._id === itemId
+                ? normalizeTimelineItem({
+                    ...item,
+                    ...updates,
+                    customMidiEvents:
+                      customMidiEvents !== undefined
+                        ? customMidiEvents
+                        : item.customMidiEvents,
+                    isCustomized:
+                      isCustomized !== undefined
+                        ? isCustomized
+                        : item.isCustomized,
+                  })
+                : item
+            ),
+          };
+        })
+      );
     };
 
     const handleRemoteTimelineDelete = (e) => {
       if (isRemoteUpdateRef.current) return;
       const { itemId } = e.detail;
+      if (!itemId) return;
+      console.log("[Collaboration] Remote timeline delete:", itemId);
 
-      // Optimistically remove the item immediately
-      if (itemId) {
-        setTracks((prevTracks) =>
-          prevTracks.map((track) => ({
+      setTracks((prevTracks) =>
+        prevTracks.map((track) => ({
+          ...track,
+          items: (track.items || []).filter((item) => item._id !== itemId),
+        }))
+      );
+    };
+
+    const handleRemoteTimelineBulkUpdate = (e) => {
+      if (isRemoteUpdateRef.current) return;
+      const { items } = e.detail || {};
+      if (!Array.isArray(items) || !items.length) return;
+      console.log(
+        "[Collaboration] Remote timeline bulk update:",
+        items.map((item) => item._id)
+      );
+
+      setTracks((prevTracks) =>
+        prevTracks.map((track) => {
+          const updatedItems = (track.items || []).map((item) => {
+            const incoming = items.find((entry) => entry._id === item._id);
+            if (!incoming) return item;
+
+            return normalizeTimelineItem({
+              ...item,
+              ...incoming,
+            });
+          });
+
+          return {
             ...track,
-            items: (track.items || []).filter((item) => item._id !== itemId),
-          }))
-        );
-      }
-
-      // Silent refresh in background
-      if (refreshProjectRef.current) {
-        setTimeout(() => refreshProjectRef.current(), 500);
-      }
+            items: updatedItems,
+          };
+        })
+      );
     };
 
     const handleRemoteSettingsUpdate = (e) => {
@@ -728,16 +764,28 @@ const ProjectDetailPage = () => {
         }
       }
 
-      if (refreshProjectRef.current) {
-        refreshProjectRef.current();
-      }
+      // Removed refresh call - optimistic update is sufficient
     };
 
     const handleRemoteTrackAdd = (e) => {
       if (isRemoteUpdateRef.current) return;
-      if (refreshProjectRef.current) {
-        refreshProjectRef.current();
-      }
+      const { track } = e.detail || {};
+      if (!track) return;
+      console.log("[Collaboration] Remote track add received:", track?._id);
+
+      const [normalizedTrack] =
+        normalizeTracks([track], TRACK_COLOR_PALETTE) || [];
+      if (!normalizedTrack) return;
+
+      setTracks((prev) => {
+        const exists = prev.some((t) => t._id === normalizedTrack._id);
+        if (exists) {
+          return prev.map((t) =>
+            t._id === normalizedTrack._id ? { ...t, ...normalizedTrack } : t
+          );
+        }
+        return [...prev, normalizedTrack];
+      });
     };
 
     const handleRemoteTrackUpdate = (e) => {
@@ -753,9 +801,7 @@ const ProjectDetailPage = () => {
         );
       }
 
-      if (refreshProjectRef.current) {
-        refreshProjectRef.current();
-      }
+      // Removed refresh call - optimistic update is sufficient
     };
 
     const handleRemoteTrackDelete = (e) => {
@@ -767,16 +813,7 @@ const ProjectDetailPage = () => {
         setTracks((prev) => prev.filter((t) => t._id !== trackId));
       }
 
-      if (refreshProjectRef.current) {
-        refreshProjectRef.current();
-      }
-    };
-
-    const handleRemoteTimelineBulkUpdate = (e) => {
-      if (isRemoteUpdateRef.current) return;
-      if (refreshProjectRef.current) {
-        refreshProjectRef.current();
-      }
+      // Removed refresh call - optimistic update is sufficient
     };
 
     const handleRemoteTimelinePositionUpdate = (e) => {
@@ -828,9 +865,62 @@ const ProjectDetailPage = () => {
     };
 
     const handleRemotePresence = (e) => {
-      const { collaborators: remoteCollaborators } = e.detail;
-      if (remoteCollaborators) {
-        setCollaborators(remoteCollaborators);
+      const {
+        type,
+        collaborators: remoteCollaborators,
+        userId: eventUserId,
+      } = e.detail;
+
+      const ensureCollaboratorEntry = (list, userId, profile, roleLabel) => {
+        if (!userId) return;
+        const exists = list.some(
+          (entry) => String(entry.userId) === String(userId)
+        );
+        if (exists) return;
+        list.push({
+          userId,
+          user: profile
+            ? {
+                _id: profile._id || profile.id || userId,
+                displayName: profile.displayName || profile.username || "",
+                username: profile.username,
+                avatarUrl: profile.avatarUrl,
+                email: profile.email,
+              }
+            : undefined,
+          role: roleLabel,
+          status: "accepted",
+        });
+      };
+
+      const normalizeCollaborators = (list = []) => {
+        const next = Array.isArray(list) ? [...list] : [];
+        const ownerProfile = project?.creatorId;
+        const ownerId = ownerProfile?._id || ownerProfile?.id;
+
+        ensureCollaboratorEntry(next, ownerId, ownerProfile, "owner");
+        ensureCollaboratorEntry(
+          next,
+          currentUserId,
+          currentUserProfile,
+          userRole || "collaborator"
+        );
+
+        return next;
+      };
+
+      if (type === "SYNC" || type === "JOIN") {
+        if (remoteCollaborators) {
+          setCollaborators(normalizeCollaborators(remoteCollaborators));
+        }
+      } else if (type === "LEAVE") {
+        if (eventUserId) {
+          setCollaborators((prev) =>
+            prev.filter((c) => c.userId !== eventUserId)
+          );
+        }
+      } else if (remoteCollaborators) {
+        setCollaborators(normalizeCollaborators(remoteCollaborators));
       }
     };
 
@@ -978,6 +1068,9 @@ const ProjectDetailPage = () => {
     setProject,
     refreshProjectRef,
     normalizeTimelineItem,
+    project?.creatorId?._id,
+    currentUserId,
+    userRole,
   ]);
 
   const fetchProject = useCallback(
@@ -1122,6 +1215,47 @@ const ProjectDetailPage = () => {
     [playbackPosition]
   );
 
+  // Resolve audio URL for a timeline item (licks & chord audio)
+  const getAudioUrlForItem = useCallback(
+    async (item) => {
+      // Handle lick items - get audio URL from API
+      if (item.type === "lick" && item.lickId) {
+        const audioResponse = await playLickAudio(
+          item.lickId._id || item.lickId,
+          user?._id
+        );
+        return (
+          audioResponse?.data?.audio_url ||
+          audioResponse?.data?.audioUrl ||
+          null
+        );
+      }
+
+      // Handle chord items with generated audio
+      if (
+        item.type === "chord" ||
+        (item.chordName &&
+          (item.audioUrl || item.audio_url || item.lickId?.audioUrl))
+      ) {
+        return (
+          item.audioUrl ||
+          item.audio_url ||
+          item.lickId?.audioUrl ||
+          item.lickId?.audio_url ||
+          null
+        );
+      }
+
+      return null;
+    },
+    [user?._id]
+  );
+
+  // Schedule audio playback for current tracks
+  const scheduleAudioPlayback = useCallback(async () => {
+    await schedulePlayback(tracks, getAudioUrlForItem);
+  }, [tracks, schedulePlayback, getAudioUrlForItem]);
+
   useEffect(() => {
     const handleEscape = (event) => {
       if (event.key === "Escape") {
@@ -1224,7 +1358,7 @@ const ProjectDetailPage = () => {
 
       const response = await addLickToTimeline(projectId, timelineData);
       if (response.success) {
-        // Broadcast to collaborators
+        // Broadcast to collaborators immediately (before refresh)
         if (broadcast) {
           broadcast("LICK_ADD_TO_TIMELINE", {
             trackId: timelineData.trackId,
@@ -1268,21 +1402,44 @@ const ProjectDetailPage = () => {
   // Handle saving MIDI edits
   const handleSaveMidiEdit = async (updatedItem) => {
     try {
+      // Optimistic update - update local state immediately
+      setTracks((prevTracks) =>
+        prevTracks.map((track) => {
+          const hasClip = (track.items || []).some(
+            (item) => item._id === updatedItem._id
+          );
+          if (!hasClip) return track;
+
+          return {
+            ...track,
+            items: (track.items || []).map((item) =>
+              item._id === updatedItem._id
+                ? {
+                    ...item,
+                    customMidiEvents: updatedItem.customMidiEvents,
+                    isCustomized: updatedItem.isCustomized,
+                  }
+                : item
+            ),
+          };
+        })
+      );
+
+      // Broadcast to collaborators immediately (before API call)
+      if (broadcast) {
+        broadcast("TIMELINE_ITEM_UPDATE", {
+          itemId: updatedItem._id,
+          customMidiEvents: updatedItem.customMidiEvents,
+          isCustomized: updatedItem.isCustomized,
+        });
+      }
+
       const response = await updateTimelineItem(projectId, updatedItem._id, {
         customMidiEvents: updatedItem.customMidiEvents,
         isCustomized: updatedItem.isCustomized,
       });
 
       if (response.success) {
-        // Broadcast to collaborators
-        if (broadcast) {
-          broadcast("TIMELINE_ITEM_UPDATE", {
-            itemId: updatedItem._id,
-            customMidiEvents: updatedItem.customMidiEvents,
-            isCustomized: updatedItem.isCustomized,
-          });
-        }
-
         await refreshProject();
         handleCloseMidiEditor();
       }
@@ -1533,15 +1690,14 @@ const ProjectDetailPage = () => {
 
   //  Auto-reschedule audio when tracks change during playback
   // This is key for live editing while playing (like professional DAWs)
-  // Audio rescheduling is handled by useAudioScheduler hook via schedulePlayback
-  // Note: schedulePlayback requires getAudioUrl function which should be implemented
   useEffect(() => {
     if (isPlaying && audioEngine.players.size > 0) {
-      // Audio rescheduling is handled by useAudioScheduler hook
-      // The scheduler will automatically reschedule when tracks change
-      // TODO: Implement getAudioUrl function and call schedulePlayback(tracks, getAudioUrl)
+      const timeoutId = setTimeout(() => {
+        scheduleAudioPlayback();
+      }, 50);
+      return () => clearTimeout(timeoutId);
     }
-  }, [tracks, isPlaying, schedulePlayback, audioEngine]); // Reschedule when tracks or playback state changes
+  }, [tracks, isPlaying, scheduleAudioPlayback, audioEngine]); // Reschedule when tracks or playback state changes
 
   // Auto-save when clips are moved/edited (catches all clip position changes)
   const prevTracksRef = useRef(null);
@@ -1599,14 +1755,15 @@ const ProjectDetailPage = () => {
       ...prev,
       backingInstrumentId: instrumentId,
     }));
-    await updateProject(projectId, { backingInstrumentId: instrumentId });
 
-    // Broadcast to collaborators
+    // Broadcast to collaborators immediately (before API call)
     if (broadcast) {
       broadcast("PROJECT_SETTINGS_UPDATE", {
         backingInstrumentId: instrumentId,
       });
     }
+
+    await updateProject(projectId, { backingInstrumentId: instrumentId });
 
     refreshProject();
   };
@@ -1838,6 +1995,10 @@ const ProjectDetailPage = () => {
           pushHistory();
           setTracks((prevTracks) => [...prevTracks, normalizedTrack]);
 
+          if (broadcast) {
+            broadcast("TRACK_ADD", { track: normalizedTrack });
+          }
+
           setAddTrackSuccess(
             `Track "${newTrackName.trim()}" added successfully!`
           );
@@ -1865,12 +2026,12 @@ const ProjectDetailPage = () => {
         )
       );
 
-      await updateTrack(projectId, trackId, updates);
-
-      // Broadcast to collaborators
+      // Broadcast to collaborators immediately (before API call)
       if (broadcast) {
         broadcast("TRACK_UPDATE", { trackId, updates });
       }
+
+      await updateTrack(projectId, trackId, updates);
 
       // Silent refresh in background to ensure sync
       refreshProject();
@@ -1946,23 +2107,23 @@ const ProjectDetailPage = () => {
       })
     );
 
+    // Broadcast to collaborators immediately (before API call)
+    if (broadcast) {
+      broadcast("TRACK_UPDATE", {
+        trackId: track._id,
+        updates: { trackOrder: targetOrder },
+      });
+      broadcast("TRACK_UPDATE", {
+        trackId: targetTrack._id,
+        updates: { trackOrder: currentOrder },
+      });
+    }
+
     try {
       await Promise.all([
         updateTrack(projectId, track._id, { trackOrder: targetOrder }),
         updateTrack(projectId, targetTrack._id, { trackOrder: currentOrder }),
       ]);
-
-      // Broadcast to collaborators
-      if (broadcast) {
-        broadcast("TRACK_UPDATE", {
-          trackId: track._id,
-          updates: { trackOrder: targetOrder },
-        });
-        broadcast("TRACK_UPDATE", {
-          trackId: targetTrack._id,
-          updates: { trackOrder: currentOrder },
-        });
-      }
 
       refreshProject();
     } catch (err) {
@@ -1983,8 +2144,8 @@ const ProjectDetailPage = () => {
     }
 
     try {
-      await deleteTrack(projectId, track._id);
       pushHistory();
+      // Optimistic update - remove track from local state immediately
       setTracks((prev) => prev.filter((t) => t._id !== track._id));
       if (track.isBackingTrack) {
         setBackingTrack(null);
@@ -1996,10 +2157,12 @@ const ProjectDetailPage = () => {
         setFocusedClipId(null);
       }
 
-      // Broadcast to collaborators
+      // Broadcast to collaborators immediately (before API call)
       if (broadcast) {
         broadcast("TRACK_DELETE", { trackId: track._id });
       }
+
+      await deleteTrack(projectId, track._id);
 
       refreshProject();
     } catch (err) {
@@ -2013,6 +2176,48 @@ const ProjectDetailPage = () => {
   // handleClipMove is now in useProjectTimeline hook
 
   // getChordDuration, getChordWidth, and getChordStartPosition are now in useProjectChords hook
+
+  // Transport / playback handlers
+  const handlePlay = useCallback(async () => {
+    await audioEngine.ensureStarted();
+    if (!audioEngine.transport) {
+      console.error("Tone.Transport is not available");
+      return;
+    }
+
+    // Set transport position to current playhead
+    audioEngine.setPosition(playbackPositionRef.current);
+    audioEngine.setBpm(bpm);
+
+    setIsPlaying(true);
+
+    // Schedule audio clips
+    await scheduleAudioPlayback();
+
+    // Start transport
+    audioEngine.startTransport();
+  }, [audioEngine, bpm, scheduleAudioPlayback]);
+
+  const handlePause = useCallback(() => {
+    setIsPlaying(false);
+    audioEngine.pauseTransport();
+    audioEngine.stopAllPlayers();
+  }, [audioEngine, setIsPlaying]);
+
+  const handleStop = useCallback(() => {
+    setIsPlaying(false);
+    setPlaybackPosition(0);
+    playbackPositionRef.current = 0;
+    audioEngine.stopTransport();
+    audioEngine.stopAllPlayers();
+  }, [audioEngine, setPlaybackPosition, setIsPlaying]);
+
+  const handleReturnToStart = useCallback(() => {
+    setIsPlaying(false);
+    setPlaybackPosition(0);
+    playbackPositionRef.current = 0;
+    audioEngine.setPosition(0);
+  }, [audioEngine, setPlaybackPosition, setIsPlaying]);
 
   if (loading) {
     return (
@@ -2224,13 +2429,10 @@ const ProjectDetailPage = () => {
                   loopEnabled={loopEnabled}
                   metronomeEnabled={metronomeEnabled}
                   formattedPlayTime={formattedPlayTime}
-                  onPlay={() => setIsPlaying(true)}
-                  onPause={() => setIsPlaying(false)}
-                  onStop={() => {
-                    setIsPlaying(false);
-                    setPlaybackPosition(0);
-                  }}
-                  onReturnToStart={() => setPlaybackPosition(0)}
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onStop={handleStop}
+                  onReturnToStart={handleReturnToStart}
                   onLoopToggle={() => setLoopEnabled((prev) => !prev)}
                   onMetronomeToggle={() => setMetronomeEnabled((prev) => !prev)}
                   className="shadow-inner"
@@ -2449,15 +2651,16 @@ const ProjectDetailPage = () => {
                             style={projectStyle}
                             onStyleChange={(newStyle) => {
                               if (project) {
-                                updateProject(projectId, { style: newStyle });
                                 setProject({ ...project, style: newStyle });
 
-                                // Broadcast to collaborators
+                                // Broadcast to collaborators immediately (before API call)
                                 if (broadcast) {
                                   broadcast("PROJECT_SETTINGS_UPDATE", {
                                     style: newStyle,
                                   });
                                 }
+
+                                updateProject(projectId, { style: newStyle });
                               }
                             }}
                             instruments={instruments}
@@ -2588,6 +2791,7 @@ const ProjectDetailPage = () => {
             projectId={projectId}
             currentUserId={user?._id}
             userRole={userRole}
+            projectOwner={project?.creatorId}
             onCollaboratorAdded={(newCollaborator) => {
               // Refresh project to get updated collaborator list
               if (refreshProjectRef.current) {

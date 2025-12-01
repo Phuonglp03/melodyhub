@@ -1,5 +1,5 @@
 // InviteCollaboratorModal - Component for managing project collaborators
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { FaTimes, FaUserPlus, FaUserMinus, FaSearch } from "react-icons/fa";
 import {
   inviteCollaborator,
@@ -13,6 +13,7 @@ export default function InviteCollaboratorModal({
   projectId,
   currentUserId,
   userRole, // "owner", "admin", "contributor", "viewer"
+  projectOwner,
   onCollaboratorAdded,
   onCollaboratorRemoved,
 }) {
@@ -114,14 +115,37 @@ export default function InviteCollaboratorModal({
     }
   };
 
-  if (!isOpen) return null;
+  const allCollaborators = useMemo(() => {
+    const list = Array.isArray(collaborators) ? [...collaborators] : [];
+    const ownerId =
+      projectOwner?._id || projectOwner?.id || projectOwner?.userId;
+    if (projectOwner && ownerId) {
+      const exists = list.some(
+        (collab) =>
+          String(collab.userId?._id || collab.userId || collab._id) ===
+          String(ownerId)
+      );
+      if (!exists) {
+        list.unshift({
+          _id: ownerId,
+          userId: ownerId,
+          user: projectOwner,
+          role: "owner",
+          status: "accepted",
+          isOwner: true,
+        });
+      }
+    }
+    return list;
+  }, [collaborators, projectOwner]);
 
   // Filter out current user from collaborators list
-  // Backend returns collaborators with populated userId field
-  const otherCollaborators = collaborators.filter((collab) => {
+  const otherCollaborators = allCollaborators.filter((collab) => {
     const userId = collab.userId?._id || collab.userId || collab._id;
     return userId && String(userId) !== String(currentUserId);
   });
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">

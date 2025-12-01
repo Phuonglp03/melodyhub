@@ -43,6 +43,13 @@ export const useProjectTimeline = ({
   const [dragOverTrack, setDragOverTrack] = useState(null);
   const [dragOverPosition, setDragOverPosition] = useState(null);
 
+  // View / playback state (used by ProjectDetailPage)
+  const [zoomLevelState, setZoomLevel] = useState(zoomLevel || 1);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+  const [metronomeEnabled, setMetronomeEnabled] = useState(false);
+  const [loopEnabled, setLoopEnabled] = useState(false);
+
   // Refs
   const timelineRef = useRef(null);
   const playheadRef = useRef(null);
@@ -59,8 +66,8 @@ export const useProjectTimeline = ({
   // Calculations
   const secondsPerBeat = useMemo(() => 60 / bpm, [bpm]);
   const pixelsPerSecond = useMemo(
-    () => basePixelsPerSecond * zoomLevel,
-    [zoomLevel]
+    () => basePixelsPerSecond * zoomLevelState,
+    [zoomLevelState]
   );
   const pixelsPerBeat = useMemo(
     () => pixelsPerSecond * secondsPerBeat,
@@ -143,12 +150,11 @@ export const useProjectTimeline = ({
     dirtyTimelineItemsRef.current.clear();
 
     try {
-      await bulkUpdateTimelineItems(projectId, payload);
-
-      // Broadcast to collaborators
       if (broadcast) {
         broadcast("TIMELINE_ITEMS_BULK_UPDATE", { items: payload });
       }
+
+      await bulkUpdateTimelineItems(projectId, payload);
     } catch (error) {
       console.error("Timeline items bulk save failed:", error);
       ids.forEach((id) => dirtyTimelineItemsRef.current.add(id));
@@ -282,16 +288,17 @@ export const useProjectTimeline = ({
 
   // Handle dropping a lick onto the timeline
   const handleDrop = useCallback(
-    async (e, trackId, startTime, draggedLick, setDraggedLick) => {
+    async (e, trackId, startTime) => {
       e.preventDefault();
 
+      // Use local state for the currently dragged lick (matches call sites)
       if (!draggedLick) return;
 
       // Get lick ID - handle different field names
       const lickId = draggedLick._id || draggedLick.lick_id || draggedLick.id;
       if (!lickId) {
         if (setError) setError("Invalid lick: missing ID");
-        if (setDraggedLick) setDraggedLick(null);
+        setDraggedLick(null);
         return;
       }
 
@@ -305,7 +312,7 @@ export const useProjectTimeline = ({
 
       if (isNaN(numericStartTime) || isNaN(numericDuration)) {
         if (setError) setError("Invalid time values");
-        if (setDraggedLick) setDraggedLick(null);
+        setDraggedLick(null);
         return;
       }
 
@@ -377,10 +384,10 @@ export const useProjectTimeline = ({
         }
         if (setError) setError(errorMessage);
       } finally {
-        if (setDraggedLick) setDraggedLick(null);
+        setDraggedLick(null);
       }
     },
-    [projectId, broadcast, pushHistory, setError]
+    [projectId, broadcast, pushHistory, setError, draggedLick]
   );
 
   // Handle deleting a timeline item
@@ -405,12 +412,12 @@ export const useProjectTimeline = ({
           }))
         );
 
-        await deleteTimelineItem(projectId, itemId);
-
-        // Broadcast to collaborators
+        // Broadcast to collaborators immediately
         if (broadcast) {
           broadcast("TIMELINE_ITEM_DELETE", { itemId });
         }
+
+        await deleteTimelineItem(projectId, itemId);
 
         // Silent refresh in background to ensure sync
         if (refreshProject) refreshProject();
@@ -888,6 +895,16 @@ export const useProjectTimeline = ({
 
   return {
     // State
+    zoomLevel: zoomLevelState,
+    setZoomLevel,
+    isPlaying,
+    setIsPlaying,
+    playbackPosition,
+    setPlaybackPosition,
+    metronomeEnabled,
+    setMetronomeEnabled,
+    loopEnabled,
+    setLoopEnabled,
     tracks,
     setTracks,
     selectedItem,
