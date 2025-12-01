@@ -7,7 +7,8 @@ import { likePost, unlikePost, createPostComment, getPostStats, getAllPostCommen
 import { followUser, unfollowUser, getFollowSuggestions, getProfileById, getFollowingList, getMyProfile } from '../../../services/user/profile';
 import { ensureConversationWith } from '../../../services/dmService';
 import { onPostCommentNew, offPostCommentNew, onPostArchived, offPostArchived, joinRoom } from '../../../services/user/socketService';
-import { getMyLicks } from '../../../services/user/lickService';
+import { getMyLicks, getTopLicksLeaderboard, playLickAudio } from '../../../services/user/lickService';
+import { getUserProjects } from '../../../services/user/projectService';
 import { reportPost, checkPostReport } from '../../../services/user/reportService';
 import PostLickEmbed from '../../../components/PostLickEmbed';
 import './newFeedResponsive.css';
@@ -125,27 +126,51 @@ const Suggestion = ({ user, following, loading, onFollow }) => {
   );
 };
 
-const LeaderboardItem = ({ name, icon, iconColor = '#111' }) => (
-  <Space>
-    <div style={{ 
-      width: 36, 
-      height: 36, 
-      background: iconColor, 
-      borderRadius: 8, 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center',
-      fontSize: 12,
-      fontWeight: 'bold',
-      color: '#fff'
-    }}>
-      {icon}
-    </div>
-    <div>
-      <Text strong style={{ color: '#fff' }}>{name}</Text>
-      <div style={{ fontSize: 12, color: '#9ca3af' }}>Tên người tạo</div>
-    </div>
-  </Space>
+const LeaderboardItem = ({ rank, title, creatorName, likesCount, isPlaying, onClick }) => (
+  <div
+    onClick={onClick}
+    style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      cursor: 'pointer',
+      padding: '4px 0',
+    }}
+  >
+    <Space>
+      <div style={{ 
+        width: 32, 
+        height: 32, 
+        borderRadius: 8, 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: '#fff',
+        background: '#0f172a',
+      }}>
+        {rank}
+      </div>
+      <div>
+        <Text strong style={{ color: '#fff' }}>{title}</Text>
+        <div style={{ fontSize: 12, color: '#9ca3af' }}>
+          {creatorName || 'Ẩn danh'} · {likesCount} lượt thích
+        </div>
+      </div>
+    </Space>
+    <Button
+      type={isPlaying ? 'primary' : 'default'}
+      shape="circle"
+      size="small"
+      icon={<CustomerServiceOutlined />}
+      style={{
+        borderColor: isPlaying ? '#7c3aed' : '#303030',
+        background: isPlaying ? '#7c3aed' : '#111',
+        color: '#fff',
+      }}
+    />
+  </div>
 );
 
 const composerSectionStyle = {
@@ -230,6 +255,9 @@ const NewsFeed = () => {
   const [availableLicks, setAvailableLicks] = useState([]);
   const [loadingLicks, setLoadingLicks] = useState(false);
   const [selectedLickIds, setSelectedLickIds] = useState([]);
+  const [availableProjects, setAvailableProjects] = useState([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [previewCache, setPreviewCache] = useState({}); // url -> {title, thumbnailUrl}
   const [commentOpen, setCommentOpen] = useState(false);
   const [commentPostId, setCommentPostId] = useState(null);
@@ -263,6 +291,11 @@ const NewsFeed = () => {
   const [deletingPostId, setDeletingPostId] = useState(null);
   const [followingUsers, setFollowingUsers] = useState([]);
   const [loadingFollowing, setLoadingFollowing] = useState(false);
+  const [leaderboardLicks, setLeaderboardLicks] = useState([]);
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
+  const [leaderboardPlayingId, setLeaderboardPlayingId] = useState(null);
+  const [leaderboardLoadingId, setLeaderboardLoadingId] = useState(null);
+  const leaderboardAudioRef = React.useRef(null);
   const [currentUserId] = useState(() => {
     try {
       const raw = localStorage.getItem('user');
@@ -514,10 +547,87 @@ const NewsFeed = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const openComment = async (postId) => {
+  // Cleanup audio when unmount
+  useEffect(() => {
+    return () => {
+      if (leaderboardAudioRef.current) {
+        leaderboardAudioRef.current.pause();
+        leaderboardAudioRef.current = null;
+      }
+    };
+  }, []);
+
+  const handlePlayLeaderboardLick = async (lick) => {
+    const lickId = lick?.lick_id || lick?._id;
+    if (!lickId) return;
+
+    // If clicking on the same lick while it's playing -> pause/stop
+    if (leaderboardPlayingId === lickId && leaderboardAudioRef.current) {
+      leaderboardAudioRef.current.pause();
+      setLeaderboardPlayingId(null);
+      return;
+    }
+
+    try {
+      setLeaderboardLoadingId(lickId);
+
+      // Stop current audio if any
+      if (leaderboardAudioRef.current) {
+        leaderboardAudioRef.current.pause();
+      } else {
+        leaderboardAudioRef.current = new Audio();
+        leaderboardAudioRef.current.addEventListener('ended', () => {
+          setLeaderboardPlayingId(null);
+        });
+      }
+
+      const res = await playLickAudio(lickId);
+      const url = res?.data?.audio_url;
+      if (!res?.success || !url) {
+        message.error('Không thể phát lick này');
+        return;
+      }
+
+      leaderboardAudioRef.current.src = url;
+      await leaderboardAudioRef.current.play();
+      setLeaderboardPlayingId(lickId);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to play leaderboard lick:', e);
+      message.error(e?.message || 'Không thể phát lick');
+      setLeaderboardPlayingId(null);
+    } finally {
+      setLeaderboardLoadingId(null);
+    }
+  };
+
+  // Fetch top licks leaderboard for sidebar
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      try {
+        setLoadingLeaderboard(true);
+        const res = await getTopLicksLeaderboard(5);
+        if (res?.success && Array.isArray(res.data)) {
+          setLeaderboardLicks(res.data);
+        } else {
+          setLeaderboardLicks([]);
+        }
+      } catch (e) {
+        // Không chặn NewsFeed nếu leaderboard lỗi
+        // eslint-disable-next-line no-console
+        console.warn('Failed to load lick leaderboard:', e?.message || e);
+        setLeaderboardLicks([]);
+      } finally {
+        setLoadingLeaderboard(false);
+      }
+    };
+    fetchLeaderboard();
+  }, []);
+
+  const openComment = async (postId, postOverride = null) => {
     setCommentPostId(postId);
     setCommentText('');
-    const p = items.find((it) => it._id === postId) || null;
+    const p = postOverride || items.find((it) => it._id === postId) || null;
     setModalPost(p);
     setCommentOpen(true);
     // Fetch tất cả comments để hiển thị trong modal (không giới hạn 3)
@@ -850,11 +960,33 @@ const NewsFeed = () => {
       <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>
         <Title level={4} style={{ color: '#fff', marginBottom: 12, textAlign: 'center' }}>LeaderBoard</Title>
         <Divider style={{ margin: '8px 0', borderColor: '#1f1f1f' }} />
-        <Space direction="vertical" size={18} style={{ width: '100%' }}>
-          <LeaderboardItem name="Tên lick" icon="XVEN" iconColor="#ef4444" />
-          <LeaderboardItem name="Tên lick" icon="UNITED" iconColor="#3b82f6" />
-          <LeaderboardItem name="Tên lick" icon={<UserOutlined />} iconColor="#6b7280" />
-        </Space>
+        {loadingLeaderboard ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}>
+            <Spin />
+          </div>
+        ) : leaderboardLicks.length === 0 ? (
+          <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+            Chưa có lick nào trong bảng xếp hạng
+          </div>
+        ) : (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            {leaderboardLicks.map((lick, index) => (
+              <LeaderboardItem
+                key={lick.lick_id || lick._id || index}
+                rank={index + 1}
+                title={lick.title || 'Untitled lick'}
+                creatorName={
+                  lick.creator?.display_name ||
+                  lick.creator?.displayName ||
+                  lick.creator?.username
+                }
+                likesCount={Number(lick.likes_count ?? 0)}
+                isPlaying={leaderboardPlayingId === (lick.lick_id || lick._id)}
+                onClick={() => handlePlayLeaderboardLick(lick)}
+              />
+            ))}
+          </Space>
+        )}
       </Card>
     </>
   );
@@ -983,7 +1115,7 @@ const NewsFeed = () => {
         // Nếu post chưa có trong items, cần fetch trước
         const post = items.find((it) => it._id === postId);
         if (post) {
-          openComment(postId);
+          openComment(postId, post);
         } else {
           // Nếu post chưa có, fetch post và mở modal
           getPostById(postId).then((result) => {
@@ -993,7 +1125,7 @@ const NewsFeed = () => {
                 const exists = prev.some((it) => it._id === postId);
                 return exists ? prev : [result.data, ...prev];
               });
-              openComment(postId);
+              openComment(postId, result.data);
             }
           }).catch((err) => {
             console.error('Lỗi khi lấy bài viết:', err);
@@ -1019,7 +1151,7 @@ const NewsFeed = () => {
       // Nếu post chưa có trong items, fetch trước
       const post = items.find((it) => it._id === postId);
       if (post) {
-        openComment(postId);
+        openComment(postId, post);
       } else {
         // Nếu post chưa có, fetch post và mở modal
         getPostById(postId).then((result) => {
@@ -1029,7 +1161,7 @@ const NewsFeed = () => {
               const exists = prev.some((it) => it._id === postId);
               return exists ? prev : [result.data, ...prev];
             });
-            openComment(postId);
+            openComment(postId, result.data);
           }
         }).catch((err) => {
           console.error('Lỗi khi lấy bài viết:', err);
@@ -1099,6 +1231,17 @@ const NewsFeed = () => {
   };
 
   useEffect(() => {
+    // Nếu đã chọn lick hoặc project thì không xử lý link preview nữa
+    if (selectedLickIds && selectedLickIds.length > 0) {
+      setLinkPreview(null);
+      setLinkLoading(false);
+      return;
+    }
+    if (selectedProjectId) {
+      setLinkPreview(null);
+      setLinkLoading(false);
+      return;
+    }
     const url = extractFirstUrl(newText);
     if (!url) {
       setLinkPreview(null);
@@ -1107,18 +1250,27 @@ const NewsFeed = () => {
     let aborted = false;
     setLinkLoading(true);
     resolvePreview(url)
-      .then((data) => { if (!aborted) setLinkPreview({ url, ...data }); })
-      .finally(() => { if (!aborted) setLinkLoading(false); });
-    return () => { aborted = true; };
-  }, [newText]);
+      .then((data) => {
+        if (!aborted) setLinkPreview({ url, ...data });
+      })
+      .finally(() => {
+        if (!aborted) setLinkLoading(false);
+      });
+    return () => {
+      aborted = true;
+    };
+  }, [newText, selectedLickIds, selectedProjectId]);
 
   const fetchData = async (p = page, l = limit) => {
     setLoading(true);
     setError('');
     try {
       const res = await listPosts({ page: p, limit: l });
-      // Posts are already sorted by backend: engagement score (likes + comments) descending, then createdAt descending
-      // Frontend displays posts in the exact order received from backend - no additional sorting
+      // Backend sorting strategy:
+      // 1) Ưu tiên bài post của những người mà current user đang follow (isFollowed = true).
+      // 2) Trong nhóm đã follow: sort theo thời gian tạo (createdAt mới nhất trước), sau đó mới tới engagement.
+      // 3) Nếu user không follow ai, fallback: sort theo engagement score (likes + comments) rồi createdAt.
+      // Frontend giữ nguyên thứ tự BE trả về, KHÔNG sắp xếp lại trên FE.
       const posts = res?.data?.posts || [];
       const totalPosts = res?.data?.pagination?.totalPosts || 0;
       if (p === 1) {
@@ -1300,10 +1452,33 @@ const NewsFeed = () => {
     }
   };
 
+  const fetchActiveProjects = async () => {
+    try {
+      setLoadingProjects(true);
+      const res = await getUserProjects('all', 'active');
+      if (res?.success && Array.isArray(res.data)) {
+        const formattedProjects = res.data.map((project) => ({
+          value: project._id,
+          label: project.title || 'Untitled Project',
+          ...project
+        }));
+        setAvailableProjects(formattedProjects);
+      } else {
+        setAvailableProjects([]);
+      }
+    } catch (e) {
+      console.error('Error fetching active projects:', e);
+      setAvailableProjects([]);
+    } finally {
+      setLoadingProjects(false);
+    }
+  };
+
   const handleModalOpen = () => {
     setIsModalOpen(true);
     if (currentUserId) {
       fetchActiveLicks();
+      fetchActiveProjects();
     }
   };
 
@@ -1311,6 +1486,7 @@ const NewsFeed = () => {
     if (!posting) {
       setIsModalOpen(false);
       setSelectedLickIds([]);
+      setSelectedProjectId(null);
     }
   };
 
@@ -1318,11 +1494,54 @@ const NewsFeed = () => {
 
   const handleCreatePost = async () => {
     const trimmed = newText.trim();
-    if (!trimmed) {
-      message.warning('Vui lòng nhập nội dung');
+    const hasUrl = !!extractFirstUrl(trimmed);
+    const hasLinkPreview = hasUrl && linkPreview;
+    const hasLicks = selectedLickIds.length > 0;
+    const hasProject = !!selectedProjectId;
+    
+    // Kiểm tra: nếu có URL trong text và đã chọn lick, không cho đăng
+    if (hasUrl && hasLicks) {
+      modal.warning({
+        title: 'Chỉ được chọn 1 loại đính kèm',
+        content:
+          'Bạn đã chọn Lick và có Link trong nội dung. Chỉ được chọn 1 trong 3: Project, Lick, hoặc Link. Vui lòng xóa link trong nội dung hoặc bỏ chọn Lick trước khi đăng.',
+      });
       return;
     }
-    if (trimmed.length > MAX_POST_TEXT_LENGTH) {
+    
+    // Kiểm tra: nếu có URL trong text và đã chọn project, không cho đăng
+    if (hasUrl && hasProject) {
+      modal.warning({
+        title: 'Chỉ được chọn 1 loại đính kèm',
+        content:
+          'Bạn đã chọn Project và có Link trong nội dung. Chỉ được chọn 1 trong 3: Project, Lick, hoặc Link. Vui lòng xóa link trong nội dung hoặc bỏ chọn Project trước khi đăng.',
+      });
+      return;
+    }
+    
+    // Đếm số lượng loại đính kèm được chọn
+    const attachmentCount = (hasLinkPreview ? 1 : 0) + (hasLicks ? 1 : 0) + (hasProject ? 1 : 0);
+    
+    // Kiểm tra: chỉ được chọn 1 trong 3: project, licks, hoặc linkPreview
+    if (attachmentCount > 1) {
+      modal.warning({
+        title: 'Chỉ được chọn 1 loại đính kèm',
+        content:
+          'Bạn chỉ được chọn 1 trong 3: Project, Lick, hoặc Link. Vui lòng bỏ chọn các mục khác trước khi đăng.',
+      });
+      return;
+    }
+    
+    // Kiểm tra: phải có ít nhất text hoặc 1 trong 3 loại đính kèm
+    if (!trimmed && attachmentCount === 0) {
+      modal.warning({
+        title: 'Thiếu nội dung',
+        content: 'Vui lòng nhập nội dung hoặc chọn ít nhất 1 trong 3: Project, Lick, hoặc Link.',
+      });
+      return;
+    }
+    
+    if (trimmed && trimmed.length > MAX_POST_TEXT_LENGTH) {
       modal.warning({
         title: 'Nội dung quá dài',
         content: `Nội dung không được vượt quá ${MAX_POST_TEXT_LENGTH} ký tự (hiện tại: ${trimmed.length}). Vui lòng rút gọn trước khi đăng.`,
@@ -1337,9 +1556,20 @@ const NewsFeed = () => {
       // và BE sẽ trả lỗi rõ ràng nếu thiếu
       // eslint-disable-next-line no-console
       console.log('[UI] Sending JSON createPost...');
-      const payload = { postType: 'status_update', textContent: trimmed, linkPreview };
-      if (selectedLickIds.length > 0) {
+      const payload = { postType: 'status_update' };
+      // Chỉ thêm textContent nếu có text
+      if (trimmed) {
+        payload.textContent = trimmed;
+      }
+      // Chỉ cho phép 1 trong 3: linkPreview, licks, hoặc project
+      if (hasLinkPreview && !hasLicks && !hasProject) {
+        payload.linkPreview = linkPreview;
+      }
+      if (hasLicks && !hasLinkPreview && !hasProject) {
         payload.attachedLickIds = selectedLickIds;
+      }
+      if (hasProject && !hasLinkPreview && !hasLicks) {
+        payload.projectId = selectedProjectId;
       }
       const response = await createPost(payload);
       // Service trả về { success: true, data: post } từ axios response.data
@@ -1409,6 +1639,7 @@ const NewsFeed = () => {
       
       setNewText('');
       setSelectedLickIds([]);
+      setSelectedProjectId(null);
       setIsModalOpen(false);
       message.success('Đăng bài thành công');
       modal.success({
@@ -1610,17 +1841,32 @@ const NewsFeed = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={composerLabelStyle}>Đính kèm lick</div>
-                    <div style={composerHintStyle}>Chỉ hiển thị các lick đang active trong tài khoản</div>
+                    <div style={composerHintStyle}>
+                      Chỉ hiển thị các lick đang active trong tài khoản. 
+                      Chỉ chọn 1 trong 3: Project, Lick, hoặc Link.
+                    </div>
                   </div>
                   <Tag color="#1f1f1f" style={{ borderRadius: 999, color: '#9ca3af', border: 'none' }}>Tùy chọn</Tag>
                 </div>
                 <Select
                   mode="multiple"
-                  placeholder="Tìm và chọn lick để đính kèm..."
+                  placeholder="Tìm và chọn 1 lick để đính kèm..."
                   value={selectedLickIds}
-                  onChange={setSelectedLickIds}
+                  onChange={(values) => {
+                    const next = Array.isArray(values) ? values.slice(0, 1) : [];
+                    setSelectedLickIds(next);
+                    if (next.length > 0) {
+                      setLinkPreview(null);
+                      setSelectedProjectId(null);
+                    }
+                  }}
                   loading={loadingLicks}
-                  style={{ width: '100%' }}
+                  style={{ 
+                    width: '100%',
+                    backgroundColor: '#1a1a1a',
+                    border: '1px solid #3a3a3a',
+                    borderRadius: 8,
+                  }}
                   options={availableLicks}
                   notFoundContent={loadingLicks ? <Spin size="small" /> : <Empty description="Không có lick active nào" />}
                   filterOption={(input, option) =>
@@ -1628,9 +1874,52 @@ const NewsFeed = () => {
                   }
                   popupClassName="dark-select-dropdown"
                   allowClear
+                  disabled={!!extractFirstUrl(newText) || !!selectedProjectId}
                 />
               </div>
-              {extractFirstUrl(newText) && (
+
+              <div className="composer-section" style={{ ...composerSectionStyle, display: 'flex', flexDirection: 'column', gap: 16, border: '1px solid #2a2a2a' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ ...composerLabelStyle, marginBottom: 6, fontSize: 16 }}>Chọn project</div>
+                    <div style={{ ...composerHintStyle, lineHeight: '1.5' }}>
+                      Chỉ hiển thị các project có trạng thái active. Chỉ
+                      chọn 1 trong 3: Project, Lick, hoặc Link.
+                    </div>
+                  </div>
+                  <Tag color="#1f1f1f" style={{ borderRadius: 999, color: '#9ca3af', border: 'none', marginLeft: 12 }}>Tùy chọn</Tag>
+                </div>
+                <Select
+                  placeholder="Chọn project để đính kèm..."
+                  value={selectedProjectId}
+                  onChange={(value) => {
+                    setSelectedProjectId(value);
+                    if (value) {
+                      setSelectedLickIds([]);
+                      setLinkPreview(null);
+                    }
+                  }}
+                  loading={loadingProjects}
+                  style={{ 
+                    width: '100%',
+                    backgroundColor: '#1a1a1a',
+                    border: '1px solid #3a3a3a',
+                    borderRadius: 8,
+                  }}
+                  options={availableProjects}
+                  notFoundContent={loadingProjects ? <Spin size="small" /> : <Empty description="Không có project active nào" />}
+                  filterOption={(input, option) =>
+                    (option?.label ?? '')
+                      .toLowerCase()
+                      .includes(input.toLowerCase())
+                  }
+                  popupClassName="dark-select-dropdown"
+                  allowClear
+                  disabled={selectedLickIds.length > 0 || !!extractFirstUrl(newText)}
+                />
+              </div>
+
+              {extractFirstUrl(newText) && selectedLickIds.length === 0 && (
                 <div style={{ ...composerSectionStyle, border: '1px solid #303030', background: '#111', color: '#e5e7eb', display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {linkLoading ? (
                     <Text style={{ color: '#bfbfbf' }}>Đang tải preview…</Text>
@@ -2074,7 +2363,18 @@ const NewsFeed = () => {
               </div>
             </div>
             {modalPost?.textContent && (
-              <div style={{ marginBottom: 8, color: '#e5e7eb' }}>{modalPost.textContent}</div>
+              <div
+                style={{
+                  marginBottom: 8,
+                  color: '#e5e7eb',
+                  fontSize: 15,
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {modalPost.textContent}
+              </div>
             )}
             {(() => {
               const url = extractFirstUrl(modalPost?.textContent);
@@ -2085,8 +2385,33 @@ const NewsFeed = () => {
                 </div>
               ) : null;
             })()}
+            {/* Hiển thị attached licks giống như ngoài feed */}
+            {modalPost?.attachedLicks &&
+              Array.isArray(modalPost.attachedLicks) &&
+              modalPost.attachedLicks.length > 0 && (
+                <div
+                  style={{
+                    marginBottom: 12,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 12,
+                  }}
+                >
+                  {modalPost.attachedLicks.map((lick) => {
+                    const lickId = lick?._id || lick?.lick_id || lick;
+                    if (!lickId) return null;
+                    return (
+                      <div key={lickId} style={{ marginBottom: 8 }}>
+                        <PostLickEmbed lickId={lickId} />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             {modalPost?.media?.length > 0 && (
-              <div style={{ marginBottom: 8 }}><WavePlaceholder /></div>
+              <div style={{ marginBottom: 8 }}>
+                <WavePlaceholder />
+              </div>
             )}
             {modalPost?.linkPreview && (
               <a href={modalPost.linkPreview?.url || '#'} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>

@@ -12,10 +12,14 @@ export const createProject = async (projectData) => {
 };
 
 // Get all projects for the current user
-export const getUserProjects = async (filter = "all") => {
+export const getUserProjects = async (filter = "all", status = null) => {
   try {
+    const params = { filter };
+    if (status) {
+      params.status = status;
+    }
     const res = await api.get("/projects", {
-      params: { filter },
+      params,
     });
     return res.data;
   } catch (error) {

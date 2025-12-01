@@ -107,9 +107,13 @@ const AppRoutes = () => {
     dispatch(refreshUser());
   }, [dispatch]);
 
-  // Defer socket initialization - only initialize when user navigates to pages that need it
-  // Socket will be initialized lazily in ChatPage, LiveStreamCreate, LiveStreamLive components
-  // This reduces initial startup overhead
+  // Khởi tạo Socket.IO khi đã có thông tin user để nhận thông báo realtime (like, comment, DM badge, ...)
+  useEffect(() => {
+    const userId = user?.user?.id;
+    if (userId) {
+      initSocket(userId);
+    }
+  }, [user?.user?.id]);
 
   if (isLoading) {
     return (

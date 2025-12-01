@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layout, Input, Button, Space, Typography, Modal, Avatar,
-  Popover, Badge, Spin, Empty, Dropdown, Drawer
+  Popover, Badge, Spin, Empty, Dropdown, Drawer, AutoComplete
 } from 'antd';
 import {
   FireOutlined, BellOutlined, MessageOutlined, SearchOutlined,
@@ -15,7 +15,8 @@ import { livestreamService } from '../services/user/livestreamService';
 import useDMConversations from '../hooks/useDMConversations';
 import FloatingChatWindow from './FloatingChatWindow';
 import NotificationBell from './NotificationBell'; 
-import { onDmNew, offDmNew } from '../services/user/socketService';
+import { onDmNew, offDmNew, onDmConversationUpdated, offDmConversationUpdated } from '../services/user/socketService';
+import { searchUsers } from '../services/user/profile';
 import './header.css';
 
 const { Header } = Layout;
@@ -43,6 +44,9 @@ const AppHeader = () => {
   const [chatFilter, setChatFilter] = useState('all'); // 'all', 'unread', 'groups'
   const [chatSearchText, setChatSearchText] = useState('');
   const [activeChatWindows, setActiveChatWindows] = useState([]); // { id, conversation, isMinimized, position }
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   const { conversations, loading, refresh } = useDMConversations();
   const [isMobile, setIsMobile] = useState(getIsMobile);
@@ -132,7 +136,7 @@ const AppHeader = () => {
     });
   };
 
-  // Cập nhật conversation trong cửa sổ chat khi có tin mới
+  // Cập nhật conversation trong cửa sổ chat khi có tin mới hoặc conversation được update
   useEffect(() => {
     setActiveChatWindows((prev) =>
       prev.map((window) => {
@@ -141,6 +145,37 @@ const AppHeader = () => {
       })
     );
   }, [conversations]);
+
+  // Lắng nghe event dm:conversation:updated để cập nhật conversation trong cửa sổ chat realtime
+  useEffect(() => {
+    const handleConversationUpdated = ({ conversationId, conversation }) => {
+      console.log('[Header] Received dm:conversation:updated for conversation', conversationId, 'status:', conversation?.status);
+      console.log('[Header] Full conversation data:', conversation);
+      setActiveChatWindows((prev) => {
+        const updated = prev.map((window) => {
+          const windowConvId = window.conversation?._id || window.conversation?.id;
+          if (String(windowConvId) === String(conversationId)) {
+            console.log('[Header] Updating conversation in window:', windowConvId, 'new status:', conversation?.status);
+            return { 
+              ...window, 
+              conversation: { 
+                ...window.conversation, 
+                ...conversation, 
+                status: conversation.status || window.conversation.status 
+              } 
+            };
+          }
+          return window;
+        });
+        console.log('[Header] Updated chat windows:', updated.map(w => ({ id: w.conversation?._id, status: w.conversation?.status })));
+        return updated;
+      });
+    };
+    onDmConversationUpdated(handleConversationUpdated);
+    return () => {
+      offDmConversationUpdated(handleConversationUpdated);
+    };
+  }, []);
 
   // Cho phép mở chat từ component khác (rất tiện)
   useEffect(() => {
@@ -318,6 +353,19 @@ const AppHeader = () => {
       <NotificationBell />
 
       {!isChatPage && (
+        isMobile ? (
+          <Badge count={totalUnreadCount} offset={[-5, 5]}>
+            <MessageOutlined
+              className="app-header__icon"
+              onClick={() => {
+                if (isMobile) {
+                  closeMobileMenu();
+                }
+                navigate('/chat');
+              }}
+            />
+          </Badge>
+        ) : (
         <Popover
           content={
             <div style={{ width: 400, maxHeight: 600, background: '#1a1a1a', color: '#fff' }}>
@@ -512,8 +560,15 @@ const AppHeader = () => {
                     e.currentTarget.style.boxShadow = '0 6px 18px rgba(37,99,235,0.55)';
                   }}
                   onClick={() => {
+                    // Đóng popover trước
                     setChatPopoverVisible(false);
-                    navigate('/chat');
+                    // Điều hướng bằng react-router
+                    try {
+                      navigate('/chat');
+                    } catch (e) {
+                      // Fallback trong trường hợp hook navigate không hoạt động
+                      window.location.href = '/chat';
+                    }
                   }}
                 >
                   Xem tất cả trong Messenger
@@ -540,6 +595,7 @@ const AppHeader = () => {
             <MessageOutlined className="app-header__icon" />
           </Badge>
         </Popover>
+        )
       )}
 
       <Dropdown menu={{ items: avatarMenuItems }} trigger={['click']} placement="bottomRight">
@@ -571,6 +627,51 @@ const AppHeader = () => {
     if (!isMobile) setIsMobileMenuOpen(false);
   }, [isMobile]);
 
+  // Search users functionality
+  const handleSearch = useCallback(async (value) => {
+    setSearchQuery(value);
+    const query = value?.trim() || '';
+    
+    if (!query || query.length < 1) {
+      setSearchResults([]);
+      return;
+    }
+
+    setSearchLoading(true);
+    try {
+      const response = await searchUsers(query, 10);
+      if (response?.success && response?.data) {
+        setSearchResults(response.data);
+      } else {
+        setSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Error searching users:', error);
+      setSearchResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, []);
+
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchQuery) {
+        handleSearch(searchQuery);
+      } else {
+        setSearchResults([]);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, handleSearch]);
+
+  const handleUserSelect = (userId) => {
+    setSearchQuery('');
+    setSearchResults([]);
+    navigate(`/users/${userId}/newfeeds`);
+  };
+
   return (
     <>
       <Header className="app-header">
@@ -593,12 +694,74 @@ const AppHeader = () => {
 
           <div className="app-header__spacer" />
 
-          <Input
+          <AutoComplete
             className="app-header__search"
-            placeholder="Tìm kiếm"
+            value={searchQuery}
+            onChange={setSearchQuery}
+            onSelect={(value) => handleUserSelect(value)}
+            filterOption={false}
+            options={searchResults.map((user) => ({
+              value: user.id,
+              label: (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '4px 0',
+                  }}
+                >
+                  <Avatar
+                    src={user.avatarUrl}
+                    icon={<UserOutlined />}
+                    size={32}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        color: '#fff',
+                        fontWeight: 500,
+                        fontSize: 14,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {user.displayName || user.username}
+                    </div>
+                    <div
+                      style={{
+                        color: '#9ca3af',
+                        fontSize: 12,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      @{user.username}
+                    </div>
+                  </div>
+                </div>
+              ),
+            }))}
+            notFoundContent={searchLoading ? <Spin size="small" /> : searchQuery ? 'Không tìm thấy người dùng' : null}
+            placeholder="Tìm kiếm người dùng"
             allowClear
-            prefix={<SearchOutlined />}
-          />
+            style={{ flex: 1, maxWidth: 600 }}
+            dropdownStyle={{
+              background: '#111213',
+              borderRadius: 8,
+              border: '1px solid #2a2a2a',
+              maxHeight: 400,
+              overflowY: 'auto',
+            }}
+            dropdownMatchSelectWidth={true}
+          >
+            <Input
+              prefix={<SearchOutlined />}
+              allowClear
+            />
+          </AutoComplete>
 
           {!isMobile && renderActionButtons()}
         </div>

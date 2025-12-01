@@ -164,7 +164,7 @@ const Register = () => {
               autoComplete="off"
             >
               <Form.Item
-                label={<span className="form-label">Name</span>}
+                label={<span className="form-label">Tên hiển thị</span>}
                 name="name"
                 rules={[{ required: true, message: 'Please input your name!' }]}
               >
@@ -189,7 +189,7 @@ const Register = () => {
               </Form.Item>
 
               <Form.Item
-                label={<span className="form-label">Password</span>}
+                label={<span className="form-label">Mật khẩu </span>}
                 name="password"
                 rules={[
                   { required: true, message: 'Please input your password!' },
@@ -204,7 +204,7 @@ const Register = () => {
               </Form.Item>
 
               <Form.Item
-                label={<span className="form-label">Gender</span>}
+                label={<span className="form-label">Giới tính</span>}
                 name="gender"
                 rules={[{ required: true, message: 'Please select your gender!' }]}
               >
@@ -220,7 +220,7 @@ const Register = () => {
               </Form.Item>
 
               <Form.Item
-                label={<span className="form-label">Birthday (Optional)</span>}
+                label={<span className="form-label">Ngày sinh</span>}
               >
                 <div className="birthday-inputs">
                   <Form.Item
@@ -266,9 +266,8 @@ const Register = () => {
               </Form.Item>
 
               <Form.Item
-                label={<span className="form-label">Address Line</span>}
+                label={<span className="form-label">Địa chỉ chi tiết</span>}
                 name="addressLine"
-                rules={[{ required: true, message: 'Please enter your street address!' }]}
               >
                 <Input 
                   placeholder="House number, street name, etc."
@@ -277,7 +276,7 @@ const Register = () => {
               </Form.Item>
 
               <Form.Item
-                label={<span className="form-label">Province / City</span>}
+                label={<span className="form-label">Thành phố</span>}
                 name="province"
                 rules={[{ required: true, message: 'Please select your province/city!' }]}
               >
@@ -296,7 +295,7 @@ const Register = () => {
               </Form.Item>
 
               <Form.Item
-                label={<span className="form-label">District</span>}
+                label={<span className="form-label">Quận huyện </span>}
                 name="district"
                 rules={[{ required: true, message: 'Please select your district!' }]}
               >
@@ -316,7 +315,7 @@ const Register = () => {
               </Form.Item>
 
               <Form.Item
-                label={<span className="form-label">Ward</span>}
+                label={<span className="form-label">Xã/ phường</span>}
                 name="ward"
                 rules={[{ required: true, message: 'Please select your ward!' }]}
               >

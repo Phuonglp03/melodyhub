@@ -426,8 +426,9 @@ export const register = async (req, res) => {
       });
     }
 
+    // Địa chỉ chi tiết (addressLine) chỉ là phần bổ sung (số nhà, tên đường),
+    // nên KHÔNG bắt buộc khi đăng ký. Người dùng chỉ cần chọn Tỉnh/Quận/Phường.
     const requiredAddressFields = [
-      { value: addressLine, message: 'Địa chỉ chi tiết không được để trống' },
       { value: provinceCode, message: 'Vui lòng chọn tỉnh/thành phố' },
       { value: provinceName, message: 'Vui lòng chọn tỉnh/thành phố' },
       { value: districtCode, message: 'Vui lòng chọn quận/huyện' },
@@ -442,7 +443,8 @@ export const register = async (req, res) => {
       }
     }
 
-    const normalizedAddressLine = addressLine.trim();
+    const normalizedAddressLine =
+      typeof addressLine === 'string' ? addressLine.trim() : '';
     const fullLocation = [
       normalizedAddressLine,
       wardName.trim(),

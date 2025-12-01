@@ -1,3 +1,4 @@
+
 .app-header {
   position: fixed;
   top: 0;
@@ -97,6 +98,29 @@
 
 .app-header__search input::placeholder {
   color: #9ca3af;
+}
+
+.app-header__search .ant-select-dropdown {
+  background: #111213 !important;
+  border: 1px solid #2a2a2a !important;
+  border-radius: 8px !important;
+}
+
+.app-header__search .ant-select-item {
+  color: #e5e7eb !important;
+  background: transparent !important;
+}
+
+.app-header__search .ant-select-item:hover {
+  background: #252525 !important;
+}
+
+.app-header__search .ant-select-item-option-selected {
+  background: #1d4ed8 !important;
+}
+
+.app-header__search .ant-select-item-option-selected:hover {
+  background: #2563eb !important;
 }
 
 .app-header__actions {
@@ -304,4 +328,3 @@
     gap: 12px;
   }
 }
-
