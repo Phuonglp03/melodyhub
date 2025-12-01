@@ -1,5 +1,9 @@
 import { useState, useRef, useCallback } from "react";
-import { HISTORY_LIMIT, cloneTracksForHistory, cloneChordsForHistory } from "../utils/projectHelpers";
+import {
+  HISTORY_LIMIT,
+  cloneTracksForHistory,
+  cloneChordsForHistory,
+} from "../utils/projectHelpers";
 
 /**
  * Hook for managing undo/redo history
@@ -101,4 +105,3 @@ export const useProjectHistory = ({
     updateHistoryStatus,
   };
 };
-

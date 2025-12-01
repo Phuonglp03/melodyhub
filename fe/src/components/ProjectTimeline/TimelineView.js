@@ -1,0 +1,330 @@
+import React from "react";
+import TimelineTrack from "./TimelineTrack";
+import ChordBlock from "../ChordBlock";
+
+/**
+ * TimelineView - Main timeline container component
+ *
+ * Props:
+ * - tracks: Array - Array of track objects
+ * - chordProgression: Array - Array of chord entries
+ * - pixelsPerSecond: number - Pixels per second
+ * - pixelsPerBeat: number - Pixels per beat
+ * - secondsPerBeat: number - Seconds per beat
+ * - beatsPerMeasure: number - Beats per measure
+ * - timelineWidth: number - Total timeline width
+ * - playbackPosition: number - Current playback position
+ * - isPlaying: boolean - Whether playback is active
+ * - chordDurationSeconds: number - Duration of each chord in seconds
+ * - selectedChordIndex: number | null - Currently selected chord index
+ * - collaborators: Array - Array of collaborators
+ * - broadcastCursor: Function - Function to broadcast cursor position
+ * - timelineRef: Ref - Reference to timeline element
+ * - playheadRef: Ref - Reference to playhead element
+ * - clipRefs: Ref - Map of clip refs
+ * - All other props passed to TimelineTrack...
+ */
+const TimelineView = ({
+  tracks = [],
+  chordProgression = [],
+  pixelsPerSecond,
+  pixelsPerBeat,
+  secondsPerBeat,
+  beatsPerMeasure,
+  timelineWidth,
+  playbackPosition,
+  isPlaying,
+  chordDurationSeconds,
+  selectedChordIndex,
+  collaborators = [],
+  broadcastCursor,
+  timelineRef,
+  playheadRef,
+  clipRefs,
+  TRACK_COLUMN_WIDTH = 256,
+  calculateTimelineWidth,
+  // Track interaction props
+  selectedTrackId,
+  setSelectedTrackId,
+  dragOverTrack,
+  setDragOverTrack,
+  dragOverPosition,
+  setDragOverPosition,
+  focusedClipId,
+  setFocusedClipId,
+  selectedItem,
+  setSelectedItem,
+  isDraggingItem,
+  draggedLick,
+  setDraggedLick,
+  activeEditors,
+  currentUserId,
+  // Handlers
+  handleDrop,
+  handleClipMouseDown,
+  handleClipResizeStart,
+  handleOpenMidiEditor,
+  handleUpdateTrack,
+  handleDeleteTimelineItem,
+  handleRemoveChord,
+  setSelectedChordIndex,
+  openTrackMenu,
+  trackContextMenu,
+  getRhythmPatternVisual,
+  applyMagnet,
+  // Additional props
+  onTimelineClick,
+  hasAnyUserClips,
+  userTracksLength,
+  onAddTrack,
+  canAddTrack,
+  ...trackProps
+}) => {
+  const userTracks = tracks.filter(
+    (track) => !track.isBackingTrack && track.trackType !== "backing"
+  );
+
+  return (
+    <div
+      ref={timelineRef}
+      className="flex-1 overflow-auto relative min-w-0"
+      onClick={onTimelineClick}
+    >
+      {/* Time Ruler with Beat Markers */}
+      <div className="sticky top-0 z-20 flex">
+        <div className="w-64 bg-gray-950 border-r border-gray-800 h-6 flex items-center px-4 text-xs font-semibold uppercase tracking-wide text-gray-400 sticky left-0 z-20">
+          Track
+        </div>
+        <div className="flex-1 relative bg-gray-800 border-b border-gray-700 h-6 flex items-end">
+          {/* Measure markers (every 4 beats) */}
+          {Array.from({
+            length:
+              Math.ceil(timelineWidth / pixelsPerBeat / beatsPerMeasure) + 1,
+          }).map((_, measureIndex) => {
+            const measureTime = measureIndex * beatsPerMeasure * secondsPerBeat;
+            const measurePosition = measureTime * pixelsPerSecond;
+            return (
+              <div
+                key={`measure-${measureIndex}`}
+                className="absolute border-l-2 border-blue-400/80 h-full flex items-end pb-1"
+                style={{ left: `${measurePosition}px` }}
+              >
+                <span className="text-[11px] text-blue-200 font-medium px-1">
+                  {measureIndex + 1}
+                </span>
+              </div>
+            );
+          })}
+
+          {/* Beat markers */}
+          {Array.from({
+            length:
+              Math.ceil(
+                (calculateTimelineWidth
+                  ? calculateTimelineWidth()
+                  : timelineWidth) / pixelsPerBeat
+              ) + 1,
+          }).map((_, beatIndex) => {
+            const beatTime = beatIndex * secondsPerBeat;
+            const beatPosition = beatTime * pixelsPerSecond;
+            const isMeasureStart = beatIndex % beatsPerMeasure === 0;
+            return (
+              <div
+                key={`beat-${beatIndex}`}
+                className={`absolute border-l h-full ${
+                  isMeasureStart ? "border-blue-400/60" : "border-gray-700/50"
+                }`}
+                style={{ left: `${beatPosition}px` }}
+              />
+            );
+          })}
+
+          {/* Second markers */}
+          {Array.from({
+            length:
+              Math.ceil(
+                (calculateTimelineWidth
+                  ? calculateTimelineWidth()
+                  : timelineWidth) / pixelsPerSecond
+              ) + 1,
+          }).map((_, i) => (
+            <div
+              key={`sec-${i}`}
+              className="absolute border-l border-gray-800/70 h-4 bottom-0"
+              style={{ left: `${i * pixelsPerSecond}px` }}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Playhead */}
+      {(playbackPosition > 0 || isPlaying) && (
+        <div
+          ref={playheadRef}
+          className="absolute top-0 bottom-0 w-[2px] bg-orange-400 z-30 pointer-events-none shadow-[0_0_14px_rgba(251,191,36,0.6)]"
+          style={{
+            left: `${
+              TRACK_COLUMN_WIDTH + playbackPosition * pixelsPerSecond
+            }px`,
+          }}
+        >
+          <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-3 h-3 bg-orange-400 rounded-full border border-white" />
+        </div>
+      )}
+
+      {/* Master Chord Track */}
+      <div
+        className="flex border-b border-gray-800/50 bg-gray-950/50"
+        style={{ minHeight: "56px" }}
+      >
+        <div className="w-64 border-r border-gray-800/50 px-3 py-2 bg-gray-950 sticky left-0 z-20 flex flex-col justify-center">
+          <span className="text-[11px] font-medium text-gray-300 uppercase tracking-wide">
+            Structure
+          </span>
+        </div>
+        <div className="flex-1 relative min-w-0 bg-gray-950/30">
+          {chordProgression.map((chord, idx) => {
+            const startTime = idx * chordDurationSeconds;
+            const width = chordDurationSeconds * pixelsPerSecond;
+            const isSelected = selectedChordIndex === idx;
+            const chordName = chord.chordName || chord.chord || "Chord";
+
+            return (
+              <div
+                key={`chord-${idx}`}
+                className="absolute inset-0"
+                style={{
+                  left: `${startTime * pixelsPerSecond}px`,
+                  width: `${Math.max(width, 40)}px`,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  trackProps.setSelectedChordIndex?.(idx);
+                  if (broadcastCursor) {
+                    broadcastCursor(null, idx);
+                  }
+                }}
+              >
+                {/* Remote cursor indicators */}
+                {collaborators
+                  .filter((c) => c.cursor?.barIndex === idx)
+                  .map((collab) => (
+                    <div
+                      key={collab.userId}
+                      className="absolute -top-1 -right-1 z-30 flex items-center gap-1 bg-green-500/90 text-black text-[8px] px-1.5 py-0.5 rounded-full border border-white/50 shadow-lg"
+                    >
+                      {collab.user?.avatarUrl ? (
+                        <img
+                          src={collab.user.avatarUrl}
+                          alt={collab.user.displayName}
+                          className="w-3 h-3 rounded-full"
+                        />
+                      ) : (
+                        <div className="w-3 h-3 rounded-full bg-indigo-600"></div>
+                      )}
+                      <span className="font-semibold">
+                        {collab.user?.displayName ||
+                          collab.user?.username ||
+                          "User"}
+                      </span>
+                    </div>
+                  ))}
+                <div
+                  className={`relative ${
+                    collaborators.some((c) => c.cursor?.barIndex === idx)
+                      ? "ring-2 ring-green-500/50 ring-offset-1 ring-offset-gray-950"
+                      : ""
+                  }`}
+                >
+                  <ChordBlock chordName={chordName} isSelected={isSelected} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 2. USER TRACKS (Licks/Audio) */}
+      {userTracks.map((track) => (
+        <TimelineTrack
+          key={track._id}
+          track={track}
+          pixelsPerSecond={pixelsPerSecond}
+          secondsPerBeat={secondsPerBeat}
+          timelineRef={timelineRef}
+          clipRefs={clipRefs}
+          selectedTrackId={selectedTrackId}
+          dragOverTrack={dragOverTrack}
+          dragOverPosition={dragOverPosition}
+          focusedClipId={focusedClipId}
+          selectedItem={selectedItem}
+          isDraggingItem={isDraggingItem}
+          activeEditors={activeEditors}
+          currentUserId={currentUserId}
+          getRhythmPatternVisual={getRhythmPatternVisual}
+          applyMagnet={applyMagnet}
+          handleDrop={handleDrop}
+          setDraggedLick={setDraggedLick}
+          handleClipMouseDown={handleClipMouseDown}
+          handleClipResizeStart={handleClipResizeStart}
+          handleOpenMidiEditor={handleOpenMidiEditor}
+          handleUpdateTrack={handleUpdateTrack}
+          handleDeleteTimelineItem={handleDeleteTimelineItem}
+          handleRemoveChord={handleRemoveChord}
+          setFocusedClipId={setFocusedClipId}
+          setSelectedItem={setSelectedItem}
+          setSelectedTrackId={setSelectedTrackId}
+          openTrackMenu={openTrackMenu}
+          trackContextMenu={trackContextMenu}
+          {...trackProps}
+        />
+      ))}
+
+      {/* Add Track Button - Under the last track */}
+      {onAddTrack && (
+        <div
+          className="flex border-b border-gray-900 bg-[#05070d]"
+          style={{ minHeight: "90px" }}
+        >
+          <div className="w-64 border-r border-gray-800/50 p-2 flex items-center justify-center sticky left-0 z-10 bg-[#05060d]">
+            <button
+              onClick={onAddTrack}
+              disabled={!canAddTrack}
+              className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
+                !canAddTrack
+                  ? "bg-gray-800 text-gray-500 cursor-not-allowed"
+                  : "bg-green-600 hover:bg-green-500 text-white"
+              }`}
+              title={
+                !canAddTrack
+                  ? "Maximum of 10 tracks allowed per project"
+                  : "Add a new track"
+              }
+            >
+              <span>+</span>
+              Add Track
+            </button>
+          </div>
+          <div className="flex-1 bg-[#05070d]"></div>
+        </div>
+      )}
+
+      {!hasAnyUserClips && !draggedLick && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="bg-gray-900/85 border border-gray-800 rounded-lg px-6 py-3 text-gray-300 text-sm text-center">
+            Drag licks or chords onto any track to build your arrangement
+          </div>
+        </div>
+      )}
+
+      {/* Drop Zone Hint */}
+      {draggedLick && (
+        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800/90 border border-gray-700 rounded-lg px-6 py-3 text-gray-300 text-sm">
+          Drag and drop a loop or audio/MIDI file here
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default TimelineView;

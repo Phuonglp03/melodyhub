@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { updateProject, getInstruments, getRhythmPatterns } from "../services/user/projectService";
+import {
+  updateProject,
+  getInstruments,
+  getRhythmPatterns,
+} from "../services/user/projectService";
 import {
   normalizeKeyPayload,
   normalizeTimeSignaturePayload,
@@ -221,4 +225,3 @@ export const useProjectSettings = ({
     handleKeyChange,
   };
 };
-

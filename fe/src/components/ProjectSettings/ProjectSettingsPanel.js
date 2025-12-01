@@ -5,7 +5,7 @@ import TimeSignatureControl from "./TimeSignatureControl";
 
 /**
  * ProjectSettingsPanel - Panel containing all project settings controls
- * 
+ *
  * Props:
  * - tempoDraft: string - current tempo draft value
  * - setTempoDraft: (value: string) => void - setter for tempo draft
@@ -27,16 +27,15 @@ const ProjectSettingsPanel = ({
   className = "",
 }) => {
   return (
-    <div className={`flex items-center gap-2 bg-gray-900/70 border border-gray-800 rounded-full px-3 py-1 text-xs text-white ${className}`}>
+    <div
+      className={`flex items-center gap-2 bg-gray-900/70 border border-gray-800 rounded-full px-3 py-1 text-xs text-white ${className}`}
+    >
       <TempoControl
         tempoDraft={tempoDraft}
         setTempoDraft={setTempoDraft}
         onCommit={onTempoCommit}
       />
-      <KeySignatureControl
-        value={projectKey}
-        onChange={onKeyChange}
-      />
+      <KeySignatureControl value={projectKey} onChange={onKeyChange} />
       <TimeSignatureControl
         value={projectTimeSignature}
         onChange={onTimeSignatureChange}
@@ -46,4 +45,3 @@ const ProjectSettingsPanel = ({
 };
 
 export default ProjectSettingsPanel;
-

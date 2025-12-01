@@ -186,11 +186,13 @@ export const useProjectLicks = () => {
     availableLicks,
     setAvailableLicks,
     loadingLicks,
+    setLoadingLicks,
     lickSearchTerm,
     setLickSearchTerm,
     lickPage,
     setLickPage,
     lickHasMore,
+    setLickHasMore,
 
     // Tag filters
     selectedGenre,
@@ -211,15 +213,20 @@ export const useProjectLicks = () => {
     setTagGroups,
     activeTagDropdown,
     setActiveTagDropdown,
+    tagDropdownRef: null, // Placeholder for compatibility
 
     // Audio playback
     playingLickId,
+    setPlayingLickId,
+    lickAudioRefs,
+    setLickAudioRefs,
     lickProgress,
+    setLickProgress,
 
     // Operations
     fetchLicks,
     loadMoreLicks,
     handleLickPlayPause,
+    LICKS_PER_PAGE,
   };
 };
-

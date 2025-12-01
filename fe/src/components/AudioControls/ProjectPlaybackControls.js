@@ -1,10 +1,10 @@
 import React from "react";
-import { AudioTransportControls } from "../../../../../components/audio";
+import { AudioTransportControls } from "../audio";
 import { RiPulseFill } from "react-icons/ri";
 
 /**
  * ProjectPlaybackControls - Playback controls for project with metronome
- * 
+ *
  * Props:
  * - isPlaying: boolean - current playback state
  * - loopEnabled: boolean - whether loop is enabled
@@ -68,4 +68,3 @@ const ProjectPlaybackControls = ({
 };
 
 export default ProjectPlaybackControls;
-

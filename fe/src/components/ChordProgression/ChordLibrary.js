@@ -1,9 +1,9 @@
 import React from "react";
-import ChordBlock from "../../../../../components/ChordBlock";
+import ChordBlock from "../ChordBlock";
 
 /**
  * ChordLibrary - Library of available chords
- * 
+ *
  * Props:
  * - chordPalette: Array - array of available chords
  * - selectedKey: string - currently selected key filter
@@ -50,4 +50,3 @@ const ChordLibrary = ({
 };
 
 export default ChordLibrary;
-

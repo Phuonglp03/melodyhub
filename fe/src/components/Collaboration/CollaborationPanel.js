@@ -1,10 +1,10 @@
 import React from "react";
 import { FaUserPlus } from "react-icons/fa";
-import CollaboratorAvatars from "../../../../../components/CollaboratorAvatars";
+import CollaboratorAvatars from "../CollaboratorAvatars";
 
 /**
  * CollaborationPanel - Panel showing collaborators and invite button
- * 
+ *
  * Props:
  * - collaborators: Array - list of collaborators
  * - currentUserId: string - current user's ID
@@ -44,4 +44,3 @@ const CollaborationPanel = ({
 };
 
 export default CollaborationPanel;
-

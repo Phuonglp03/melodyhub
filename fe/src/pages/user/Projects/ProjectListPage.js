@@ -1,9 +1,25 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaPlus, FaTrash, FaEdit, FaMusic, FaCheck, FaTimes } from "react-icons/fa";
-import { getUserProjects, deleteProject } from "../../../services/user/projectService";
-import { acceptProjectInvitation, declineProjectInvitation } from "../../../services/user/notificationService";
-import { getNotifications, markNotificationAsRead } from "../../../services/user/notificationService";
+import {
+  FaPlus,
+  FaTrash,
+  FaEdit,
+  FaMusic,
+  FaCheck,
+  FaTimes,
+} from "react-icons/fa";
+import {
+  getUserProjects,
+  deleteProject,
+} from "../../../services/user/projectService";
+import {
+  acceptProjectInvitation,
+  declineProjectInvitation,
+} from "../../../services/user/notificationService";
+import {
+  getNotifications,
+  markNotificationAsRead,
+} from "../../../services/user/notificationService";
 import { useSelector } from "react-redux";
 
 const ProjectListPage = () => {
@@ -28,15 +44,31 @@ const ProjectListPage = () => {
       setLoading(true);
       setError(null);
       const response = await getUserProjects(filter);
-      if (response.success) {
+      // Handle different response structures
+      if (response?.success) {
         setProjects(response.data || []);
         setPendingInvitations(response.pendingInvitations || []);
+      } else if (Array.isArray(response?.data)) {
+        setProjects(response.data);
+        setPendingInvitations(response.pendingInvitations || []);
+      } else if (Array.isArray(response)) {
+        setProjects(response);
+        setPendingInvitations([]);
       } else {
-        setError(response.message || "Failed to load projects");
+        setProjects([]);
+        setPendingInvitations([]);
+        setError(response?.message || "Failed to load projects");
       }
     } catch (err) {
       console.error("Error fetching projects:", err);
-      setError(err.message || "Failed to load projects");
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to load projects"
+      );
+      // Reset to empty arrays on error
+      setProjects([]);
+      setPendingInvitations([]);
     } finally {
       setLoading(false);
     }
@@ -74,23 +106,29 @@ const ProjectListPage = () => {
     try {
       setProcessingInvitation(projectId);
       await acceptProjectInvitation(projectId);
-      
+
       // Mark related notifications as read
       try {
         const notifications = await getNotifications({ page: 1, limit: 100 });
-        const relatedNotifications = notifications.data?.notifications?.filter(
-          (n) => n.type === "project_invite" && n.linkUrl?.includes(`/projects/${projectId}`) && !n.isRead
-        ) || [];
-        
+        const relatedNotifications =
+          notifications.data?.notifications?.filter(
+            (n) =>
+              n.type === "project_invite" &&
+              n.linkUrl?.includes(`/projects/${projectId}`) &&
+              !n.isRead
+          ) || [];
+
         for (const notif of relatedNotifications) {
           await markNotificationAsRead(notif._id);
         }
       } catch (err) {
         console.error("Error marking notifications as read:", err);
       }
-      
+
       // Remove from pending list and refresh
-      setPendingInvitations((prev) => prev.filter((inv) => inv._id !== projectId));
+      setPendingInvitations((prev) =>
+        prev.filter((inv) => inv._id !== projectId)
+      );
       fetchProjects(); // Refresh to show in collaborations
     } catch (error) {
       console.error("Error accepting invitation:", error);
@@ -105,23 +143,29 @@ const ProjectListPage = () => {
     try {
       setProcessingInvitation(projectId);
       await declineProjectInvitation(projectId);
-      
+
       // Mark related notifications as read
       try {
         const notifications = await getNotifications({ page: 1, limit: 100 });
-        const relatedNotifications = notifications.data?.notifications?.filter(
-          (n) => n.type === "project_invite" && n.linkUrl?.includes(`/projects/${projectId}`) && !n.isRead
-        ) || [];
-        
+        const relatedNotifications =
+          notifications.data?.notifications?.filter(
+            (n) =>
+              n.type === "project_invite" &&
+              n.linkUrl?.includes(`/projects/${projectId}`) &&
+              !n.isRead
+          ) || [];
+
         for (const notif of relatedNotifications) {
           await markNotificationAsRead(notif._id);
         }
       } catch (err) {
         console.error("Error marking notifications as read:", err);
       }
-      
+
       // Remove from pending list
-      setPendingInvitations((prev) => prev.filter((inv) => inv._id !== projectId));
+      setPendingInvitations((prev) =>
+        prev.filter((inv) => inv._id !== projectId)
+      );
     } catch (error) {
       console.error("Error declining invitation:", error);
       alert(error?.response?.data?.message || "Failed to decline invitation");
@@ -211,7 +255,9 @@ const ProjectListPage = () => {
       {/* Pending Invitations Section - Show in Collaborations tab */}
       {filter === "collaborations" && pendingInvitations.length > 0 && (
         <div className="mb-6">
-          <h2 className="text-xl font-semibold text-white mb-4">Pending Invitations</h2>
+          <h2 className="text-xl font-semibold text-white mb-4">
+            Pending Invitations
+          </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 mb-6">
             {pendingInvitations.map((invitation) => (
               <div
@@ -241,12 +287,17 @@ const ProjectListPage = () => {
                     </p>
                   )}
                   <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
-                    <span>by {invitation.creatorId?.displayName || invitation.creatorId?.username || "Unknown"}</span>
+                    <span>
+                      by{" "}
+                      {invitation.creatorId?.displayName ||
+                        invitation.creatorId?.username ||
+                        "Unknown"}
+                    </span>
                     <span className="px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400 text-xs">
                       {invitation.invitationRole}
                     </span>
                   </div>
-                  
+
                   {/* Accept/Decline Buttons */}
                   <div className="flex gap-2 mt-3">
                     <button
@@ -264,7 +315,9 @@ const ProjectListPage = () => {
                       )}
                     </button>
                     <button
-                      onClick={(e) => handleDeclineInvitation(invitation._id, e)}
+                      onClick={(e) =>
+                        handleDeclineInvitation(invitation._id, e)
+                      }
                       disabled={processingInvitation === invitation._id}
                       className="flex-1 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed text-white px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2"
                     >
@@ -286,10 +339,13 @@ const ProjectListPage = () => {
       )}
 
       {/* Projects Grid */}
-      {projects.length === 0 && (filter !== "collaborations" || pendingInvitations.length === 0) ? (
+      {projects.length === 0 &&
+      (filter !== "collaborations" || pendingInvitations.length === 0) ? (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center">
           <FaMusic className="mx-auto mb-4 opacity-50" size={48} />
-          <h5 className="text-xl font-semibold text-white mb-2">No projects found</h5>
+          <h5 className="text-xl font-semibold text-white mb-2">
+            No projects found
+          </h5>
           <p className="text-gray-400 mb-6">
             {filter === "all"
               ? "You haven't created or joined any projects yet."
@@ -310,7 +366,9 @@ const ProjectListPage = () => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {projects.map((project) => {
-            const isOwner = project.creatorId?._id === user?.id || project.creatorId?._id === user?._id;
+            const isOwner =
+              project.creatorId?._id === user?.id ||
+              project.creatorId?._id === user?._id;
             return (
               <div
                 key={project._id}
@@ -371,12 +429,21 @@ const ProjectListPage = () => {
                     </p>
                   )}
                   <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
-                    <span>by {project.creatorId?.displayName || project.creatorId?.username || "Unknown"}</span>
-                    <span className={`px-2 py-1 rounded-full ${
-                      project.status === "active" ? "bg-green-500/20 text-green-400" :
-                      project.status === "completed" ? "bg-blue-500/20 text-blue-400" :
-                      "bg-gray-700 text-gray-400"
-                    }`}>
+                    <span>
+                      by{" "}
+                      {project.creatorId?.displayName ||
+                        project.creatorId?.username ||
+                        "Unknown"}
+                    </span>
+                    <span
+                      className={`px-2 py-1 rounded-full ${
+                        project.status === "active"
+                          ? "bg-green-500/20 text-green-400"
+                          : project.status === "completed"
+                          ? "bg-blue-500/20 text-blue-400"
+                          : "bg-gray-700 text-gray-400"
+                      }`}
+                    >
                       {project.status}
                     </span>
                   </div>
@@ -399,11 +466,14 @@ const ProjectListPage = () => {
           />
           <div className="relative z-10 w-full max-w-md mx-4 bg-gray-900 border border-gray-800 rounded-lg shadow-xl">
             <div className="px-6 py-4 border-b border-gray-800">
-              <h2 className="text-lg font-semibold text-white">Delete Project</h2>
+              <h2 className="text-lg font-semibold text-white">
+                Delete Project
+              </h2>
             </div>
             <div className="px-6 py-5 space-y-3">
               <p className="text-gray-300 text-sm">
-                Are you sure you want to delete this project? This action cannot be undone.
+                Are you sure you want to delete this project? This action cannot
+                be undone.
               </p>
             </div>
             <div className="px-6 py-4 border-t border-gray-800 flex justify-end gap-3">

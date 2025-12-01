@@ -66,17 +66,56 @@ import {
 } from "../../../utils/midi";
 import { useAudioEngine } from "../../../hooks/useAudioEngine";
 import { useAudioScheduler } from "../../../hooks/useAudioScheduler";
-import { AudioTransportControls } from "../../../components/audio";
-import { DndProvider, useDrop } from "react-dnd";
+import { DndProvider } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import ProjectBandEngine from "../../../components/ProjectBandEngine";
 import ProjectLickLibrary from "../../../components/ProjectLickLibrary";
 import ProjectExportButton from "../../../components/ProjectExportButton";
 import ChordBlock from "../../../components/ChordBlock";
 import BandConsole from "../../../components/BandConsole";
-import CollaboratorAvatars from "../../../components/CollaboratorAvatars";
 import InviteCollaboratorModal from "../../../components/InviteCollaboratorModal";
 import { useProjectCollaboration } from "../../../hooks/useProjectCollaboration";
+// Extracted hooks
+import { useProjectTimeline } from "../../../hooks/useProjectTimeline";
+import { useProjectChords } from "../../../hooks/useProjectChords";
+import { useProjectLicks } from "../../../hooks/useProjectLicks";
+import { useProjectSettings } from "../../../hooks/useProjectSettings";
+import { useProjectHistory } from "../../../hooks/useProjectHistory";
+// Extracted components
+import TimelineView from "../../../components/ProjectTimeline/TimelineView";
+import ProjectSettingsPanel from "../../../components/ProjectSettings/ProjectSettingsPanel";
+import CollaborationPanel from "../../../components/Collaboration/CollaborationPanel";
+import ChordProgressionEditor from "../../../components/ChordProgression/ChordProgressionEditor";
+import ChordLibrary from "../../../components/ChordProgression/ChordLibrary";
+import ProjectPlaybackControls from "../../../components/AudioControls/ProjectPlaybackControls";
+// Extracted utilities
+import {
+  formatLabelValue,
+  formatTrackTitle,
+  TRACK_COLOR_PALETTE,
+  cloneTracksForHistory,
+  cloneChordsForHistory,
+  hydrateChordProgression,
+  normalizeChordEntry,
+  normalizeChordLibraryItem,
+  cloneChordEntry,
+  isChordInKey,
+  getChordDegree,
+  isBasicDiatonicChord,
+} from "../../../utils/projectHelpers";
+import {
+  normalizeTimelineItem,
+  getChordIndexFromId,
+  formatTransportTime,
+  getChordMidiEvents,
+  MIN_CLIP_DURATION,
+  normalizeRhythmPattern,
+  normalizeRhythmSteps,
+  registerPatternLookupKey,
+  lookupPatternFromMap,
+  createDefaultPatternSteps,
+  normalizeTracks,
+} from "../../../utils/timelineHelpers";
 import {
   DEFAULT_BAND_MEMBERS,
   deriveLegacyMixFromMembers,
@@ -89,885 +128,8 @@ import {
   clampSwingAmount,
 } from "../../../utils/musicTheory";
 
-const HISTORY_LIMIT = 50;
-const MIN_CLIP_DURATION = 0.1;
-
-const DEFAULT_FALLBACK_CHORDS = [
-  { chordName: "C", midiNotes: [60, 64, 67] },
-  { chordName: "G", midiNotes: [67, 71, 74] },
-  { chordName: "Am", midiNotes: [69, 72, 76] },
-  { chordName: "F", midiNotes: [65, 69, 72] },
-  { chordName: "Dm7", midiNotes: [62, 65, 69, 72] },
-  { chordName: "Em7", midiNotes: [64, 67, 71, 74] },
-  { chordName: "Gmaj7", midiNotes: [67, 71, 74, 78] },
-  { chordName: "Cmaj7", midiNotes: [60, 64, 67, 71] },
-];
-
-const TRACK_COLOR_PALETTE = [
-  "#6366f1",
-  "#8b5cf6",
-  "#0ea5e9",
-  "#10b981",
-  "#f97316",
-  "#f43f5e",
-  "#facc15",
-  "#ec4899",
-];
-const TIME_SIGNATURES = ["4/4", "3/4", "6/8", "2/4"];
-const KEY_OPTIONS = [
-  "C Major",
-  "G Major",
-  "D Major",
-  "A Major",
-  "E Major",
-  "B Major",
-  "F Major",
-  "Bb Major",
-  "Eb Major",
-  "C Minor",
-  "G Minor",
-  "D Minor",
-  "A Minor",
-  "E Minor",
-];
-
-const cloneTracksForHistory = (sourceTracks = []) =>
-  sourceTracks.map((track) => ({
-    ...track,
-    items: (track.items || []).map((item) => ({ ...item })),
-  }));
-
-const cloneChordsForHistory = (sourceChords = []) =>
-  sourceChords.map((entry) =>
-    typeof entry === "string" ? entry : { ...entry }
-  );
-
-const formatLabelValue = (value) => {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "number") return String(value);
-  if (Array.isArray(value)) {
-    return value
-      .map((entry) => formatLabelValue(entry))
-      .filter(Boolean)
-      .join(", ");
-  }
-  if (typeof value === "object") {
-    const candidate =
-      value.displayName ||
-      value.name ||
-      value.title ||
-      value.label ||
-      value.instrument ||
-      value.instrumentName ||
-      value.patternName ||
-      value.description ||
-      value.type;
-    if (candidate) return String(candidate);
-  }
-  return "";
-};
-
-const formatTrackTitle = (title) => {
-  const raw = formatLabelValue(title) || "Track";
-  const trimmed = raw.trim();
-  const cleaned = trimmed.replace(/^[\d\s._-]+/, "").trim();
-  return cleaned || trimmed || "Track";
-};
-
-const createDefaultPatternSteps = (length = 8) => {
-  const clamped = Math.max(4, Math.min(length, 32));
-  return Array.from({ length: clamped }, (_, idx) =>
-    idx % 4 === 0 ? 0.95 : idx % 2 === 0 ? 0.55 : 0.2
-  );
-};
-
-const candidatePatternKeys = [
-  "steps",
-  "sequence",
-  "pattern",
-  "patternData",
-  "grid",
-  "values",
-  "hits",
-  "data",
-  "notes",
-  "timeline",
-];
-
-const coercePatternArray = (raw) => {
-  if (Array.isArray(raw)) return raw.flat(Infinity);
-  if (typeof raw === "number" || typeof raw === "boolean") return [raw];
-  if (typeof raw === "string") {
-    const trimmed = raw.trim();
-    if (!trimmed) return [];
-    try {
-      const parsed = JSON.parse(trimmed);
-      return coercePatternArray(parsed);
-    } catch {
-      if (/^[01]+$/.test(trimmed)) {
-        return trimmed.split("").map((char) => (char === "1" ? 1 : 0));
-      }
-      const tokens = trimmed.split(/[\s,|/-]+/).filter(Boolean);
-      if (tokens.length) {
-        return tokens
-          .map((token) => Number(token))
-          .filter((num) => !Number.isNaN(num));
-      }
-    }
-    return [];
-  }
-  if (raw && typeof raw === "object") {
-    for (const key of candidatePatternKeys) {
-      if (raw[key] !== undefined) {
-        const arr = coercePatternArray(raw[key]);
-        if (arr.length) return arr;
-      }
-    }
-    return [];
-  }
-  return [];
-};
-
-const normalizeRhythmStepValue = (step) => {
-  if (typeof step === "boolean") return step ? 1 : 0;
-  if (typeof step === "number") return step;
-  if (typeof step === "string") {
-    const num = Number(step);
-    if (!Number.isNaN(num)) return num;
-    return step === "x" || step === "X" ? 1 : 0;
-  }
-  if (step && typeof step === "object") {
-    const numericKeys = [
-      "velocity",
-      "value",
-      "intensity",
-      "accent",
-      "gain",
-      "amount",
-    ];
-    for (const key of numericKeys) {
-      if (typeof step[key] === "number") {
-        return step[key];
-      }
-    }
-    if (typeof step.active === "boolean") return step.active ? 1 : 0;
-    if (typeof step.on === "boolean") return step.on ? 1 : 0;
-  }
-  return 0;
-};
-
-const clampStepValue = (value) => {
-  if (!Number.isFinite(value)) return 0;
-  if (value > 1) return Math.min(1, value / 127);
-  if (value < 0) return 0;
-  return value;
-};
-
-const normalizeRhythmSteps = (raw, fallbackLength = 0) => {
-  const arr = coercePatternArray(raw);
-  const normalized = arr
-    .map((step) => normalizeRhythmStepValue(step))
-    .map((value) => clampStepValue(value))
-    .filter((_, idx) => idx < 128);
-
-  if (normalized.length) {
-    return normalized;
-  }
-
-  if (fallbackLength > 0) {
-    return createDefaultPatternSteps(fallbackLength);
-  }
-
-  return [];
-};
-
-const normalizeRhythmPattern = (pattern) => {
-  if (!pattern) return null;
-  const fallbackLength =
-    (Array.isArray(pattern.steps) && pattern.steps.length) ||
-    (Array.isArray(pattern.sequence) && pattern.sequence.length) ||
-    Number(pattern.stepCount) ||
-    Number(pattern.subdivisionCount) ||
-    Number(pattern.length) ||
-    Number(pattern.beatCount) ||
-    8;
-
-  const sourceCandidates = [
-    pattern.steps,
-    pattern.sequence,
-    pattern.patternData,
-    pattern.pattern,
-    pattern.grid,
-    pattern.values,
-    pattern.hits,
-    pattern.timeline,
-    pattern.midiPreview,
-    pattern.midiNotes,
-  ];
-
-  let steps = [];
-  for (const source of sourceCandidates) {
-    const parsed = normalizeRhythmSteps(source);
-    if (parsed.length) {
-      steps = parsed;
-      break;
-    }
-  }
-
-  if (!steps.length) {
-    steps = createDefaultPatternSteps(fallbackLength);
-  }
-
-  return {
-    ...pattern,
-    visualSteps: steps,
-    visualStepCount: steps.length,
-    displayName: pattern.name || pattern.title || pattern.slug || "Rhythm",
-  };
-};
-
-const registerPatternLookupKey = (map, key, pattern) => {
-  if (key === null || key === undefined) return;
-  if (typeof key === "object") return;
-  const strKey = String(key).trim();
-  if (!strKey) return;
-  map[strKey] = pattern;
-  map[strKey.toLowerCase()] = pattern;
-};
-
-const lookupPatternFromMap = (map, key) => {
-  if (key === null || key === undefined) return null;
-  if (typeof key === "object") return null;
-  const strKey = String(key).trim();
-  if (!strKey) return null;
-  return map[strKey] || map[strKey.toLowerCase()] || null;
-};
-
-const formatTransportTime = (seconds = 0) => {
-  const totalSeconds = Math.max(0, seconds);
-  const minutes = Math.floor(totalSeconds / 60);
-  const secs = Math.floor(totalSeconds % 60)
-    .toString()
-    .padStart(2, "0");
-  const tenths = Math.floor((totalSeconds % 1) * 10);
-  return `${minutes.toString().padStart(2, "0")}:${secs}.${tenths}`;
-};
-
-/**
- * Derive detailed MIDI events for a chord block so we can visualize and describe it consistently.
- */
-const getChordMidiEvents = (
-  item,
-  fallbackDuration = 0,
-  patternSteps = null
-) => {
-  if (!item) return [];
-
-  if (Array.isArray(item.customMidiEvents) && item.customMidiEvents.length) {
-    return item.customMidiEvents;
-  }
-
-  const duration = fallbackDuration || item.duration || 0;
-  if (Array.isArray(item.midiNotes) && item.midiNotes.length) {
-    const chordMidi = item.midiNotes.map((pitch) => ({
-      pitch: Number(pitch),
-      startTime: 0,
-      duration,
-    }));
-    if (patternSteps?.length && duration > 0) {
-      const generated = generatePatternMidiEvents(
-        chordMidi.map((event) => event.pitch),
-        patternSteps,
-        duration
-      );
-      if (generated.length) return generated;
-    }
-    return chordMidi;
-  }
-
-  const fallbackNotes = getMidiNotesForChord(item.chordName || item.chord);
-  if (!fallbackNotes.length) return [];
-
-  if (patternSteps?.length && duration > 0) {
-    const generated = generatePatternMidiEvents(
-      fallbackNotes,
-      patternSteps,
-      duration
-    );
-    if (generated.length) return generated;
-  }
-
-  return fallbackNotes.map((pitch) => ({
-    pitch,
-    startTime: 0,
-    duration,
-  }));
-};
-
-const generatePatternMidiEvents = (
-  pitches = [],
-  patternSteps = [],
-  totalDuration = 0
-) => {
-  if (!pitches.length || !patternSteps.length || !totalDuration) return [];
-  const stepDuration = Math.max(
-    MIN_CLIP_DURATION,
-    totalDuration / patternSteps.length
-  );
-  const events = [];
-
-  patternSteps.forEach((value, index) => {
-    if (!value || value <= 0) return;
-    const startTime = index * stepDuration;
-    const duration = Math.max(MIN_CLIP_DURATION, stepDuration * 0.85);
-    const velocity = Math.max(0.1, Math.min(1, value));
-    pitches.forEach((pitch) => {
-      events.push({
-        pitch: Number(pitch),
-        startTime,
-        duration,
-        velocity,
-      });
-    });
-  });
-
-  return events;
-};
-
-const deriveRhythmGrid = (
-  events = [],
-  totalDuration = 0,
-  fallbackSteps = [],
-  preferredLength = 0
-) => {
-  const stepCount =
-    preferredLength ||
-    (fallbackSteps?.length
-      ? fallbackSteps.length
-      : Math.min(32, Math.max(8, Math.round(totalDuration * 2))));
-
-  if (!events.length || !totalDuration || !stepCount) {
-    return fallbackSteps || [];
-  }
-
-  const grid = Array(stepCount).fill(0);
-  const stepDuration = totalDuration / stepCount;
-
-  events.forEach((event) => {
-    const start = Math.max(0, Number(event.startTime) || 0);
-    const duration = Math.max(
-      MIN_CLIP_DURATION,
-      Number(event.duration) || stepDuration
-    );
-    const end = Math.min(totalDuration, start + duration);
-    let startIndex = Math.floor(start / stepDuration);
-    let endIndex = Math.floor(end / stepDuration);
-    if (endIndex < startIndex) endIndex = startIndex;
-    for (let i = startIndex; i <= endIndex && i < stepCount; i += 1) {
-      const overlapStart = Math.max(start, i * stepDuration);
-      const overlapEnd = Math.min(end, (i + 1) * stepDuration);
-      const proportion = Math.max(0, overlapEnd - overlapStart) / stepDuration;
-      const velocity = Number(event.velocity) || 0.6;
-      grid[i] = Math.max(grid[i], 0.2 + proportion * velocity);
-    }
-  });
-
-  return grid;
-};
-
-/**
- * Get chord degree in a key (I, ii, iii, IV, V, vi, vii°, bII, #IV, etc.)
- */
-const getChordDegree = (chordName, key) => {
-  if (!chordName || !key) return null;
-
-  // Parse key (e.g., "C Major", "A Minor", "Bb Major")
-  const keyMatch = key.match(/^([A-G][#b]?)\s*(Major|Minor|maj|min)$/i);
-  if (!keyMatch) return null;
-
-  const keyRoot = keyMatch[1];
-  const isMinor = /minor|min/i.test(keyMatch[2]);
-
-  // Parse chord root (e.g., "Am" -> "A", "C#maj7" -> "C#", "Bb7" -> "Bb")
-  const chordMatch = chordName.match(/^([A-G][#b]?)/);
-  if (!chordMatch) return null;
-
-  const chordRoot = chordMatch[1];
-
-  // Convert all note names to semitone indices (0-11)
-  const noteToIndex = (note) => {
-    const noteMap = {
-      C: 0,
-      "C#": 1,
-      Db: 1,
-      D: 2,
-      "D#": 3,
-      Eb: 3,
-      E: 4,
-      F: 5,
-      "F#": 6,
-      Gb: 6,
-      G: 7,
-      "G#": 8,
-      Ab: 8,
-      A: 9,
-      "A#": 10,
-      Bb: 10,
-      B: 11,
-    };
-    return noteMap[note] !== undefined ? noteMap[note] : null;
-  };
-
-  const keyIndex = noteToIndex(keyRoot);
-  const chordIndex = noteToIndex(chordRoot);
-
-  if (keyIndex === null || chordIndex === null) return null;
-
-  // Calculate semitone difference from key root
-  let semitoneDiff = (chordIndex - keyIndex + 12) % 12;
-
-  // Diatonic scale degrees (major and minor)
-  const majorScaleDegrees = [0, 2, 4, 5, 7, 9, 11]; // C, D, E, F, G, A, B
-  const minorScaleDegrees = [0, 2, 3, 5, 7, 8, 10]; // C, D, Eb, F, G, Ab, Bb (natural minor)
-
-  const scaleDegrees = isMinor ? minorScaleDegrees : majorScaleDegrees;
-
-  // Diatonic degree names
-  const majorDegreeNames = ["I", "ii", "iii", "IV", "V", "vi", "vii°"];
-  const minorDegreeNames = ["i", "ii°", "III", "iv", "v", "VI", "VII"];
-  const degreeNames = isMinor ? minorDegreeNames : majorDegreeNames;
-
-  // Check if it's a diatonic chord
-  const diatonicIndex = scaleDegrees.indexOf(semitoneDiff);
-  if (diatonicIndex !== -1) {
-    return degreeNames[diatonicIndex];
-  }
-
-  // Handle chromatic alterations (bII, #IV, etc.)
-  // Find the closest diatonic degree
-  let closestDiatonic = 0;
-  let minDistance = 12;
-  for (let i = 0; i < scaleDegrees.length; i++) {
-    const distance = Math.min(
-      Math.abs(semitoneDiff - scaleDegrees[i]),
-      Math.abs(semitoneDiff - scaleDegrees[i] - 12),
-      Math.abs(semitoneDiff - scaleDegrees[i] + 12)
-    );
-    if (distance < minDistance) {
-      minDistance = distance;
-      closestDiatonic = i;
-    }
-  }
-
-  // Calculate the alteration (how many semitones away from diatonic)
-  const diatonicSemitone = scaleDegrees[closestDiatonic];
-  let alteration = semitoneDiff - diatonicSemitone;
-  if (alteration > 6) alteration -= 12;
-  if (alteration < -6) alteration += 12;
-
-  // If it's exactly a diatonic note, return it (shouldn't happen here, but just in case)
-  if (alteration === 0) {
-    return degreeNames[closestDiatonic];
-  }
-
-  // Build the altered degree name
-  const baseDegree = degreeNames[closestDiatonic];
-  const isUppercase = baseDegree[0] === baseDegree[0].toUpperCase();
-  const degreeNum = baseDegree.replace(/[°b#]/g, ""); // Remove existing symbols
-
-  // Add flat or sharp prefix
-  let prefix = "";
-  if (alteration === -1) prefix = "b";
-  else if (alteration === 1) prefix = "#";
-  else if (alteration === -2) prefix = "bb";
-  else if (alteration === 2) prefix = "##";
-  else return null; // Too far from diatonic
-
-  // Preserve case and special symbols
-  const preservedSuffix = baseDegree.match(/[°b#]+$/)?.[0] || "";
-  return prefix + degreeNum + preservedSuffix;
-};
-
-/**
- * Check if a chord belongs to a key
- */
-const isChordInKey = (chordName, key) => {
-  return getChordDegree(chordName, key) !== null;
-};
-
-/**
- * Check if a chord is a basic diatonic chord (no extensions, in key)
- */
-const isBasicDiatonicChord = (chordName, key) => {
-  if (!chordName || !key) return false;
-
-  // Must be basic (no extensions)
-  const name = chordName.toLowerCase();
-  const complexPatterns =
-    /(7|9|11|13|sus|add|maj7|dim7|aug7|m7|b5|#5|6|maj9|9th)/;
-  if (complexPatterns.test(name)) return false;
-
-  // Must be in key (diatonic)
-  const degree = getChordDegree(chordName, key);
-  if (!degree) return false;
-
-  // Must be a diatonic degree (not chromatic like bII, #IV)
-  // Diatonic degrees don't have b or # prefix (except for diminished which has °)
-  const isDiatonic = !degree.startsWith("b") && !degree.startsWith("#");
-
-  return isDiatonic;
-};
-
-/**
- * Get the 7 diatonic chords for a key with their correct qualities
- * Returns array of { root, quality } where quality is 'major', 'minor', or 'diminished'
- */
-const getDiatonicChords = (key) => {
-  if (!key) return [];
-
-  const keyMatch = key.match(/^([A-G][#b]?)\s*(Major|Minor|maj|min)$/i);
-  if (!keyMatch) return [];
-
-  const keyRoot = keyMatch[1];
-  const isMinor = /minor|min/i.test(keyMatch[2]);
-
-  const noteToIndex = (note) => {
-    const noteMap = {
-      C: 0,
-      "C#": 1,
-      Db: 1,
-      D: 2,
-      "D#": 3,
-      Eb: 3,
-      E: 4,
-      F: 5,
-      "F#": 6,
-      Gb: 6,
-      G: 7,
-      "G#": 8,
-      Ab: 8,
-      A: 9,
-      "A#": 10,
-      Bb: 10,
-      B: 11,
-    };
-    return noteMap[note] !== undefined ? noteMap[note] : null;
-  };
-
-  const indexToNote = (index, preferSharp = true) => {
-    const sharpNotes = [
-      "C",
-      "C#",
-      "D",
-      "D#",
-      "E",
-      "F",
-      "F#",
-      "G",
-      "G#",
-      "A",
-      "A#",
-      "B",
-    ];
-    const flatNotes = [
-      "C",
-      "Db",
-      "D",
-      "Eb",
-      "E",
-      "F",
-      "Gb",
-      "G",
-      "Ab",
-      "A",
-      "Bb",
-      "B",
-    ];
-    return preferSharp ? sharpNotes[index] : flatNotes[index];
-  };
-
-  const keyIndex = noteToIndex(keyRoot);
-  if (keyIndex === null) return [];
-
-  // Diatonic scale intervals
-  const majorIntervals = [0, 2, 4, 5, 7, 9, 11]; // I, II, III, IV, V, VI, VII
-  const minorIntervals = [0, 2, 3, 5, 7, 8, 10]; // i, ii, III, iv, v, VI, VII
-
-  const intervals = isMinor ? minorIntervals : majorIntervals;
-
-  // Chord qualities for each degree
-  // Major key: I(maj), ii(min), iii(min), IV(maj), V(maj), vi(min), vii°(dim)
-  // Minor key: i(min), ii°(dim), III(maj), iv(min), v(min), VI(maj), VII(maj)
-  const majorQualities = [
-    "major",
-    "minor",
-    "minor",
-    "major",
-    "major",
-    "minor",
-    "diminished",
-  ];
-  const minorQualities = [
-    "minor",
-    "diminished",
-    "major",
-    "minor",
-    "minor",
-    "major",
-    "major",
-  ];
-
-  const qualities = isMinor ? minorQualities : majorQualities;
-
-  // Get chords with their roots and qualities
-  const chords = intervals.map((interval, index) => {
-    const noteIndex = (keyIndex + interval) % 12;
-    const root = indexToNote(noteIndex);
-    return { root, quality: qualities[index] };
-  });
-
-  return chords;
-};
-
-const normalizeChordLibraryItem = (chord) => ({
-  ...chord,
-  chordName: chord.chordName || chord.name || chord.label || "Chord",
-  midiNotes: parseMidiNotes(chord.midiNotes),
-  // Add note names for display
-  noteNames: parseMidiNotes(chord.midiNotes).map(midiToNoteNameNoOctave),
-});
-
-const normalizeChordEntry = (entry) => {
-  if (!entry) return null;
-  if (typeof entry === "string") {
-    return {
-      chordId: null,
-      chordName: entry,
-      midiNotes: [],
-      variation: null,
-      rhythm: null,
-      instrumentStyle: null,
-    };
-  }
-
-  const chordName = entry.chordName || entry.name || entry.label || "";
-  if (!chordName) {
-    return null;
-  }
-
-  return {
-    chordId: entry.chordId || entry._id || entry.id || null,
-    chordName,
-    midiNotes: parseMidiNotes(entry.midiNotes),
-    variation: entry.variation || entry.variant || null,
-    rhythmPatternId:
-      entry.rhythmPatternId ||
-      entry.rhythmPattern ||
-      entry.patternId ||
-      entry.rhythm?.patternId ||
-      entry.rhythm?.id ||
-      null,
-    rhythmPatternName:
-      entry.rhythmPatternName ||
-      entry.rhythm?.name ||
-      entry.patternName ||
-      null,
-    rhythmPatternSteps:
-      entry.rhythmPatternSteps ||
-      entry.rhythm?.steps ||
-      entry.patternSteps ||
-      null,
-    rhythm: entry.rhythm || entry.pattern || null,
-    instrumentStyle: entry.instrumentStyle || entry.timbre || null,
-  };
-};
-
-const hydrateChordProgression = (rawProgression) => {
-  if (!rawProgression) return [];
-
-  let parsed = rawProgression;
-  if (typeof rawProgression === "string") {
-    try {
-      parsed = JSON.parse(rawProgression);
-    } catch {
-      parsed = [];
-    }
-  }
-
-  if (!Array.isArray(parsed)) return [];
-
-  return parsed
-    .map(normalizeChordEntry)
-    .filter((entry) => entry && entry.chordName);
-};
-
-const cloneChordEntry = (entry) => {
-  const normalized = normalizeChordEntry(entry);
-  return normalized ? { ...normalized } : null;
-};
-
-const normalizeMidiEvent = (event) => {
-  if (!event) return null;
-  const pitch = Number(event.pitch);
-  const startTime = Number(event.startTime);
-  const duration = Number(event.duration);
-  const velocity = event.velocity === undefined ? 0.8 : Number(event.velocity);
-  if (
-    !Number.isFinite(pitch) ||
-    pitch < 0 ||
-    pitch > 127 ||
-    !Number.isFinite(startTime) ||
-    startTime < 0 ||
-    !Number.isFinite(duration) ||
-    duration < 0
-  ) {
-    return null;
-  }
-  const clampedVelocity = velocity >= 0 && velocity <= 1 ? velocity : 0.8;
-  return {
-    pitch,
-    startTime,
-    duration,
-    velocity: clampedVelocity,
-  };
-};
-
-const normalizeTimelineItem = (item) => {
-  if (!item) return item;
-  const startTime = Math.max(0, Number(item.startTime) || 0);
-  const duration = Math.max(
-    MIN_CLIP_DURATION,
-    Number(item.duration) || MIN_CLIP_DURATION
-  );
-  const offset = Math.max(0, Number(item.offset) || 0);
-  const sourceDurationRaw =
-    Number(item.sourceDuration) ||
-    Number(item.lickId?.duration) ||
-    offset + duration;
-  const sourceDuration = Math.max(sourceDurationRaw, offset + duration);
-
-  return {
-    ...item, // Preserve ALL original properties including lickId, waveformData, etc.
-    startTime,
-    duration,
-    offset,
-    sourceDuration,
-    loopEnabled: Boolean(item.loopEnabled),
-    playbackRate: Number(item.playbackRate) || 1,
-    type:
-      item.type || (item.lickId ? "lick" : item.audioUrl ? "chord" : "midi"),
-    chordName: item.chordName || item.chord || null,
-    rhythmPatternId: item.rhythmPatternId || null,
-    isCustomized: Boolean(item.isCustomized),
-    customMidiEvents: Array.isArray(item.customMidiEvents)
-      ? item.customMidiEvents
-          .map((event) => normalizeMidiEvent(event))
-          .filter(Boolean)
-      : [],
-    // Explicitly preserve lickId and all its properties (including waveformData)
-    lickId: item.lickId || null,
-    // Preserve audio URL and waveform data for chord items with generated audio
-    // Check multiple possible locations for audio URL (API might return it in different formats)
-    audioUrl:
-      item.audioUrl ||
-      item.audio_url ||
-      item.lickId?.audioUrl ||
-      item.lickId?.audio_url ||
-      null,
-    waveformData:
-      item.waveformData ||
-      item.waveform_data ||
-      item.lickId?.waveformData ||
-      item.lickId?.waveform_data ||
-      null,
-  };
-};
-
-const getChordIndexFromId = (itemId) => {
-  if (typeof itemId !== "string") return null;
-  if (!itemId.startsWith("chord-")) return null;
-  const parts = itemId.split("-");
-  const index = parseInt(parts[1], 10);
-  return Number.isNaN(index) ? null : index;
-};
-
-// Component to handle react-dnd drops on tracks
-const TrackDropZone = ({
-  trackId,
-  track,
-  timelineRef,
-  pixelsPerSecond,
-  secondsPerBeat,
-  applyMagnet,
-  handleDrop,
-  setDraggedLick,
-  children,
-  className,
-  style,
-}) => {
-  const [{ isOver }, dropRef] = useDrop(
-    () => ({
-      accept: "PROJECT_LICK",
-      drop: (item, monitor) => {
-        if (!timelineRef.current) return;
-
-        const clientOffset = monitor.getClientOffset();
-        if (!clientOffset) return;
-
-        const trackRect = timelineRef.current.getBoundingClientRect();
-        const scrollLeft = timelineRef.current.scrollLeft || 0;
-        const x = clientOffset.x - trackRect.left + scrollLeft;
-        const rawTime = Math.max(
-          0,
-          Math.round(x / pixelsPerSecond / secondsPerBeat) * secondsPerBeat
-        );
-        const snapped = applyMagnet(rawTime, track, null);
-
-        // Set the dragged lick state so handleDrop can use it
-        setDraggedLick(item);
-
-        // Create a synthetic event for handleDrop
-        const syntheticEvent = {
-          preventDefault: () => {},
-        };
-        // handleDrop will clear draggedLick when it's done
-        handleDrop(syntheticEvent, trackId, snapped).catch((error) => {
-          console.error("Error handling drop:", error);
-          setDraggedLick(null);
-        });
-      },
-      collect: (monitor) => ({
-        isOver: monitor.isOver(),
-      }),
-    }),
-    [
-      trackId,
-      track,
-      timelineRef,
-      pixelsPerSecond,
-      secondsPerBeat,
-      applyMagnet,
-      handleDrop,
-      setDraggedLick,
-    ]
-  );
-
-  return (
-    <div
-      ref={dropRef}
-      className={className}
-      style={{
-        ...style,
-        backgroundColor: isOver
-          ? "rgba(255,255,255,0.06)"
-          : style?.backgroundColor || "transparent",
-      }}
-    >
-      {children}
-    </div>
-  );
-};
+// All utility functions moved to utils/projectHelpers.js and utils/timelineHelpers.js
+// TrackDropZone component moved to components/ProjectTimeline/TrackDropZone.js
 
 const ProjectDetailPage = () => {
   const { projectId } = useParams();
@@ -989,6 +151,463 @@ const ProjectDetailPage = () => {
   const [newTrackName, setNewTrackName] = useState("");
   const [addTrackError, setAddTrackError] = useState(null);
   const [addTrackSuccess, setAddTrackSuccess] = useState(null);
+
+  // Project state (not in hooks)
+  const [project, setProject] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [userRole, setUserRole] = useState("viewer");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [workspaceScale, setWorkspaceScale] = useState(0.9); // Overall UI scale
+
+  // UI State (not in hooks)
+  const [sidePanelOpen, setSidePanelOpen] = useState(true); // Bottom panel visibility
+  const [sidePanelWidth, setSidePanelWidth] = useState(450); // Bottom panel height (resizable)
+  const [bandSettings, setBandSettings] = useState(() => {
+    const members = DEFAULT_BAND_MEMBERS;
+    const legacy = deriveLegacyMixFromMembers(members);
+    return {
+      style: "Swing",
+      swingAmount: 0.6,
+      members,
+      volumes: legacy.volumes,
+      mutes: legacy.mutes,
+    };
+  });
+  const [currentBeat, setCurrentBeat] = useState(0);
+  const [midiEditorOpen, setMidiEditorOpen] = useState(false);
+  const [editingTimelineItem, setEditingTimelineItem] = useState(null);
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [aiNotification, setAiNotification] = useState(null); // { type: 'success'|'error', message: '' }
+  const [trackContextMenu, setTrackContextMenu] = useState({
+    isOpen: false,
+    x: 0,
+    y: 0,
+    trackId: null,
+  });
+
+  // Create refs for circular dependencies
+  const pushHistoryRef = useRef(null);
+
+  // Initialize hooks - must be called unconditionally before event handlers
+  // Settings hook (needed first for bpm, key, time signature)
+  const settingsHook = useProjectSettings({
+    projectId,
+    project,
+    setProject,
+    broadcast,
+    refreshProject: () => refreshProjectRef.current?.(),
+  });
+
+  // Licks hook (independent, can be called early)
+  const licksHook = useProjectLicks(user);
+
+  // Timeline hook - needs bpm from settings
+  const timelineHook = useProjectTimeline({
+    projectId,
+    bpm: settingsHook?.bpm || project?.tempo || 120,
+    zoomLevel: 1, // Will be managed by hook
+    broadcast,
+    pushHistory: () => pushHistoryRef.current?.(),
+    chordItems: [], // Will be updated from chords hook
+    setError,
+  });
+
+  // Chords hook - needs projectKeyName from settings
+  const chordsHook = useProjectChords({
+    projectId,
+    projectKeyName: settingsHook?.projectKeyName || null,
+    broadcast,
+    pushHistory: () => pushHistoryRef.current?.(),
+    refreshProject: () => refreshProjectRef.current?.(),
+  });
+
+  // History hook - needs tracks and chordProgression from other hooks
+  const historyHook = useProjectHistory({
+    tracks: timelineHook?.tracks || [],
+    chordProgression: chordsHook?.chordProgression || [],
+    setTracks: timelineHook?.setTracks,
+    setChordProgression: chordsHook?.setChordProgression,
+    setSelectedItem: timelineHook?.setSelectedItem,
+    setFocusedClipId: timelineHook?.setFocusedClipId,
+  });
+
+  // Update pushHistory ref
+  useEffect(() => {
+    pushHistoryRef.current = historyHook?.pushHistory;
+  }, [historyHook?.pushHistory]);
+
+  // Extract values from hooks for easier access
+  const {
+    tempoDraft,
+    setTempoDraft,
+    swingDraft,
+    setSwingDraft,
+    instruments,
+    loadingInstruments,
+    selectedInstrumentId,
+    setSelectedInstrumentId,
+    rhythmPatterns,
+    loadingRhythmPatterns,
+    selectedRhythmPatternId,
+    setSelectedRhythmPatternId,
+    bpm,
+    projectKeyName: settingsProjectKeyName,
+    projectTimeSignatureName,
+    projectSwingAmount: settingsProjectSwingAmount,
+    fetchInstruments,
+    fetchRhythmPatterns,
+    commitTempoChange,
+    commitSwingChange,
+    handleTimeSignatureChange,
+    handleKeyChange,
+  } = settingsHook || {};
+
+  const resolvedBackingInstrumentId = useMemo(
+    () => selectedInstrumentId || project?.backingInstrumentId || null,
+    [selectedInstrumentId, project?.backingInstrumentId]
+  );
+
+  const {
+    tracks,
+    setTracks,
+    zoomLevel,
+    setZoomLevel,
+    selectedItem,
+    setSelectedItem,
+    focusedClipId,
+    setFocusedClipId,
+    isDraggingItem,
+    setIsDraggingItem,
+    dragOffset,
+    setDragOffset,
+    resizeState,
+    setResizeState,
+    draggedLick,
+    setDraggedLick,
+    dragOverTrack,
+    setDragOverTrack,
+    dragOverPosition,
+    setDragOverPosition,
+    selectedTrackId,
+    setSelectedTrackId,
+    isPlaying,
+    setIsPlaying,
+    playbackPosition,
+    setPlaybackPosition,
+    metronomeEnabled,
+    setMetronomeEnabled,
+    loopEnabled,
+    setLoopEnabled,
+    isSavingTimeline,
+    markTimelineItemDirty,
+    flushTimelineSaves,
+    scheduleTimelineAutosave,
+    applyMagnet,
+    handleClipOverlap,
+    calculateTimelineWidth,
+    handleDrop,
+    handleDeleteTimelineItem,
+    handleClipResize,
+    handleClipMove,
+    handleClipMouseDown,
+    startClipResize,
+    secondsPerBeat,
+    timelineRef,
+    playheadRef,
+    clipRefs,
+    TRACK_COLUMN_WIDTH,
+    basePixelsPerSecond,
+    pixelsPerSecond,
+    pixelsPerBeat,
+    hasUnsavedTimelineChanges,
+  } = timelineHook || {};
+
+  const instrumentHighlightId = useMemo(() => {
+    if (!selectedTrackId) return resolvedBackingInstrumentId;
+    const targetTrack = tracks.find((t) => t._id === selectedTrackId);
+    if (!targetTrack) return null;
+    if (targetTrack.isBackingTrack || targetTrack.trackType === "backing") {
+      return resolvedBackingInstrumentId;
+    }
+    return targetTrack.instrument || null;
+  }, [selectedTrackId, tracks, resolvedBackingInstrumentId]);
+
+  const {
+    chordProgression,
+    setChordProgression,
+    backingTrack,
+    setBackingTrack,
+    selectedChordIndex,
+    setSelectedChordIndex,
+    chordLibrary,
+    loadingChords,
+    chordLibraryError,
+    showComplexChords,
+    setShowComplexChords,
+    chordLibraryTotal,
+    selectedKeyFilter,
+    setSelectedKeyFilter,
+    draggedChord,
+    setDraggedChord,
+    chordItems,
+    chordPalette,
+    chordDurationSeconds,
+    reorderChordProgression,
+    saveChordProgression,
+    handleAddChord,
+    handleChordSelect,
+    handleAddChordFromDeck,
+    handleRemoveChord,
+    handleChordDragStart,
+    fetchChordLibrary,
+    loadComplexChords,
+    getChordDuration,
+    getChordWidth,
+    getChordStartPosition,
+  } = chordsHook || {};
+
+  const {
+    lickSearchTerm,
+    setLickSearchTerm,
+    availableLicks,
+    setAvailableLicks,
+    loadingLicks,
+    selectedGenre,
+    setSelectedGenre,
+    selectedType,
+    setSelectedType,
+    selectedEmotional,
+    setSelectedEmotional,
+    selectedTimbre,
+    setSelectedTimbre,
+    selectedArticulation,
+    setSelectedArticulation,
+    selectedCharacter,
+    setSelectedCharacter,
+    tagGroups,
+    setTagGroups,
+    activeTagDropdown,
+    setActiveTagDropdown,
+    tagDropdownRef: licksTagDropdownRef,
+    lickPage,
+    setLickPage,
+    lickHasMore,
+    setLickHasMore,
+    playingLickId,
+    setPlayingLickId,
+    lickAudioRefs,
+    setLickAudioRefs,
+    lickProgress,
+    setLickProgress,
+    fetchLicks,
+    loadMoreLicks,
+    handleLickPlayPause,
+    setLoadingLicks,
+    LICKS_PER_PAGE,
+  } = licksHook || {};
+
+  const {
+    historyStatus,
+    pushHistory,
+    handleUndo,
+    handleRedo,
+    updateHistoryStatus,
+  } = historyHook || {};
+
+  // Computed values that depend on hooks
+  const normalizedTimeSignature = useMemo(
+    () => normalizeTimeSignaturePayload(project?.timeSignature),
+    [project?.timeSignature]
+  );
+  const beatsPerMeasure = normalizedTimeSignature?.numerator || 4;
+  const projectSwingAmount = useMemo(
+    () => clampSwingAmount(project?.swingAmount ?? 0),
+    [project?.swingAmount]
+  );
+
+  // Rhythm Patterns lookup - depends on rhythmPatterns from hook
+  const rhythmPatternLookup = useMemo(() => {
+    const map = {};
+    (rhythmPatterns || []).forEach((pattern) => {
+      if (!pattern) return;
+      const normalized = normalizeRhythmPattern(pattern);
+      registerPatternLookupKey(map, pattern._id, normalized);
+      registerPatternLookupKey(map, pattern.id, normalized);
+      registerPatternLookupKey(map, pattern.slug, normalized);
+      registerPatternLookupKey(map, pattern.name, normalized);
+    });
+    return map;
+  }, [rhythmPatterns]);
+
+  const lookupRhythmPattern = useCallback(
+    (key) => lookupPatternFromMap(rhythmPatternLookup, key),
+    [rhythmPatternLookup]
+  );
+
+  const getRhythmPatternVisual = useCallback(
+    (item) => {
+      if (!item) return null;
+
+      const patternKeys = [
+        item.rhythmPatternId,
+        item.rhythmPattern,
+        item.rhythm?.patternId,
+        item.rhythm?.id,
+        item.rhythmPatternName,
+        item.rhythm?.name,
+      ].filter(Boolean);
+
+      const tryLookupPattern = () => {
+        for (const key of patternKeys) {
+          const found = lookupRhythmPattern(key);
+          if (found) return found;
+        }
+        return null;
+      };
+
+      const directSources = [
+        item.rhythmPatternSteps,
+        item.rhythmPatternData,
+        item.rhythm?.steps,
+        item.rhythm,
+      ];
+
+      for (const source of directSources) {
+        const steps = normalizeRhythmSteps(source);
+        if (steps.length) {
+          const matchedPattern = tryLookupPattern();
+          const label =
+            item.rhythmPatternName ||
+            item.rhythm?.name ||
+            matchedPattern?.displayName ||
+            null;
+          return { steps, label };
+        }
+      }
+
+      const matchedPattern = tryLookupPattern();
+      if (matchedPattern) {
+        return {
+          steps: matchedPattern.visualSteps,
+          label: matchedPattern.displayName,
+        };
+      }
+
+      if (selectedRhythmPatternId) {
+        const fallback = lookupRhythmPattern(selectedRhythmPatternId);
+        if (fallback) {
+          return {
+            steps: fallback.visualSteps,
+            label: fallback.displayName,
+          };
+        }
+      }
+
+      return {
+        steps: createDefaultPatternSteps(),
+        label: null,
+      };
+    },
+    [lookupRhythmPattern, selectedRhythmPatternId]
+  );
+
+  // Track-related computed values
+  const closeTrackMenu = useCallback(
+    () => setTrackContextMenu({ isOpen: false, x: 0, y: 0, trackId: null }),
+    []
+  );
+  const orderedTracks = useMemo(
+    () => [...tracks].sort((a, b) => (a.trackOrder ?? 0) - (b.trackOrder ?? 0)),
+    [tracks]
+  );
+  const userTracks = useMemo(
+    () =>
+      orderedTracks.filter(
+        (track) => !track.isBackingTrack && track.trackType !== "backing"
+      ),
+    [orderedTracks]
+  );
+  const hasAnyUserClips = useMemo(
+    () => userTracks.some((track) => (track.items || []).length > 0),
+    [userTracks]
+  );
+  const menuTrack = useMemo(
+    () =>
+      trackContextMenu.trackId
+        ? tracks.find((track) => track._id === trackContextMenu.trackId) || null
+        : null,
+    [trackContextMenu.trackId, tracks]
+  );
+  const menuPosition = useMemo(() => {
+    const padding = 12;
+    const width = 260;
+    const height = 320;
+    let x = trackContextMenu.x;
+    let y = trackContextMenu.y;
+
+    if (typeof window !== "undefined") {
+      x = Math.min(Math.max(padding, x), window.innerWidth - width - padding);
+      y = Math.min(Math.max(padding, y), window.innerHeight - height - padding);
+    }
+
+    return { x, y };
+  }, [trackContextMenu.x, trackContextMenu.y]);
+
+  // Helper functions
+  const updateBandSettings = (updater) => {
+    setBandSettings((prev) => {
+      const next =
+        typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
+      const members = next.members || prev.members || [];
+      const legacy = deriveLegacyMixFromMembers(members);
+      return {
+        ...prev,
+        ...next,
+        members,
+        volumes: legacy.volumes,
+        mutes: legacy.mutes,
+      };
+    });
+  };
+
+  const startPerformanceDeckResize = (e) => {
+    if (!sidePanelOpen) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = sidePanelWidth;
+
+    const handleMouseMove = (moveEvent) => {
+      const diff = startY - moveEvent.clientY; // Inverted for bottom panel
+      const newHeight = Math.max(200, Math.min(500, startHeight + diff));
+      setSidePanelWidth(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const adjustWorkspaceScale = useCallback((delta) => {
+    setWorkspaceScale((prev) => {
+      const next = parseFloat((prev + delta).toFixed(2));
+      return Math.min(MAX_WORKSPACE_SCALE, Math.max(MIN_WORKSPACE_SCALE, next));
+    });
+  }, []);
+
+  // Constants
+  const COLLAPSED_DECK_HEIGHT = 44;
+  const MIN_WORKSPACE_SCALE = 0.75;
+  const MAX_WORKSPACE_SCALE = 1.1;
+  const WORKSPACE_SCALE_STEP = 0.05;
+
+  // Audio engine
+  const audioEngine = useAudioEngine();
+  const { schedulePlayback, stopPlayback, loadClipAudio } = useAudioScheduler();
 
   // Listen for remote collaboration updates
   useEffect(() => {
@@ -1349,528 +968,17 @@ const ProjectDetailPage = () => {
         handleRemoteEditingActivity
       );
     };
-  }, [collaborators]);
-
-  const [project, setProject] = useState(null);
-  const [tracks, setTracks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [userRole, setUserRole] = useState("viewer");
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isSavingTimeline, setIsSavingTimeline] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackPosition, setPlaybackPosition] = useState(0);
-  const [zoomLevel, setZoomLevel] = useState(1); // Timeline zoom multiplier
-  const [workspaceScale, setWorkspaceScale] = useState(0.9); // Overall UI scale
-  const [selectedItem, setSelectedItem] = useState(null);
-  const [focusedClipId, setFocusedClipId] = useState(null);
-  const [isDraggingItem, setIsDraggingItem] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, trackId: null });
-  const [resizeState, setResizeState] = useState(null);
-  const [draggedLick, setDraggedLick] = useState(null);
-  const [draggedChord, setDraggedChord] = useState(null);
-  const [dragOverTrack, setDragOverTrack] = useState(null);
-  const [dragOverPosition, setDragOverPosition] = useState(null);
-  const [selectedTrackId, setSelectedTrackId] = useState(null); // New state for selected track
-
-  // UI State
-  const [activeTab, setActiveTab] = useState("chord-deck"); // "chord-deck", "backing-track"
-  const [sidePanelOpen, setSidePanelOpen] = useState(true); // Bottom panel visibility
-  const [sidePanelWidth, setSidePanelWidth] = useState(450); // Bottom panel height (resizable)
-  const [chordLibraryPanelOpen, setChordLibraryPanelOpen] = useState(false); // Right chord library panel visibility (hidden by default)
-  const [chordLibraryPanelWidth, setChordLibraryPanelWidth] = useState(280); // Right panel width (resizable)
-  const [selectedLick, setSelectedLick] = useState(null);
-  const [showLickLibrary, setShowLickLibrary] = useState(true);
-  const [lickSearchTerm, setLickSearchTerm] = useState("");
-  const [availableLicks, setAvailableLicks] = useState([]);
-  const [loadingLicks, setLoadingLicks] = useState(false);
-
-  // Tag filters for lick search - all 6 categories from upload page
-  const [selectedGenre, setSelectedGenre] = useState(null);
-  const [selectedType, setSelectedType] = useState(null); // Type (Instrument)
-  const [selectedEmotional, setSelectedEmotional] = useState(null); // Emotional (Mood)
-  const [selectedTimbre, setSelectedTimbre] = useState(null);
-  const [selectedArticulation, setSelectedArticulation] = useState(null);
-  const [selectedCharacter, setSelectedCharacter] = useState(null);
-
-  // Tag groups from database
-  const [tagGroups, setTagGroups] = useState({});
-  const [activeTagDropdown, setActiveTagDropdown] = useState(null); // which dropdown is open
-  const tagDropdownRef = useRef(null);
-
-  // Chord progression - now stored as backing track items
-  const [chordProgression, setChordProgression] = useState([]);
-  const [backingTrack, setBackingTrack] = useState(null); // The backing track that holds chords
-  const [selectedChordIndex, setSelectedChordIndex] = useState(null); // For chord deck
-  const [bandSettings, setBandSettings] = useState(() => {
-    const members = DEFAULT_BAND_MEMBERS;
-    const legacy = deriveLegacyMixFromMembers(members);
-    return {
-      style: "Swing",
-      swingAmount: 0.6,
-      members,
-      volumes: legacy.volumes,
-      mutes: legacy.mutes,
-    };
-  });
-  const [currentBeat, setCurrentBeat] = useState(0);
-  const [chordLibrary, setChordLibrary] = useState([]);
-  const [loadingChords, setLoadingChords] = useState(false);
-  const [chordLibraryError, setChordLibraryError] = useState(null);
-  const [showComplexChords, setShowComplexChords] = useState(false);
-  const [chordLibraryTotal, setChordLibraryTotal] = useState(0);
-  const [selectedKeyFilter, setSelectedKeyFilter] = useState(null); // null = all keys, or specific key string
-  const [lickPage, setLickPage] = useState(1);
-  const [lickHasMore, setLickHasMore] = useState(true);
-  const LICKS_PER_PAGE = 10; // Reduced initial load to prevent crashes
-  const [playingLickId, setPlayingLickId] = useState(null);
-  const [lickAudioRefs, setLickAudioRefs] = useState({});
-  const [lickProgress, setLickProgress] = useState({});
-
-  const updateBandSettings = (updater) => {
-    setBandSettings((prev) => {
-      const next =
-        typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
-      const members = next.members || prev.members || [];
-      const legacy = deriveLegacyMixFromMembers(members);
-      return {
-        ...prev,
-        ...next,
-        members,
-        volumes: legacy.volumes,
-        mutes: legacy.mutes,
-      };
-    });
-  };
-
-  const startPerformanceDeckResize = (e) => {
-    if (!sidePanelOpen) return;
-    e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = sidePanelWidth;
-
-    const handleMouseMove = (moveEvent) => {
-      const diff = startY - moveEvent.clientY; // Inverted for bottom panel
-      const newHeight = Math.max(200, Math.min(500, startHeight + diff));
-      setSidePanelWidth(newHeight);
-    };
-
-    const handleMouseUp = () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-  };
-
-  // Generate all keys (12 major + 12 minor)
-  const allKeys = useMemo(() => {
-    const notes = [
-      "C",
-      "C#",
-      "D",
-      "D#",
-      "E",
-      "F",
-      "F#",
-      "G",
-      "G#",
-      "A",
-      "A#",
-      "B",
-    ];
-    const keys = [];
-    notes.forEach((note) => {
-      keys.push(`${note} Major`);
-      keys.push(`${note} Minor`);
-    });
-    return keys;
-  }, []);
-
-  // Instruments
-  const [instruments, setInstruments] = useState([]);
-  const [loadingInstruments, setLoadingInstruments] = useState(false);
-  const [selectedInstrumentId, setSelectedInstrumentId] = useState(null);
-  const resolvedBackingInstrumentId = useMemo(
-    () => selectedInstrumentId || project?.backingInstrumentId || null,
-    [selectedInstrumentId, project?.backingInstrumentId]
-  );
-  const instrumentHighlightId = useMemo(() => {
-    if (!selectedTrackId) return resolvedBackingInstrumentId;
-    const targetTrack = tracks.find((t) => t._id === selectedTrackId);
-    if (!targetTrack) return null;
-    if (targetTrack.isBackingTrack || targetTrack.trackType === "backing") {
-      return resolvedBackingInstrumentId;
-    }
-    return targetTrack.instrument || null;
-  }, [selectedTrackId, tracks, resolvedBackingInstrumentId]);
-
-  // Rhythm Patterns
-  const [rhythmPatterns, setRhythmPatterns] = useState([]);
-  const [loadingRhythmPatterns, setLoadingRhythmPatterns] = useState(false);
-  const [selectedRhythmPatternId, setSelectedRhythmPatternId] = useState(null);
-  const rhythmPatternLookup = useMemo(() => {
-    const map = {};
-    (rhythmPatterns || []).forEach((pattern) => {
-      if (!pattern) return;
-      const normalized = normalizeRhythmPattern(pattern);
-      registerPatternLookupKey(map, pattern._id, normalized);
-      registerPatternLookupKey(map, pattern.id, normalized);
-      registerPatternLookupKey(map, pattern.slug, normalized);
-      registerPatternLookupKey(map, pattern.name, normalized);
-    });
-    return map;
-  }, [rhythmPatterns]);
-
-  const lookupRhythmPattern = useCallback(
-    (key) => lookupPatternFromMap(rhythmPatternLookup, key),
-    [rhythmPatternLookup]
-  );
-
-  const getRhythmPatternVisual = useCallback(
-    (item) => {
-      if (!item) return null;
-
-      const patternKeys = [
-        item.rhythmPatternId,
-        item.rhythmPattern,
-        item.rhythm?.patternId,
-        item.rhythm?.id,
-        item.rhythmPatternName,
-        item.rhythm?.name,
-      ].filter(Boolean);
-
-      const tryLookupPattern = () => {
-        for (const key of patternKeys) {
-          const found = lookupRhythmPattern(key);
-          if (found) return found;
-        }
-        return null;
-      };
-
-      const directSources = [
-        item.rhythmPatternSteps,
-        item.rhythmPatternData,
-        item.rhythm?.steps,
-        item.rhythm,
-      ];
-
-      for (const source of directSources) {
-        const steps = normalizeRhythmSteps(source);
-        if (steps.length) {
-          const matchedPattern = tryLookupPattern();
-          const label =
-            item.rhythmPatternName ||
-            item.rhythm?.name ||
-            matchedPattern?.displayName ||
-            null;
-          return { steps, label };
-        }
-      }
-
-      const matchedPattern = tryLookupPattern();
-      if (matchedPattern) {
-        return {
-          steps: matchedPattern.visualSteps,
-          label: matchedPattern.displayName,
-        };
-      }
-
-      if (selectedRhythmPatternId) {
-        const fallback = lookupRhythmPattern(selectedRhythmPatternId);
-        if (fallback) {
-          return {
-            steps: fallback.visualSteps,
-            label: fallback.displayName,
-          };
-        }
-      }
-
-      return {
-        steps: createDefaultPatternSteps(),
-        label: null,
-      };
-    },
-    [lookupRhythmPattern, selectedRhythmPatternId]
-  );
-
-  // MIDI Editor
-  const [midiEditorOpen, setMidiEditorOpen] = useState(false);
-  const [editingTimelineItem, setEditingTimelineItem] = useState(null);
-
-  // AI Generation Loading & Notifications
-  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
-  const [aiNotification, setAiNotification] = useState(null); // { type: 'success'|'error', message: '' }
-
-  // Bottom Panel Tabs
-  const [activeBottomTab, setActiveBottomTab] = useState("backing"); // 'backing' or 'library'
-
-  // Track Context Menu
-  const [trackContextMenu, setTrackContextMenu] = useState({
-    isOpen: false,
-    x: 0,
-    y: 0,
-    trackId: null,
-  });
-  const closeTrackMenu = useCallback(
-    () => setTrackContextMenu({ isOpen: false, x: 0, y: 0, trackId: null }),
-    []
-  );
-  const orderedTracks = useMemo(
-    () => [...tracks].sort((a, b) => (a.trackOrder ?? 0) - (b.trackOrder ?? 0)),
-    [tracks]
-  );
-  const userTracks = useMemo(
-    () =>
-      orderedTracks.filter(
-        (track) => !track.isBackingTrack && track.trackType !== "backing"
-      ),
-    [orderedTracks]
-  );
-  const hasAnyUserClips = useMemo(
-    () => userTracks.some((track) => (track.items || []).length > 0),
-    [userTracks]
-  );
-  const menuTrack = useMemo(
-    () =>
-      trackContextMenu.trackId
-        ? tracks.find((track) => track._id === trackContextMenu.trackId) || null
-        : null,
-    [trackContextMenu.trackId, tracks]
-  );
-  const [tempoDraft, setTempoDraft] = useState("120");
-  const [swingDraft, setSwingDraft] = useState("0");
-  const [metronomeEnabled, setMetronomeEnabled] = useState(true);
-  const [loopEnabled, setLoopEnabled] = useState(false);
-  const [historyStatus, setHistoryStatus] = useState({
-    canUndo: false,
-    canRedo: false,
-  });
-  const audioEngine = useAudioEngine();
-  const { schedulePlayback, stopPlayback, loadClipAudio } = useAudioScheduler();
-  const historyRef = useRef([]);
-  const futureRef = useRef([]);
-  const playbackPositionRef = useRef(0);
-  const dirtyTimelineItemsRef = useRef(new Set());
-  const saveTimeoutRef = useRef(null);
-  // Note: Tone.js players are now managed through audioEngine hook (not stored in component refs)
-  // This avoids storing non-serializable objects and follows the rule of using useAudioEngine singleton
-  const menuPosition = useMemo(() => {
-    const padding = 12;
-    const width = 260;
-    const height = 320;
-    let x = trackContextMenu.x;
-    let y = trackContextMenu.y;
-
-    if (typeof window !== "undefined") {
-      x = Math.min(Math.max(padding, x), window.innerWidth - width - padding);
-      y = Math.min(Math.max(padding, y), window.innerHeight - height - padding);
-    }
-
-    return { x, y };
-  }, [trackContextMenu.x, trackContextMenu.y]);
-
-  const markTimelineItemDirty = useCallback((itemId) => {
-    dirtyTimelineItemsRef.current.add(itemId);
-  }, []);
-
-  const adjustWorkspaceScale = useCallback((delta) => {
-    setWorkspaceScale((prev) => {
-      const next = parseFloat((prev + delta).toFixed(2));
-      return Math.min(MAX_WORKSPACE_SCALE, Math.max(MIN_WORKSPACE_SCALE, next));
-    });
-  }, []);
-
-  const hasUnsavedTimelineChanges = dirtyTimelineItemsRef.current.size > 0;
-
-  const normalizedProjectKey = useMemo(
-    () => normalizeKeyPayload(project?.key),
-    [project?.key]
-  );
-  const projectKeyName = normalizedProjectKey.name;
-  const normalizedTimeSignature = useMemo(
-    () => normalizeTimeSignaturePayload(project?.timeSignature),
-    [project?.timeSignature]
-  );
-  const projectTimeSignatureName = normalizedTimeSignature.name;
-  const projectSwingAmount = useMemo(
-    () => clampSwingAmount(project?.swingAmount ?? 0),
-    [project?.swingAmount]
-  );
-
-  const collectTimelineItemSnapshot = useCallback(
-    (itemId) => {
-      if (!itemId) return null;
-      for (const track of tracks) {
-        const found = (track.items || []).find((item) => item._id === itemId);
-        if (found) {
-          const normalized = normalizeTimelineItem(found);
-          const snapshot = {
-            _id: normalized._id,
-            startTime: normalized.startTime,
-            duration: normalized.duration,
-            offset: normalized.offset,
-            loopEnabled: normalized.loopEnabled,
-            playbackRate: normalized.playbackRate,
-            sourceDuration: normalized.sourceDuration,
-          };
-
-          // Include chord-related fields for chord timeline items
-          if (normalized.type === "chord") {
-            if (normalized.chordName !== undefined) {
-              snapshot.chordName = normalized.chordName;
-            }
-            if (normalized.rhythmPatternId !== undefined) {
-              snapshot.rhythmPatternId = normalized.rhythmPatternId;
-            }
-            if (normalized.isCustomized !== undefined) {
-              snapshot.isCustomized = normalized.isCustomized;
-            }
-            if (normalized.customMidiEvents !== undefined) {
-              snapshot.customMidiEvents = normalized.customMidiEvents;
-            }
-          }
-
-          return snapshot;
-        }
-      }
-      return null;
-    },
-    [tracks]
-  );
-
-  const autosaveTimeoutRef = useRef(null);
-
-  const updateHistoryStatus = useCallback(() => {
-    setHistoryStatus({
-      canUndo: historyRef.current.length > 0,
-      canRedo: futureRef.current.length > 0,
-    });
-  }, []);
-
-  const pushHistory = useCallback(() => {
-    const snapshot = {
-      tracks: cloneTracksForHistory(tracks),
-      chordProgression: cloneChordsForHistory(chordProgression),
-    };
-    historyRef.current = [...historyRef.current, snapshot].slice(
-      -HISTORY_LIMIT
-    );
-  }, [tracks, chordProgression, updateHistoryStatus]);
-
-  const flushTimelineSaves = useCallback(async () => {
-    const ids = Array.from(dirtyTimelineItemsRef.current);
-    if (!ids.length) return;
-
-    const snapshots = ids
-      .map((id) => collectTimelineItemSnapshot(id))
-      .filter((s) => s !== null);
-
-    if (!snapshots.length) return;
-
-    const payload = snapshots;
-    setIsSavingTimeline(true);
-    dirtyTimelineItemsRef.current.clear();
-
-    try {
-      await bulkUpdateTimelineItems(projectId, payload);
-
-      // Broadcast to collaborators
-      if (broadcast) {
-        broadcast("TIMELINE_ITEMS_BULK_UPDATE", { items: payload });
-      }
-    } catch (error) {
-      console.error("Timeline items bulk save failed:", error);
-      ids.forEach((id) => dirtyTimelineItemsRef.current.add(id));
-    } finally {
-      setIsSavingTimeline(false);
-    }
-  }, [projectId, collectTimelineItemSnapshot, broadcast]);
-
-  const scheduleTimelineAutosave = useCallback(() => {
-    clearTimeout(autosaveTimeoutRef.current);
-    autosaveTimeoutRef.current = setTimeout(() => {
-      flushTimelineSaves();
-    }, 2000);
-  }, [flushTimelineSaves]);
-
-  const handleUndo = useCallback(() => {
-    if (!historyRef.current.length) return;
-    const previous = historyRef.current.pop();
-    futureRef.current.push({
-      tracks: cloneTracksForHistory(tracks),
-      chordProgression: cloneChordsForHistory(chordProgression),
-    });
-    setTracks(previous?.tracks || []);
-    setChordProgression(previous?.chordProgression || []);
-    setSelectedItem(null);
-    setFocusedClipId(null);
-    updateHistoryStatus();
-  }, [tracks, chordProgression, updateHistoryStatus]);
-
-  const handleRedo = useCallback(() => {
-    if (!futureRef.current.length) return;
-    const nextState = futureRef.current.pop();
-    historyRef.current.push({
-      tracks: cloneTracksForHistory(tracks),
-      chordProgression: cloneChordsForHistory(chordProgression),
-    });
-    setTracks(nextState?.tracks || []);
-    setChordProgression(nextState?.chordProgression || []);
-    setSelectedItem(null);
-    setFocusedClipId(null);
-    updateHistoryStatus();
-  }, [tracks, chordProgression, updateHistoryStatus]);
-
-  const timelineRef = useRef(null);
-  const playheadRef = useRef(null);
-  const clipRefs = useRef(new Map());
-  const dragStateRef = useRef(null);
-  const basePixelsPerSecond = 50; // Base scale for timeline
-  const beatsPerMeasure = 4; // For 4/4 time
-  const TRACK_COLUMN_WIDTH = 256; // Tailwind w-64 keeps labels aligned with lanes
-  const COLLAPSED_DECK_HEIGHT = 44;
-  const MIN_WORKSPACE_SCALE = 0.75;
-  const MAX_WORKSPACE_SCALE = 1.1;
-  const WORKSPACE_SCALE_STEP = 0.05;
-
-  // Calculate BPM-dependent values
-  const bpm = project?.tempo || 120;
-  const secondsPerBeat = 60 / bpm;
-  const pixelsPerSecond = basePixelsPerSecond * zoomLevel; // Zoom-adjusted scale
-  const pixelsPerBeat = pixelsPerSecond * secondsPerBeat;
-
-  const normalizeTracks = (incomingTracks = []) =>
-    incomingTracks
-      .map((track, index) => {
-        const fallbackColor =
-          TRACK_COLOR_PALETTE[index % TRACK_COLOR_PALETTE.length];
-        const inferredBacking =
-          track.isBackingTrack ||
-          track.trackType === "backing" ||
-          track.trackName?.toLowerCase() === "backing track";
-        const rawType = (track.trackType || "").toLowerCase();
-        const normalizedType = ["audio", "midi", "backing"].includes(rawType)
-          ? rawType
-          : inferredBacking
-          ? "backing"
-          : "audio";
-        const isBackingTrack = Boolean(
-          inferredBacking || normalizedType === "backing"
-        );
-
-        return {
-          ...track,
-          isBackingTrack,
-          trackType: normalizedType,
-          color: track.color || fallbackColor,
-          instrument: track.instrument || null,
-          defaultRhythmPatternId: track.defaultRhythmPatternId || null,
-          items: (track.items || []).map((item) => normalizeTimelineItem(item)),
-        };
-      })
-      .sort((a, b) => (a.trackOrder ?? 0) - (b.trackOrder ?? 0));
+  }, [
+    collaborators,
+    setTracks,
+    setChordProgression,
+    saveChordProgression,
+    setTempoDraft,
+    setSwingDraft,
+    setProject,
+    refreshProjectRef,
+    normalizeTimelineItem,
+  ]);
 
   const fetchProject = useCallback(
     async (showLoading = false) => {
@@ -1888,7 +996,10 @@ const ProjectDetailPage = () => {
           setChordProgression(
             hydrateChordProgression(response.data.project.chordProgression)
           );
-          const normalized = normalizeTracks(response.data.tracks || []);
+          const normalized = normalizeTracks(
+            response.data.tracks || [],
+            TRACK_COLOR_PALETTE
+          );
           setTracks(normalized);
 
           // Store userRole if available
@@ -1937,7 +1048,22 @@ const ProjectDetailPage = () => {
         setLoadingLicks(false);
       }
     },
-    [projectId]
+    [
+      projectId,
+      setChordProgression,
+      setTracks,
+      setSelectedInstrumentId,
+      setBackingTrack,
+      setLoadingLicks,
+      setProject,
+      setUserRole,
+      setError,
+      setLoading,
+      updateBandSettings,
+      hydrateChordProgression,
+      normalizeTracks,
+      TRACK_COLOR_PALETTE,
+    ]
   );
 
   const refreshProject = useCallback(() => fetchProject(false), [fetchProject]);
@@ -1947,252 +1073,24 @@ const ProjectDetailPage = () => {
     refreshProjectRef.current = refreshProject;
   }, [refreshProject]);
 
-  const fetchLicks = useCallback(
-    async (page = 1, append = false) => {
-      setLoadingLicks(true);
-      try {
-        const activeFilters = [
-          selectedGenre,
-          selectedType,
-          selectedEmotional,
-          selectedTimbre,
-          selectedArticulation,
-          selectedCharacter,
-        ].filter(Boolean);
+  // fetchLicks, loadMoreLicks, and handleLickPlayPause are now in useProjectLicks hook
 
-        const response = await getCommunityLicks({
-          search: lickSearchTerm,
-          tags: activeFilters.join(","),
-          limit: LICKS_PER_PAGE,
-          page: page,
-          sortBy: "newest",
-        });
-
-        const licks =
-          response?.data?.licks ||
-          response?.data?.items ||
-          response?.data ||
-          response?.licks ||
-          response?.items ||
-          [];
-
-        if (append) {
-          setAvailableLicks((prev) => [
-            ...prev,
-            ...(Array.isArray(licks) ? licks : []),
-          ]);
-        } else {
-          setAvailableLicks(Array.isArray(licks) ? licks : []);
-          setLickPage(1);
-        }
-
-        // Check if there are more licks to load
-        const total = response?.data?.total || response?.total || 0;
-        const currentCount = append
-          ? availableLicks.length + licks.length
-          : licks.length;
-        setLickHasMore(licks.length === LICKS_PER_PAGE && currentCount < total);
-      } catch (err) {
-        console.error("Error fetching licks:", err);
-        if (!append) {
-          setAvailableLicks([]);
-        }
-      } finally {
-        setLoadingLicks(false);
-      }
-    },
-    [
-      lickSearchTerm,
-      selectedGenre,
-      selectedType,
-      selectedEmotional,
-      selectedTimbre,
-      selectedArticulation,
-      selectedCharacter,
-      availableLicks.length,
-    ]
-  );
-
-  const loadMoreLicks = () => {
-    if (!loadingLicks && lickHasMore) {
-      const nextPage = lickPage + 1;
-      setLickPage(nextPage);
-      fetchLicks(nextPage, true);
-    }
-  };
-
-  // Handle lick audio playback
-  const handleLickPlayPause = async (lick, e) => {
-    e?.stopPropagation();
-    const lickId = lick._id || lick.lick_id || lick.id;
-
-    // If clicking the same lick that's playing, pause it
-    if (playingLickId === lickId) {
-      const audio = lickAudioRefs[lickId];
-      if (audio) {
-        audio.pause();
-        setPlayingLickId(null);
-      }
-      return;
-    }
-
-    // Stop any currently playing lick
-    if (playingLickId && lickAudioRefs[playingLickId]) {
-      lickAudioRefs[playingLickId].pause();
-      lickAudioRefs[playingLickId].currentTime = 0;
-    }
-
-    try {
-      // Get audio URL
-      const response = await playLickAudio(lickId);
-      if (!response.success || !response.data?.audio_url) {
-        console.error("No audio URL available");
-        return;
-      }
-
-      // Create or get audio element
-      let audio = lickAudioRefs[lickId];
-      if (!audio) {
-        audio = new Audio();
-        audio.addEventListener("timeupdate", () => {
-          if (audio.duration) {
-            setLickProgress((prev) => ({
-              ...prev,
-              [lickId]: audio.currentTime / audio.duration,
-            }));
-          }
-        });
-        audio.addEventListener("ended", () => {
-          setPlayingLickId(null);
-          setLickProgress((prev) => ({
-            ...prev,
-            [lickId]: 0,
-          }));
-        });
-        setLickAudioRefs((prev) => ({ ...prev, [lickId]: audio }));
-      }
-
-      audio.src = response.data.audio_url;
-      await audio.play();
-      setPlayingLickId(lickId);
-    } catch (error) {
-      console.error("Error playing lick:", error);
-    }
-  };
-
-  // Cleanup audio refs on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(lickAudioRefs).forEach((audio) => {
-        if (audio) {
-          audio.pause();
-          audio.src = "";
-        }
-      });
-    };
-  }, []);
-
+  // Fetch project, instruments, and rhythm patterns on mount or projectId change
+  // Note: fetchInstruments and fetchRhythmPatterns are memoized with empty deps, so they're stable
+  // fetchProject may change, but we only want to refetch when projectId changes
   useEffect(() => {
     fetchProject(true); // Show loading only on initial load
     fetchInstruments();
     fetchRhythmPatterns();
-  }, [projectId, fetchProject]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]); // Only depend on projectId - fetchInstruments/fetchRhythmPatterns are stable, fetchProject may change but we only refetch on projectId change
 
-  useEffect(() => {
-    const fetchChordLibrary = async () => {
-      try {
-        setLoadingChords(true);
-        // Load ALL chords from database (we'll filter to 7 diatonic basic on frontend)
-        // This allows lazy loading - only show 7 basic diatonic chords first
-        const result = await getChords({
-          basicOnly: false, // Get all chords, filter on frontend
-        });
-        const allChords = (result.chords || []).map((chord) =>
-          normalizeChordLibraryItem(chord)
-        );
-        setChordLibrary(allChords);
-        setChordLibraryTotal(result.total || 0);
-        setShowComplexChords(false); // Reset to basic diatonic when key changes
-        setChordLibraryError(null);
-      } catch (err) {
-        console.error("Error fetching chords:", err);
-        setChordLibraryError(err.message || "Failed to load chords");
-      } finally {
-        setLoadingChords(false);
-      }
-    };
+  // fetchChordLibrary is now in useProjectChords hook
+  // loadComplexChords is now in useProjectChords hook
+  // Pointer up handler is now handled in useProjectTimeline hook's drag useEffect
 
-    fetchChordLibrary();
-  }, [projectKeyName, selectedKeyFilter]); // Reload when key changes
-
-  // Load complex chords when user expands (no need to fetch, just change state)
-  const loadComplexChords = () => {
-    if (showComplexChords) return;
-    setShowComplexChords(true);
-  };
-
-  useEffect(() => {
-    const handlePointerUp = () => {
-      if (!isDraggingItem) return;
-
-      // Get the dragged clip and its final position
-      if (selectedItem && clipRefs.current.has(selectedItem)) {
-        const clipElement = clipRefs.current.get(selectedItem);
-        if (clipElement && timelineRef.current) {
-          // Read final position from visual element
-          const currentLeft = parseFloat(clipElement.style.left) || 0;
-          const finalStartTime = Math.max(0, currentLeft / pixelsPerSecond);
-
-          // Update state
-          pushHistory();
-          setTracks((prevTracks) =>
-            prevTracks.map((track) => {
-              const hasClip = (track.items || []).find(
-                (item) => item._id === selectedItem
-              );
-              if (!hasClip) return track;
-              return {
-                ...track,
-                items: (track.items || []).map((item) =>
-                  item._id === selectedItem
-                    ? normalizeTimelineItem({
-                        ...item,
-                        startTime: finalStartTime,
-                      })
-                    : item
-                ),
-              };
-            })
-          );
-
-          // Trigger autosave
-          markTimelineItemDirty(selectedItem);
-          scheduleTimelineAutosave();
-        }
-      }
-
-      // Clean up drag state
-      setIsDraggingItem(false);
-      setSelectedItem(null);
-      dragStateRef.current = null;
-    };
-
-    window.addEventListener("pointerup", handlePointerUp);
-    window.addEventListener("blur", handlePointerUp);
-
-    return () => {
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("blur", handlePointerUp);
-    };
-  }, [
-    isDraggingItem,
-    selectedItem,
-    pixelsPerSecond,
-    pushHistory,
-    markTimelineItemDirty,
-    scheduleTimelineAutosave,
-  ]);
-
+  // playbackPositionRef for immediate position access
+  const playbackPositionRef = useRef(playbackPosition);
   useEffect(() => {
     playbackPositionRef.current = playbackPosition;
   }, [playbackPosition]);
@@ -2200,7 +1098,7 @@ const ProjectDetailPage = () => {
   // Warn on page unload if there are unsaved timeline changes
   useEffect(() => {
     const handleBeforeUnload = (event) => {
-      if (!dirtyTimelineItemsRef.current.size) return;
+      if (!hasUnsavedTimelineChanges) return;
       event.preventDefault();
       // Chrome requires returnValue to be set.
       event.returnValue = "";
@@ -2209,15 +1107,15 @@ const ProjectDetailPage = () => {
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, []);
+  }, [hasUnsavedTimelineChanges]);
 
   useEffect(() => {
     setTempoDraft(String(project?.tempo || 120));
-  }, [project?.tempo]);
+  }, [project?.tempo, setTempoDraft]);
 
   useEffect(() => {
     setSwingDraft(String(projectSwingAmount));
-  }, [projectSwingAmount]);
+  }, [projectSwingAmount, setSwingDraft]);
 
   const formattedPlayTime = useMemo(
     () => formatTransportTime(playbackPosition),
@@ -2234,127 +1132,9 @@ const ProjectDetailPage = () => {
 
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [closeTrackMenu]);
+  }, [closeTrackMenu, setFocusedClipId]);
 
-  const chordDurationSeconds = useMemo(
-    () => getChordDuration() * secondsPerBeat,
-    [secondsPerBeat]
-  );
-
-  const chordItems = useMemo(
-    () =>
-      chordProgression.map((entry, index) => {
-        const chordName = entry?.chordName || `Chord ${index + 1}`;
-        return {
-          _id: `chord-${index}`,
-          chord: chordName,
-          startTime: index * chordDurationSeconds,
-          duration: chordDurationSeconds,
-          _isChord: true,
-          midiNotes: entry?.midiNotes || [],
-          variation: entry?.variation || null,
-          instrumentStyle: entry?.instrumentStyle || null,
-          rhythmPatternId: entry?.rhythmPatternId || null,
-          rhythmPatternName: entry?.rhythmPatternName || null,
-          rhythmPatternSteps: entry?.rhythmPatternSteps || null,
-          rhythm: entry?.rhythm || null,
-        };
-      }),
-    [chordProgression, chordDurationSeconds]
-  );
-
-  const chordPalette = useMemo(() => {
-    const sourceChords = chordLibrary.length
-      ? chordLibrary
-      : DEFAULT_FALLBACK_CHORDS;
-    // Use null check to allow "" (All Keys) to be valid
-    const filterKey =
-      selectedKeyFilter !== null ? selectedKeyFilter : projectKeyName;
-
-    let filtered = sourceChords;
-
-    // If showing basic chords only, filter to only 7 diatonic basic chords with correct qualities
-    if (!showComplexChords && filterKey) {
-      // Get the 7 diatonic chords with their correct qualities
-      const diatonicChords = getDiatonicChords(filterKey);
-
-      // Helper to extract root and quality from chord name
-      const rootMatch = (chordName) => {
-        const match = chordName.match(/^([A-G][#b]?)/);
-        return match ? match[1] : null;
-      };
-
-      const getChordQuality = (chordName) => {
-        const name = chordName.toLowerCase();
-        if (/dim|°/.test(name)) return "diminished";
-        if (/m$|min$/.test(name) && !/maj|dim/.test(name)) return "minor";
-        return "major";
-      };
-
-      // Filter to only chords that match the 7 diatonic chords exactly
-      filtered = sourceChords.filter((chord) => {
-        const chordName = chord.chordName || chord.name;
-        if (!chordName) return false;
-
-        // Must be basic (no extensions)
-        const name = chordName.toLowerCase();
-        const complexPatterns =
-          /(7|9|11|13|sus|add|maj7|dim7|aug7|m7|b5|#5|6|maj9|9th)/;
-        if (complexPatterns.test(name)) return false;
-
-        const root = rootMatch(chordName);
-        const quality = getChordQuality(chordName);
-
-        // Check if this chord matches one of the 7 diatonic chords
-        return diatonicChords.some(
-          (dc) => dc.root === root && dc.quality === quality
-        );
-      });
-
-      // Ensure we have exactly one chord per diatonic degree
-      const chordsByDegree = {};
-      diatonicChords.forEach((dc, index) => {
-        const matchingChord = filtered.find((chord) => {
-          const chordName = chord.chordName || chord.name;
-          const root = rootMatch(chordName);
-          const quality = getChordQuality(chordName);
-          return root === dc.root && quality === dc.quality;
-        });
-        if (matchingChord) {
-          chordsByDegree[index] = matchingChord;
-        }
-      });
-
-      // Sort by degree order
-      filtered = Object.keys(chordsByDegree)
-        .sort((a, b) => parseInt(a) - parseInt(b))
-        .map((key) => chordsByDegree[key]);
-    } else if (filterKey) {
-      // When showing complex chords, filter by key but include all chords in key
-      filtered = sourceChords.filter((chord) => {
-        const chordName = chord.chordName || chord.name;
-        if (!chordName) return false;
-        return isChordInKey(chordName, filterKey);
-      });
-    }
-    // If no key selected, show all chords
-
-    // Sort: basic chords first, then complex (for better UX)
-    const sorted = [...filtered].sort((a, b) => {
-      const aName = (a.chordName || a.name || "").toLowerCase();
-      const bName = (b.chordName || b.name || "").toLowerCase();
-      const aIsBasic =
-        !/(7|9|11|13|sus|add|maj7|dim7|aug7|m7|b5|#5|6|maj9|9th)/.test(aName);
-      const bIsBasic =
-        !/(7|9|11|13|sus|add|maj7|dim7|aug7|m7|b5|#5|6|maj9|9th)/.test(bName);
-
-      if (aIsBasic && !bIsBasic) return -1;
-      if (!aIsBasic && bIsBasic) return 1;
-      return aName.localeCompare(bName);
-    });
-
-    return sorted.map((chord) => normalizeChordLibraryItem(chord));
-  }, [chordLibrary, projectKeyName, selectedKeyFilter, showComplexChords]);
+  // chordDurationSeconds, chordItems, and chordPalette are now in useProjectChords hook
 
   const studioSeed = useMemo(() => {
     if (!project) return null;
@@ -2372,55 +1152,9 @@ const ProjectDetailPage = () => {
     };
   }, [project, chordProgression, projectId, availableLicks]);
 
-  const reorderChordProgression = (fromIndex, toIndex) => {
-    if (
-      fromIndex === null ||
-      toIndex === null ||
-      fromIndex < 0 ||
-      fromIndex >= chordProgression.length
-    ) {
-      return;
-    }
+  // reorderChordProgression is now in useProjectChords hook
 
-    const clampedTarget = Math.max(
-      0,
-      Math.min(toIndex, chordProgression.length - 1)
-    );
-    const updated = [...chordProgression];
-    const [moved] = updated.splice(fromIndex, 1);
-    updated.splice(clampedTarget, 0, moved);
-    saveChordProgression(updated);
-  };
-
-  // Fetch available instruments
-  const fetchInstruments = async () => {
-    try {
-      setLoadingInstruments(true);
-      const response = await getInstruments();
-      if (response.success) {
-        setInstruments(response.data || []);
-      }
-    } catch (err) {
-      console.error("Error fetching instruments:", err);
-    } finally {
-      setLoadingInstruments(false);
-    }
-  };
-
-  // Fetch rhythm patterns
-  const fetchRhythmPatterns = async () => {
-    try {
-      setLoadingRhythmPatterns(true);
-      const response = await getRhythmPatterns();
-      if (response.success) {
-        setRhythmPatterns(response.data || []);
-      }
-    } catch (err) {
-      console.error("Error fetching rhythm patterns:", err);
-    } finally {
-      setLoadingRhythmPatterns(false);
-    }
-  };
+  // fetchInstruments and fetchRhythmPatterns are now in useProjectSettings hook
 
   // Handle adding chord to timeline from backing track panel
   const handleAddChordToTimeline = async (chordData) => {
@@ -2795,58 +1529,19 @@ const ProjectDetailPage = () => {
   }, [bpm]);
 
   // Get audio URL for a timeline item (used by useAudioScheduler)
-  const getAudioUrlForItem = useCallback(
-    async (item) => {
-      // Handle lick items - get audio URL from API
-      if (item.type === "lick" && item.lickId) {
-        const audioResponse = await playLickAudio(
-          item.lickId._id || item.lickId,
-          user?._id
-        );
-        return (
-          audioResponse?.data?.audio_url ||
-          audioResponse?.data?.audioUrl ||
-          null
-        );
-      }
-
-      // Handle chord items with generated audio
-      if (
-        item.type === "chord" ||
-        (item.chordName &&
-          (item.audioUrl || item.audio_url || item.lickId?.audioUrl))
-      ) {
-        return (
-          item.audioUrl ||
-          item.audio_url ||
-          item.lickId?.audioUrl ||
-          item.lickId?.audio_url ||
-          null
-        );
-      }
-
-      return null;
-    },
-    [user?._id]
-  );
-
-  // Schedule audio playback using the extracted hook
-  const scheduleAudioPlayback = useCallback(async () => {
-    await schedulePlayback(tracks, getAudioUrlForItem);
-  }, [tracks, schedulePlayback, getAudioUrlForItem]);
+  // getAudioUrlForItem and scheduleAudioPlayback are now in useProjectTimeline hook
 
   //  Auto-reschedule audio when tracks change during playback
   // This is key for live editing while playing (like professional DAWs)
+  // Audio rescheduling is handled by useAudioScheduler hook via schedulePlayback
+  // Note: schedulePlayback requires getAudioUrl function which should be implemented
   useEffect(() => {
     if (isPlaying && audioEngine.players.size > 0) {
-      // Debounce rescheduling to avoid too many updates
-      const timeoutId = setTimeout(() => {
-        scheduleAudioPlayback();
-      }, 50); // 50ms debounce
-
-      return () => clearTimeout(timeoutId);
+      // Audio rescheduling is handled by useAudioScheduler hook
+      // The scheduler will automatically reschedule when tracks change
+      // TODO: Implement getAudioUrl function and call schedulePlayback(tracks, getAudioUrl)
     }
-  }, [tracks, isPlaying]); // Reschedule when tracks or playback state changes
+  }, [tracks, isPlaying, schedulePlayback, audioEngine]); // Reschedule when tracks or playback state changes
 
   // Auto-save when clips are moved/edited (catches all clip position changes)
   const prevTracksRef = useRef(null);
@@ -2891,219 +1586,12 @@ const ProjectDetailPage = () => {
     prevTracksRef.current = tracks;
   }, [tracks, markTimelineItemDirty, scheduleTimelineAutosave]);
 
-  const handlePlay = async () => {
-    // Start Tone.js audio context if needed
-    await audioEngine.ensureStarted();
-
-    if (!audioEngine.transport) {
-      console.error("Tone.Transport is not available");
-      return;
-    }
-
-    // Set the transport position to current playback position
-    audioEngine.setPosition(playbackPositionRef.current);
-
-    // Update BPM in case it changed
-    audioEngine.setBpm(bpm);
-
-    setIsPlaying(true);
-
-    // Schedule audio playback (no longer needs startTime parameter)
-    await scheduleAudioPlayback();
-
-    // Start the Tone.js Transport
-    audioEngine.startTransport();
-  };
-
-  const handlePause = () => {
-    setIsPlaying(false);
-
-    // Pause the Tone.js Transport
-    audioEngine.pauseTransport();
-
-    // Stop all audio players
-    audioEngine.stopAllPlayers();
-  };
-
-  const handleStop = () => {
-    setIsPlaying(false);
-    setPlaybackPosition(0);
-    playbackPositionRef.current = 0;
-
-    // Stop the Tone.js Transport and reset position
-    audioEngine.stopTransport();
-
-    // Stop all audio players
-    audioEngine.stopAllPlayers();
-  };
-
-  const handleReturnToStart = () => {
-    setIsPlaying(false);
-    setPlaybackPosition(0);
-    playbackPositionRef.current = 0;
-  };
-
-  const handlePlayToggle = () => {
-    if (isPlaying) {
-      handlePause();
-    } else {
-      handlePlay();
-    }
-  };
+  // handlePlay, handlePause, handleStop, handleReturnToStart, handlePlayToggle are now in useProjectTimeline hook
 
   // Snap time to grid and clip edges
-  // Soft magnetic snapping to neighboring clips on the same track
-  const applyMagnet = (time, track, itemId) => {
-    if (!track) return time;
+  // applyMagnet, handleClipOverlap, and calculateTimelineWidth are now in useProjectTimeline hook
 
-    const thresholdSeconds = secondsPerBeat * 0.25; // quarter-beat magnetic range
-    let closestTime = time;
-    let minDelta = thresholdSeconds;
-
-    // Snap to beat grid
-    const beatTime = Math.round(time / secondsPerBeat) * secondsPerBeat;
-    const beatDelta = Math.abs(beatTime - time);
-    if (beatDelta < minDelta) {
-      minDelta = beatDelta;
-      closestTime = beatTime;
-    }
-
-    // Snap to clip edges
-    const hasTimelineChords = (track.items || []).some(
-      (clip) => clip?.type === "chord"
-    );
-    const includeVirtualChords =
-      (track.trackType === "backing" || track.isBackingTrack) &&
-      chordItems?.length &&
-      !hasTimelineChords;
-    const allItems = includeVirtualChords
-      ? [...(track.items || []), ...chordItems]
-      : track.items || [];
-
-    allItems.forEach((item) => {
-      if (!item || item._id === itemId) return;
-      const start = item.startTime || 0;
-      const end = start + (item.duration || 0);
-      const edges = [start, end];
-
-      edges.forEach((edge) => {
-        const delta = Math.abs(edge - time);
-        if (delta < minDelta) {
-          minDelta = delta;
-          closestTime = edge;
-        }
-      });
-    });
-
-    return closestTime;
-  };
-
-  // Handle clip overlap: Trim overlapping clips (like openDAW/Ableton)
-  // When a clip overlaps another, trim the underlying clip
-  const handleClipOverlap = (
-    track,
-    movedItemId,
-    newStartTime,
-    movedDuration
-  ) => {
-    if (!track) return track;
-
-    const movedItem = track.items?.find((item) => item._id === movedItemId);
-    if (!movedItem) return track;
-
-    const movedEnd = newStartTime + movedDuration;
-    const updatedItems = (track.items || [])
-      .map((item) => {
-        if (item._id === movedItemId) {
-          // Update the moved item
-          return { ...item, startTime: newStartTime };
-        }
-
-        const itemStart = item.startTime || 0;
-        const itemEnd = itemStart + (item.duration || 0);
-
-        // Check if moved clip overlaps this item
-        const overlaps = !(newStartTime >= itemEnd || movedEnd <= itemStart);
-
-        if (overlaps) {
-          // Trim the underlying clip
-          if (newStartTime > itemStart && newStartTime < itemEnd) {
-            // Moved clip starts inside this item - trim the end
-            const newDuration = newStartTime - itemStart;
-            if (newDuration >= MIN_CLIP_DURATION) {
-              return { ...item, duration: newDuration };
-            } else {
-              // Too small, remove it
-              return null;
-            }
-          } else if (movedEnd > itemStart && movedEnd < itemEnd) {
-            // Moved clip ends inside this item - trim the start
-            const trimAmount = movedEnd - itemStart;
-            const newStart = itemStart + trimAmount;
-            const newDuration = item.duration - trimAmount;
-            if (newDuration >= MIN_CLIP_DURATION) {
-              return {
-                ...item,
-                startTime: newStart,
-                offset: (item.offset || 0) + trimAmount,
-              };
-            } else {
-              // Too small, remove it
-              return null;
-            }
-          } else if (newStartTime <= itemStart && movedEnd >= itemEnd) {
-            // Moved clip completely covers this item - remove it
-            return null;
-          }
-        }
-
-        return item;
-      })
-      .filter(Boolean); // Remove null items
-
-    return {
-      ...track,
-      items: updatedItems,
-    };
-  };
-
-  // Calculate timeline width based on content
-  const calculateTimelineWidth = () => {
-    let maxTime = 32; // Default 32 seconds
-    tracks.forEach((track) => {
-      track.items?.forEach((item) => {
-        const endTime = item.startTime + item.duration;
-        if (endTime > maxTime) maxTime = endTime;
-      });
-    });
-    // Add some padding
-    return Math.max(maxTime * pixelsPerSecond + 200, 1000);
-  };
-
-  const saveChordProgression = async (chords, isRemote = false) => {
-    try {
-      pushHistory();
-      const normalized = (chords || [])
-        .map((entry) => normalizeChordEntry(entry))
-        .filter((entry) => entry && entry.chordName);
-
-      // Optimistic update - update chord progression in local state immediately
-      setChordProgression(normalized);
-      await updateChordProgressionAPI(projectId, normalized);
-
-      // Broadcast to collaborators (if not a remote update)
-      if (!isRemote && broadcast) {
-        broadcast("CHORD_PROGRESSION_UPDATE", { chords: normalized });
-      }
-
-      // Silent refresh in background
-      refreshProject();
-    } catch (err) {
-      console.error("Error updating chord progression:", err);
-      // Revert on error by refreshing
-      refreshProject();
-    }
-  };
+  // saveChordProgression is now in useProjectChords hook
 
   const applyBackingInstrumentSelection = async (instrumentId) => {
     setSelectedInstrumentId(instrumentId);
@@ -3183,14 +1671,17 @@ const ProjectDetailPage = () => {
         color: defaultColor,
       });
       if (response.success) {
-        const [createdTrack] = normalizeTracks([
-          {
-            ...response.data,
-            isBackingTrack: true,
-            trackType: "backing",
-            color: response.data.color || defaultColor,
-          },
-        ]);
+        const [createdTrack] = normalizeTracks(
+          [
+            {
+              ...response.data,
+              isBackingTrack: true,
+              trackType: "backing",
+              color: response.data.color || defaultColor,
+            },
+          ],
+          TRACK_COLOR_PALETTE
+        );
         if (createdTrack) {
           pushHistory();
           setBackingTrack(createdTrack);
@@ -3230,163 +1721,12 @@ const ProjectDetailPage = () => {
     return null;
   };
 
-  const commitTempoChange = useCallback(async () => {
-    if (!project) return;
-    const parsed = parseInt(tempoDraft, 10);
-    if (Number.isNaN(parsed)) {
-      setTempoDraft(String(project.tempo || 120));
-      return;
-    }
-    const tempo = Math.min(300, Math.max(40, parsed));
-    if (tempo === project.tempo) {
-      setTempoDraft(String(project.tempo || tempo));
-      return;
-    }
-    setProject((prev) => (prev ? { ...prev, tempo } : prev));
-    try {
-      await updateProject(projectId, { tempo });
+  // commitTempoChange, commitSwingChange, handleTimeSignatureChange, and handleKeyChange are now in useProjectSettings hook
 
-      // Broadcast to collaborators
-      if (broadcast) {
-        broadcast("PROJECT_SETTINGS_UPDATE", { tempo });
-      }
-    } catch (err) {
-      console.error("Error updating tempo:", err);
-      refreshProject();
-    }
-  }, [project, tempoDraft, projectId, refreshProject, broadcast]);
+  // handleAddChord, handleChordSelect, handleAddChordFromDeck, and handleRemoveChord are now in useProjectChords hook
 
-  const commitSwingChange = useCallback(async () => {
-    if (!project) return;
-    const parsed = clampSwingAmount(swingDraft);
-    if (parsed === clampSwingAmount(project.swingAmount ?? 0)) {
-      setSwingDraft(String(parsed));
-      return;
-    }
-    setProject((prev) => (prev ? { ...prev, swingAmount: parsed } : prev));
-    try {
-      await updateProject(projectId, { swingAmount: parsed });
-
-      // Broadcast to collaborators
-      if (broadcast) {
-        broadcast("PROJECT_SETTINGS_UPDATE", { swingAmount: parsed });
-      }
-    } catch (err) {
-      console.error("Error updating swing amount:", err);
-      refreshProject();
-    }
-  }, [project, swingDraft, projectId, refreshProject, broadcast]);
-
-  const handleTimeSignatureChange = async (value) => {
-    if (!project || !value) return;
-    const normalized = normalizeTimeSignaturePayload(value);
-    const current = normalizeTimeSignaturePayload(project.timeSignature);
-    const isSame =
-      current.numerator === normalized.numerator &&
-      current.denominator === normalized.denominator;
-    if (isSame) return;
-    setProject((prev) =>
-      prev ? { ...prev, timeSignature: normalized } : prev
-    );
-    try {
-      await updateProject(projectId, { timeSignature: normalized });
-
-      // Broadcast to collaborators
-      if (broadcast) {
-        broadcast("PROJECT_SETTINGS_UPDATE", { timeSignature: normalized });
-      }
-    } catch (err) {
-      console.error("Error updating time signature:", err);
-      refreshProject();
-    }
-  };
-
-  const handleKeyChange = async (value) => {
-    if (!project || !value) return;
-    const normalized = normalizeKeyPayload(value);
-    const current = normalizeKeyPayload(project.key);
-    const isSame =
-      current.root === normalized.root && current.scale === normalized.scale;
-    if (isSame) return;
-    setProject((prev) => (prev ? { ...prev, key: normalized } : prev));
-    try {
-      await updateProject(projectId, { key: normalized });
-
-      // Broadcast to collaborators
-      if (broadcast) {
-        broadcast("PROJECT_SETTINGS_UPDATE", { key: normalized });
-      }
-    } catch (err) {
-      console.error("Error updating key:", err);
-      refreshProject();
-    }
-  };
-
-  const handleAddChord = async (chord) => {
-    await ensureBackingTrack();
-    const entry = cloneChordEntry(chord);
-    if (!entry) return;
-    const updated = [...chordProgression, entry];
-    saveChordProgression(updated);
-  };
-
-  // Chord deck handlers
-  const handleChordSelect = async (chord) => {
-    if (selectedChordIndex === null) {
-      // Add new chord if none selected
-      await ensureBackingTrack();
-      const entry = cloneChordEntry(chord);
-      if (!entry) return;
-      const updated = [...chordProgression, entry];
-      saveChordProgression(updated);
-      setSelectedChordIndex(updated.length - 1);
-    } else {
-      // Update existing chord
-      await ensureBackingTrack();
-      const entry = cloneChordEntry(chord);
-      if (entry) {
-        const updated = [...chordProgression];
-        updated[selectedChordIndex] = entry;
-        saveChordProgression(updated);
-        // Auto-advance to next chord
-        if (selectedChordIndex < updated.length - 1) {
-          setSelectedChordIndex(selectedChordIndex + 1);
-        } else {
-          setSelectedChordIndex(null);
-        }
-      }
-    }
-  };
-
-  const handleAddChordFromDeck = async () => {
-    await ensureBackingTrack();
-    const entry = cloneChordEntry("C");
-    if (!entry) return;
-    const updated = [...chordProgression, entry];
-    saveChordProgression(updated);
-    setSelectedChordIndex(updated.length - 1);
-  };
-
-  const handleRemoveChord = (itemIdOrIndex) => {
-    const index =
-      typeof itemIdOrIndex === "number"
-        ? itemIdOrIndex
-        : getChordIndexFromId(itemIdOrIndex);
-    if (index === null || index < 0 || index >= chordProgression.length) return;
-    const updated = chordProgression.filter((_, i) => i !== index);
-    saveChordProgression(updated);
-  };
-
-  const handleDragStart = (lick) => {
-    setDraggedLick(lick);
-  };
-
-  const handleChordDragStart = (chord) => {
-    setDraggedLick(null);
-    const entry = cloneChordEntry(chord);
-    if (!entry) return;
-    setDraggedChord(entry);
-  };
+  // handleDragStart is now in useProjectLicks hook
+  // handleChordDragStart is now in useProjectChords hook
 
   const finishDragging = () => {
     setIsDraggingItem(false);
@@ -3394,193 +1734,9 @@ const ProjectDetailPage = () => {
     setDragOffset({ x: 0, trackId: null });
   };
 
-  const handleDrop = async (e, trackId, startTime) => {
-    e.preventDefault();
+  // handleDrop is now in useProjectTimeline hook
 
-    if (draggedChord) {
-      const targetTrack = tracks.find((track) => track._id === trackId);
-      if (
-        !targetTrack ||
-        !(
-          targetTrack.isBackingTrack ||
-          targetTrack.trackName === "Backing Track"
-        )
-      ) {
-        setError("Chord blocks can only be dropped on a backing track");
-      } else {
-        const insertionIndex = Math.min(
-          Math.max(0, Math.round(startTime / chordDurationSeconds)),
-          chordProgression.length
-        );
-        const updated = [...chordProgression];
-        const entry = cloneChordEntry(draggedChord);
-        if (entry) {
-          updated.splice(insertionIndex, 0, entry);
-          saveChordProgression(updated);
-        }
-      }
-      setDraggedChord(null);
-      setDragOverTrack(null);
-      setDragOverPosition(null);
-      finishDragging();
-      return;
-    }
-
-    if (!draggedLick) return;
-
-    // Get lick ID - handle different field names
-    const lickId = draggedLick._id || draggedLick.lick_id || draggedLick.id;
-    if (!lickId) {
-      setError("Invalid lick: missing ID");
-      setDraggedLick(null);
-      finishDragging();
-      return;
-    }
-
-    // Ensure startTime and duration are numbers
-    const numericStartTime =
-      typeof startTime === "number" ? startTime : parseFloat(startTime) || 0;
-    const numericDuration =
-      typeof draggedLick.duration === "number"
-        ? draggedLick.duration
-        : parseFloat(draggedLick.duration) || 4;
-
-    if (isNaN(numericStartTime) || isNaN(numericDuration)) {
-      setError("Invalid time values");
-      setDraggedLick(null);
-      finishDragging();
-      return;
-    }
-
-    try {
-      const sourceDuration =
-        typeof draggedLick.duration === "number"
-          ? draggedLick.duration
-          : parseFloat(draggedLick.duration) || numericDuration;
-      const response = await addLickToTimeline(projectId, {
-        trackId: trackId.toString(),
-        lickId: lickId.toString(),
-        startTime: numericStartTime,
-        duration: numericDuration,
-        offset: 0,
-        sourceDuration,
-        loopEnabled: false,
-      });
-
-      if (response.success) {
-        // --- FIX BUG 2: Đảm bảo ID luôn tồn tại ---
-        // Nếu API trả về 'id' thay vì '_id', hoặc thiếu id, ta tạo ID tạm thời
-        const rawItem = response.data;
-        const uniqueId =
-          rawItem._id || rawItem.id || `temp-${Date.now()}-${Math.random()}`;
-
-        const newItem = normalizeTimelineItem({
-          ...rawItem,
-          _id: uniqueId, // Ép buộc có _id để React phân biệt
-        });
-
-        pushHistory();
-        setTracks((prevTracks) =>
-          prevTracks.map((track) =>
-            track._id === trackId
-              ? {
-                  ...track,
-                  items: [...(track.items || []), newItem],
-                }
-              : track
-          )
-        );
-        setError(null);
-
-        // Broadcast to collaborators
-        if (broadcast) {
-          broadcast("LICK_ADD_TO_TIMELINE", {
-            trackId: trackId.toString(),
-            item: newItem,
-          });
-        }
-
-        // --- FIX BUG 1: BỎ DÒNG refreshProject() ---
-        // Không gọi refreshProject() ngay lập tức vì server có thể chưa lưu kịp.
-        // State cục bộ (newItem) đã đủ để hiển thị rồi.
-        // refreshProject(); <--- XÓA HOẶC COMMENT DÒNG NÀY
-      } else {
-        setError(response.message || "Failed to add lick to timeline");
-      }
-    } catch (err) {
-      console.error("Error adding lick to timeline:", err);
-      console.error("Error details:", {
-        response: err.response?.data,
-        draggedLick,
-        trackId,
-        startTime: numericStartTime,
-        duration: numericDuration,
-      });
-
-      // Extract detailed error message
-      let errorMessage = "Failed to add lick to timeline";
-      if (err.response?.data) {
-        if (
-          err.response.data.errors &&
-          Array.isArray(err.response.data.errors)
-        ) {
-          errorMessage = err.response.data.errors
-            .map((e) => e.msg || e.message)
-            .join(", ");
-        } else if (err.response.data.message) {
-          errorMessage = err.response.data.message;
-        }
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      setError(errorMessage);
-    } finally {
-      setDraggedLick(null);
-      setDragOverTrack(null);
-      setDragOverPosition(null);
-      finishDragging();
-    }
-  };
-
-  const handleDeleteTimelineItem = async (
-    itemId,
-    { skipConfirm = false } = {}
-  ) => {
-    if (
-      !skipConfirm &&
-      !window.confirm(
-        "Are you sure you want to remove this lick from the timeline?"
-      )
-    ) {
-      return;
-    }
-
-    try {
-      // Optimistic update - remove item from local state immediately
-      pushHistory();
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => ({
-          ...track,
-          items: (track.items || []).filter((item) => item._id !== itemId),
-        }))
-      );
-
-      await deleteTimelineItem(projectId, itemId);
-
-      // Broadcast to collaborators
-      if (broadcast) {
-        broadcast("TIMELINE_ITEM_DELETE", { itemId });
-      }
-
-      // Silent refresh in background to ensure sync
-      refreshProject();
-    } catch (err) {
-      console.error("Error deleting timeline item:", err);
-      setError(err.message || "Failed to delete timeline item");
-      // Revert on error by refreshing
-      refreshProject();
-    }
-  };
+  // handleDeleteTimelineItem is now in useProjectTimeline hook
 
   useEffect(() => {
     const handleKeyDelete = (event) => {
@@ -3667,14 +1823,17 @@ const ProjectDetailPage = () => {
       });
 
       if (response.success) {
-        const [normalizedTrack] = normalizeTracks([
-          {
-            ...response.data,
-            isBackingTrack,
-            trackType: trackTypeValue,
-            color: response.data.color || defaultColor,
-          },
-        ]);
+        const [normalizedTrack] = normalizeTracks(
+          [
+            {
+              ...response.data,
+              isBackingTrack,
+              trackType: trackTypeValue,
+              color: response.data.color || defaultColor,
+            },
+          ],
+          TRACK_COLOR_PALETTE
+        );
         if (normalizedTrack) {
           pushHistory();
           setTracks((prevTracks) => [...prevTracks, normalizedTrack]);
@@ -3849,494 +2008,11 @@ const ProjectDetailPage = () => {
     }
   };
 
-  // Handle clip dragging with smooth real-time updates (direct DOM, absolute positioning)
-  // Professional DAW behavior: The point you click stays under your cursor during drag
-  useEffect(() => {
-    if (!isDraggingItem || !selectedItem) return;
+  // handleClipMouseDown, startClipResize, and drag/resize useEffects are now in useProjectTimeline hook
 
-    let currentItem = null;
-    let currentTrack = null;
+  // handleClipMove is now in useProjectTimeline hook
 
-    const candidateTracks = dragOffset.trackId
-      ? tracks.filter((track) => track._id === dragOffset.trackId)
-      : tracks;
-
-    candidateTracks.forEach((track) => {
-      const item = track.items?.find((i) => i._id === selectedItem);
-      if (item) {
-        currentItem = item;
-        currentTrack = track;
-      }
-    });
-
-    if (!currentItem || !currentTrack) return;
-
-    const clipElement = clipRefs.current.get(selectedItem);
-    if (!clipElement) return;
-
-    const originalZIndex = clipElement.style.zIndex;
-    const originalCursor = clipElement.style.cursor;
-    clipElement.style.zIndex = "100";
-    clipElement.style.cursor = "grabbing";
-
-    // Professional DAW Logic:
-    // 1. Record where user clicked INSIDE the clip (offset from clip's left edge)
-    // 2. During drag, keep that point under the cursor
-    // 3. Only startTime changes, offset and duration stay constant
-    const computeNewStartTime = (event) => {
-      if (!timelineRef.current || !dragStateRef.current) {
-        return currentItem.startTime;
-      }
-      const timelineElement = timelineRef.current;
-      const timelineRect = timelineElement.getBoundingClientRect();
-      const scrollLeft = timelineElement.scrollLeft || 0;
-
-      // Current mouse position in timeline coordinates
-      const currentPointerX = event.clientX - timelineRect.left + scrollLeft;
-
-      // Where the user originally clicked (in timeline coordinates)
-      const originPointerX = dragStateRef.current.originPointerX;
-
-      // How far the mouse has moved
-      const deltaX = currentPointerX - originPointerX;
-
-      // Calculate new startTime: original start + mouse movement
-      // The click offset (dragOffset.x) is already accounted for in originPointerX
-      const newStartTime =
-        dragStateRef.current.originStart + deltaX / pixelsPerSecond;
-
-      return Math.max(0, newStartTime);
-    };
-
-    const handleMouseMove = (event) => {
-      const newStartTime = computeNewStartTime(event);
-      const newLeftPixel = newStartTime * pixelsPerSecond;
-      clipElement.style.left = `${newLeftPixel}px`;
-      // Don't update state here to avoid re-render lag during drag
-    };
-
-    const handleMouseUp = async (event) => {
-      const newStartTime = computeNewStartTime(event);
-      const finalTime = Math.max(0, newStartTime);
-
-      clipElement.style.zIndex = originalZIndex;
-      clipElement.style.cursor = originalCursor || "move";
-
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-
-      // Optional snapping: Hold Shift to disable snapping (like professional DAWs)
-      const shouldSnap = !event.shiftKey;
-      const finalSnappedTime = shouldSnap
-        ? applyMagnet(finalTime, currentTrack, selectedItem)
-        : finalTime;
-
-      // Push history once before making changes
-      pushHistory();
-
-      // Handle clip overlap: Trim overlapping clips (like openDAW/Ableton)
-      const trimmedTracks = handleClipOverlap(
-        currentTrack,
-        selectedItem,
-        finalSnappedTime,
-        currentItem.duration
-      );
-
-      // Update state IMMEDIATELY with overlap handling
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => {
-          if (track._id !== currentTrack._id) return track;
-          return trimmedTracks;
-        })
-      );
-
-      // Final update (this will also save to DB) - don't push history again
-      await handleClipMove(selectedItem, finalSnappedTime, {
-        skipHistory: true,
-      });
-
-      setIsDraggingItem(false);
-      setSelectedItem(null);
-      setDragOffset({ x: 0, trackId: null });
-      dragStateRef.current = null;
-    };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-      clipElement.style.zIndex = originalZIndex;
-      clipElement.style.cursor = originalCursor;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    isDraggingItem,
-    selectedItem,
-    pixelsPerSecond,
-    tracks,
-    dragOffset,
-    applyMagnet,
-  ]);
-
-  const handleClipResize = useCallback(
-    async (itemId, updates) => {
-      const chordIndex = getChordIndexFromId(itemId);
-      if (chordIndex !== null) {
-        // Chord blocks have fixed duration for now
-        return;
-      }
-
-      const sanitized = {};
-      if (updates.startTime !== undefined) {
-        sanitized.startTime = Math.max(0, updates.startTime);
-      }
-      if (updates.duration !== undefined) {
-        sanitized.duration = Math.max(MIN_CLIP_DURATION, updates.duration);
-      }
-      if (updates.offset !== undefined) {
-        sanitized.offset = Math.max(0, updates.offset);
-      }
-
-      if (!Object.keys(sanitized).length) {
-        return;
-      }
-
-      // Use functional update to get the LATEST state (not stale)
-      // This ensures we don't overwrite data that was just updated in handleMouseUp
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => {
-          const hasClip = (track.items || []).some(
-            (item) => item._id === itemId
-          );
-          if (!hasClip) return track;
-
-          // Find the current item with ALL its data (waveform, lickId, etc.)
-          const currentItem = (track.items || []).find(
-            (item) => item._id === itemId
-          );
-          if (!currentItem) return track;
-
-          // Check if values are already updated (avoid unnecessary re-render)
-          const needsUpdate =
-            (sanitized.startTime !== undefined &&
-              currentItem.startTime !== sanitized.startTime) ||
-            (sanitized.duration !== undefined &&
-              currentItem.duration !== sanitized.duration) ||
-            (sanitized.offset !== undefined &&
-              currentItem.offset !== sanitized.offset);
-
-          if (!needsUpdate) return track;
-
-          // Merge updates while preserving ALL original data
-          const updatedItem = {
-            ...currentItem, // Preserve ALL original data (waveform, lickId, sourceDuration, etc.)
-            ...sanitized, // Apply only the sanitized updates
-          };
-
-          return {
-            ...track,
-            items: (track.items || []).map((item) =>
-              item._id === itemId ? normalizeTimelineItem(updatedItem) : item
-            ),
-          };
-        })
-      );
-
-      // Broadcast position update in real-time (debounced)
-      if (broadcast) {
-        broadcast("TIMELINE_ITEM_POSITION_UPDATE", {
-          itemId,
-          updates: sanitized,
-        });
-      }
-
-      // mark dirty & schedule autosave; actual DB write is deferred
-      markTimelineItemDirty(itemId);
-      scheduleTimelineAutosave();
-    },
-    [markTimelineItemDirty, scheduleTimelineAutosave, broadcast]
-  );
-
-  useEffect(() => {
-    if (!resizeState) return;
-
-    const clipElement = clipRefs.current.get(resizeState.clipId);
-    if (!clipElement) return;
-
-    const waveformElement = clipElement.querySelector(
-      '[data-clip-waveform="true"]'
-    );
-    const originalStyles = {
-      width: clipElement.style.width,
-      left: clipElement.style.left,
-      waveformLeft: waveformElement?.style.left ?? null,
-    };
-
-    const computeResizeValues = (event) => {
-      const deltaX = event.clientX - resizeState.startX;
-      const deltaSeconds = deltaX / pixelsPerSecond;
-
-      if (resizeState.edge === "left") {
-        const lowerBound = Math.max(
-          -resizeState.originStart,
-          -resizeState.originOffset
-        );
-        const upperBound = resizeState.originDuration - MIN_CLIP_DURATION;
-        const clampedDelta = Math.min(
-          Math.max(deltaSeconds, lowerBound),
-          upperBound
-        );
-
-        const startTime = resizeState.originStart + clampedDelta;
-        const duration = Math.max(
-          MIN_CLIP_DURATION,
-          resizeState.originDuration - clampedDelta
-        );
-        const offset = Math.max(0, resizeState.originOffset + clampedDelta);
-
-        return {
-          startTime,
-          duration,
-          offset,
-          isLeft: true,
-        };
-      }
-
-      const lowerBound = MIN_CLIP_DURATION - resizeState.originDuration;
-      const availableTail =
-        (resizeState.sourceDuration || 0) -
-        (resizeState.originOffset + resizeState.originDuration);
-      const upperBound = Math.max(0, availableTail);
-      const clampedDelta = Math.min(
-        Math.max(deltaSeconds, lowerBound),
-        upperBound
-      );
-      const duration = Math.max(
-        MIN_CLIP_DURATION,
-        resizeState.originDuration + clampedDelta
-      );
-
-      return {
-        duration,
-        isLeft: false,
-      };
-    };
-
-    const handleMouseMove = (event) => {
-      const values = computeResizeValues(event);
-      if (!values) return;
-
-      if (values.duration !== undefined) {
-        clipElement.style.width = `${values.duration * pixelsPerSecond}px`;
-      }
-
-      if (values.isLeft && values.startTime !== undefined) {
-        clipElement.style.left = `${values.startTime * pixelsPerSecond}px`;
-
-        if (waveformElement && values.offset !== undefined) {
-          waveformElement.style.left = `-${values.offset * pixelsPerSecond}px`;
-        }
-      }
-      // Don't update state here to avoid re-render lag during resize
-    };
-
-    const handleMouseUp = async (event) => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-
-      const finalValues = computeResizeValues(event) || {};
-      const clipId = resizeState.clipId;
-      setResizeState(null);
-
-      // Update state IMMEDIATELY using functional update to get latest data
-      // This ensures we preserve ALL original clip data (waveform, lickId, etc.)
-      if (Object.keys(finalValues).length > 0) {
-        setTracks((prevTracks) => {
-          // Find the current clip with ALL its data from the latest state
-          let currentClip = null;
-          for (const track of prevTracks) {
-            const found = (track.items || []).find(
-              (item) => item._id === clipId
-            );
-            if (found) {
-              currentClip = found;
-              break;
-            }
-          }
-
-          if (!currentClip) return prevTracks;
-
-          // Merge updates while preserving ALL original data
-          const updatedItem = {
-            ...currentClip, // Preserve ALL original data (waveform, lickId, sourceDuration, etc.)
-            ...finalValues, // Apply the resize values
-          };
-
-          return prevTracks.map((track) => {
-            const hasClip = (track.items || []).some(
-              (item) => item._id === clipId
-            );
-            if (!hasClip) return track;
-            return {
-              ...track,
-              items: (track.items || []).map((item) =>
-                item._id === clipId ? normalizeTimelineItem(updatedItem) : item
-              ),
-            };
-          });
-        });
-      }
-
-      // Final update with validation (this will also save to DB)
-      // handleClipResize uses functional updates so it will get the latest state
-      await handleClipResize(clipId, finalValues);
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-      // Don't reset styles on cleanup - let React re-render with updated state
-      // Resetting styles here causes the "snap back" bug
-    };
-  }, [resizeState, pixelsPerSecond, handleClipResize]);
-
-  const handleClipMouseDown = (e, item, trackId) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    // Don't start drag if clicking on resize handles or delete button
-    if (
-      e.target.closest("[data-resize-handle]") ||
-      e.target.closest("button")
-    ) {
-      return;
-    }
-
-    setSelectedItem(item._id);
-    setFocusedClipId(item._id);
-
-    if (timelineRef.current) {
-      const timelineRect = timelineRef.current.getBoundingClientRect();
-      const scrollLeft = timelineRef.current.scrollLeft || 0;
-
-      // Where the user clicked in timeline coordinates
-      const pointerX = e.clientX - timelineRect.left + scrollLeft;
-
-      // Where the clip currently starts in timeline coordinates
-      const itemStartX = (item.startTime || 0) * pixelsPerSecond;
-
-      // How far from the clip's left edge the user clicked (in pixels)
-      const clickOffsetX = pointerX - itemStartX;
-
-      // Store the original state for smooth dragging
-      dragStateRef.current = {
-        originStart: item.startTime || 0,
-        originPointerX: pointerX, // Where user clicked (absolute timeline position)
-      };
-
-      setDragOffset({
-        x: Number.isFinite(clickOffsetX) ? Math.max(0, clickOffsetX) : 0,
-        trackId,
-      });
-    } else {
-      dragStateRef.current = {
-        originStart: item.startTime || 0,
-        originPointerX: 0,
-      };
-      setDragOffset({ x: 0, trackId: trackId || null });
-    }
-    setIsDraggingItem(true);
-  };
-
-  const startClipResize = (e, item, trackId, edge = "right") => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!item || !trackId) return;
-    setFocusedClipId(item._id);
-    setSelectedItem(item._id);
-    setIsDraggingItem(false);
-    pushHistory();
-    setResizeState({
-      clipId: item._id,
-      trackId,
-      edge,
-      originDuration: item.duration || MIN_CLIP_DURATION,
-      originStart: item.startTime || 0,
-      originOffset: item.offset || 0,
-      sourceDuration:
-        item.sourceDuration ||
-        item.lickId?.duration ||
-        (item.offset || 0) + (item.duration || 0),
-      startX: e.clientX,
-    });
-  };
-
-  // Handle clip move
-  const handleClipMove = async (itemId, newStartTime, options = {}) => {
-    if (newStartTime < 0) return;
-    const chordIndex = getChordIndexFromId(itemId);
-    if (chordIndex !== null) {
-      const targetIndex = Math.max(
-        0,
-        Math.round(newStartTime / chordDurationSeconds)
-      );
-      reorderChordProgression(chordIndex, targetIndex);
-      return;
-    }
-
-    // Only push history if not skipped (e.g., when called from drag handler)
-    if (!options.skipHistory) {
-      pushHistory();
-    }
-
-    // Update state to ensure consistency
-    setTracks((prevTracks) =>
-      prevTracks.map((track) => {
-        const hasClip = (track.items || []).some((item) => item._id === itemId);
-        if (!hasClip) return track;
-        return {
-          ...track,
-          items: (track.items || []).map((item) =>
-            item._id === itemId
-              ? normalizeTimelineItem({ ...item, startTime: newStartTime })
-              : item
-          ),
-        };
-      })
-    );
-
-    // Broadcast position update in real-time (for Google Docs-like experience)
-    if (broadcast) {
-      broadcast("TIMELINE_ITEM_POSITION_UPDATE", {
-        itemId,
-        updates: { startTime: newStartTime },
-      });
-    }
-
-    // mark dirty & schedule autosave; actual DB write is deferred
-    markTimelineItemDirty(itemId);
-    scheduleTimelineAutosave();
-  };
-
-  function getChordDuration() {
-    // Each chord gets 4 beats (1 measure in 4/4)
-    return 4;
-  }
-
-  // Calculate chord width in pixels (4 beats = 1 measure)
-  const getChordWidth = () => {
-    return getChordDuration() * pixelsPerBeat;
-  };
-
-  // Calculate chord start position in pixels
-  const getChordStartPosition = (chordIndex) => {
-    return chordIndex * getChordWidth();
-  };
+  // getChordDuration, getChordWidth, and getChordStartPosition are now in useProjectChords hook
 
   if (loading) {
     return (
@@ -4543,71 +2219,31 @@ const ProjectDetailPage = () => {
               </div>
 
               <div className="flex items-center gap-2 ml-auto flex-wrap justify-end">
-                <AudioTransportControls
+                <ProjectPlaybackControls
                   isPlaying={isPlaying}
                   loopEnabled={loopEnabled}
+                  metronomeEnabled={metronomeEnabled}
                   formattedPlayTime={formattedPlayTime}
-                  onPlay={handlePlay}
-                  onPause={handlePause}
-                  onStop={handleStop}
-                  onReturnToStart={handleReturnToStart}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onStop={() => {
+                    setIsPlaying(false);
+                    setPlaybackPosition(0);
+                  }}
+                  onReturnToStart={() => setPlaybackPosition(0)}
                   onLoopToggle={() => setLoopEnabled((prev) => !prev)}
+                  onMetronomeToggle={() => setMetronomeEnabled((prev) => !prev)}
                   className="shadow-inner"
                 />
-                <div className="flex items-center gap-2 bg-gray-900/70 border border-gray-800 rounded-full px-3 py-1 text-xs text-white">
-                  <span className="uppercase text-gray-400">Tempo</span>
-                  <input
-                    type="number"
-                    min={40}
-                    max={300}
-                    value={tempoDraft}
-                    onChange={(e) => setTempoDraft(e.target.value)}
-                    onBlur={commitTempoChange}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        commitTempoChange();
-                      }
-                    }}
-                    className="bg-transparent w-14 text-right text-white text-xs focus:outline-none"
-                  />
-                  <span className="text-[10px] text-gray-500">bpm</span>
-                </div>
-                <div className="flex items-center gap-1 bg-gray-900/70 border border-gray-800 rounded-full px-3 py-1 text-xs text-white">
-                  <span className="uppercase text-gray-400">Time</span>
-                  <select
-                    value={projectTimeSignatureName}
-                    onChange={(e) => handleTimeSignatureChange(e.target.value)}
-                    className="bg-transparent text-white text-xs focus:outline-none"
-                  >
-                    {TIME_SIGNATURES.map((signature) => (
-                      <option
-                        key={signature}
-                        className="bg-gray-900"
-                        value={signature}
-                      >
-                        {signature}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-1 bg-gray-900/70 border border-gray-800 rounded-full px-3 py-1 text-xs text-white">
-                  <span className="uppercase text-gray-400">Key</span>
-                  <select
-                    value={projectKeyName || "C Major"}
-                    onChange={(e) => handleKeyChange(e.target.value)}
-                    className="bg-transparent text-white text-xs focus:outline-none"
-                  >
-                    {KEY_OPTIONS.map((keyOption) => (
-                      <option
-                        key={keyOption}
-                        className="bg-gray-900"
-                        value={keyOption}
-                      >
-                        {keyOption}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <ProjectSettingsPanel
+                  tempoDraft={tempoDraft}
+                  setTempoDraft={setTempoDraft}
+                  onTempoCommit={commitTempoChange}
+                  projectKey={settingsProjectKeyName}
+                  onKeyChange={handleKeyChange}
+                  projectTimeSignature={projectTimeSignatureName}
+                  onTimeSignatureChange={handleTimeSignatureChange}
+                />
                 <ProjectExportButton
                   variant="compact"
                   className="shadow-lg"
@@ -4619,30 +2255,13 @@ const ProjectDetailPage = () => {
                   style={projectStyle}
                   bandSettings={bandSettings}
                 />
-                {/* Phase 4: Collaborator Avatars */}
-                <CollaboratorAvatars
+                <CollaborationPanel
                   collaborators={collaborators}
                   currentUserId={user?._id}
                   activeEditors={activeEditors}
+                  isConnected={isConnected}
+                  onInvite={() => setInviteModalOpen(true)}
                 />
-                {/* Invite Collaborator Button */}
-                <button
-                  onClick={() => setInviteModalOpen(true)}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-xs font-medium transition-colors"
-                  title="Invite collaborators"
-                >
-                  <FaUserPlus size={12} />
-                  <span>Invite</span>
-                </button>
-                {/* Connection Status Indicator */}
-                {isConnected && (
-                  <div className="flex items-center gap-1 px-2 py-1 bg-green-900/20 border border-green-700/50 rounded-full">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="text-[10px] text-green-400 uppercase">
-                      Live
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-between text-[11px] text-gray-400 mt-2">
@@ -4653,7 +2272,7 @@ const ProjectDetailPage = () => {
                 <span>Zoom {Math.round(zoomLevel * 100)}%</span>
                 <span>Display {workspaceScalePercentage}%</span>
                 <span>{projectTimeSignatureName}</span>
-                <span>{projectKeyName || "Key"}</span>
+                <span>{settingsProjectKeyName || "Key"}</span>
               </span>
             </div>
           </div>
@@ -4679,894 +2298,69 @@ const ProjectDetailPage = () => {
                 {/* Main Timeline Area */}
                 <div className="flex-1 relative flex flex-col min-w-0">
                   <div
-                    className="flex-1 overflow-auto relative min-w-0"
-                    ref={timelineRef}
+                    className="flex-1 relative flex flex-col min-w-0"
                     style={{
                       paddingBottom:
                         (sidePanelOpen
                           ? sidePanelWidth
                           : COLLAPSED_DECK_HEIGHT) + 24,
                     }}
-                    onClick={() => {
-                      setFocusedClipId(null);
-                      closeTrackMenu();
-                    }}
                   >
-                    {/* Time Ruler with Beat Markers */}
-                    <div className="sticky top-0 z-20 flex">
-                      <div className="w-64 bg-gray-950 border-r border-gray-800 h-6 flex items-center px-4 text-xs font-semibold uppercase tracking-wide text-gray-400 sticky left-0 z-20">
-                        Track
-                      </div>
-                      <div className="flex-1 relative bg-gray-800 border-b border-gray-700 h-6 flex items-end">
-                        {/* Measure markers (every 4 beats) */}
-                        {Array.from({
-                          length:
-                            Math.ceil(
-                              timelineWidth / pixelsPerBeat / beatsPerMeasure
-                            ) + 1,
-                        }).map((_, measureIndex) => {
-                          const measureTime =
-                            measureIndex * beatsPerMeasure * secondsPerBeat;
-                          const measurePosition = measureTime * pixelsPerSecond;
-                          return (
-                            <div
-                              key={`measure-${measureIndex}`}
-                              className="absolute border-l-2 border-blue-400/80 h-full flex items-end pb-1"
-                              style={{ left: `${measurePosition}px` }}
-                            >
-                              <span className="text-[11px] text-blue-200 font-medium px-1">
-                                {measureIndex + 1}
-                              </span>
-                            </div>
-                          );
-                        })}
-
-                        {/* Beat markers */}
-                        {Array.from({
-                          length:
-                            Math.ceil(
-                              calculateTimelineWidth() / pixelsPerBeat
-                            ) + 1,
-                        }).map((_, beatIndex) => {
-                          const beatTime = beatIndex * secondsPerBeat;
-                          const beatPosition = beatTime * pixelsPerSecond;
-                          const isMeasureStart =
-                            beatIndex % beatsPerMeasure === 0;
-                          return (
-                            <div
-                              key={`beat-${beatIndex}`}
-                              className={`absolute border-l h-full ${
-                                isMeasureStart
-                                  ? "border-blue-400/60"
-                                  : "border-gray-700/50"
-                              }`}
-                              style={{ left: `${beatPosition}px` }}
-                            />
-                          );
-                        })}
-
-                        {/* Second markers */}
-                        {Array.from({
-                          length:
-                            Math.ceil(
-                              calculateTimelineWidth() / pixelsPerSecond
-                            ) + 1,
-                        }).map((_, i) => (
-                          <div
-                            key={`sec-${i}`}
-                            className="absolute border-l border-gray-800/70 h-4 bottom-0"
-                            style={{ left: `${i * pixelsPerSecond}px` }}
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Playhead */}
-                    {(playbackPosition > 0 || isPlaying) && (
-                      <div
-                        ref={playheadRef}
-                        className="absolute top-0 bottom-0 w-[2px] bg-orange-400 z-30 pointer-events-none shadow-[0_0_14px_rgba(251,191,36,0.6)]"
-                        style={{
-                          left: `${
-                            TRACK_COLUMN_WIDTH +
-                            playbackPosition * pixelsPerSecond
-                          }px`,
-                        }}
-                      >
-                        <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-3 h-3 bg-orange-400 rounded-full border border-white" />
-                      </div>
-                    )}
-
-                    {/* 1. MASTER CHORD TRACK (Fixed at Top) */}
-                    <div
-                      className="flex border-b border-gray-800/50 bg-gray-950/50"
-                      style={{ minHeight: "56px" }}
-                    >
-                      <div className="w-64 border-r border-gray-800/50 px-3 py-2 bg-gray-950 sticky left-0 z-20 flex flex-col justify-center">
-                        <span className="text-[11px] font-medium text-gray-300 uppercase tracking-wide">
-                          Structure
-                        </span>
-                      </div>
-
-                      <div className="flex-1 relative min-w-0 bg-gray-950/30">
-                        {chordProgression.map((chord, idx) => {
-                          const startTime = idx * chordDurationSeconds;
-                          const width = chordDurationSeconds * pixelsPerSecond;
-                          const isSelected = selectedChordIndex === idx;
-                          const chordName =
-                            chord.chordName || chord.chord || "Chord";
-
-                          return (
-                            <div
-                              key={`chord-${idx}`}
-                              className="absolute inset-0"
-                              style={{
-                                left: `${startTime * pixelsPerSecond}px`,
-                                width: `${Math.max(width, 40)}px`,
-                              }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedChordIndex(idx);
-                                // Phase 4: Broadcast cursor position
-                                if (broadcastCursor) {
-                                  broadcastCursor(null, idx); // For ProjectDetailPage, use chord index
-                                }
-                              }}
-                            >
-                              {/* Phase 4: Remote cursor indicators */}
-                              {collaborators
-                                .filter((c) => c.cursor?.barIndex === idx)
-                                .map((collab) => (
-                                  <div
-                                    key={collab.userId}
-                                    className="absolute -top-1 -right-1 z-30 flex items-center gap-1 bg-green-500/90 text-black text-[8px] px-1.5 py-0.5 rounded-full border border-white/50 shadow-lg"
-                                  >
-                                    {collab.user?.avatarUrl ? (
-                                      <img
-                                        src={collab.user.avatarUrl}
-                                        alt={collab.user.displayName}
-                                        className="w-3 h-3 rounded-full"
-                                      />
-                                    ) : (
-                                      <div className="w-3 h-3 rounded-full bg-indigo-600"></div>
-                                    )}
-                                    <span className="font-semibold">
-                                      {collab.user?.displayName ||
-                                        collab.user?.username ||
-                                        "User"}
-                                    </span>
-                                  </div>
-                                ))}
-                              <div
-                                className={`relative ${
-                                  collaborators.some(
-                                    (c) => c.cursor?.barIndex === idx
-                                  )
-                                    ? "ring-2 ring-green-500/50 ring-offset-1 ring-offset-gray-950"
-                                    : ""
-                                }`}
-                              >
-                                <ChordBlock
-                                  chordName={chordName}
-                                  isSelected={isSelected}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* 2. USER TRACKS (Licks/Audio) */}
-                    {userTracks.map((track, trackIndex) => {
-                      const isHoveringTrack = dragOverTrack === track._id;
-                      const isMenuOpen =
-                        trackContextMenu.isOpen &&
-                        trackContextMenu.trackId === track._id;
-                      const trackAccent = track.color || "#2563eb";
-                      const readableTrackName = formatTrackTitle(
-                        track.trackName || "Track"
-                      );
-                      const trackHasClips = (track.items || []).length > 0;
-                      const trackRowBg = isHoveringTrack
-                        ? "bg-gray-900/40"
-                        : trackHasClips
-                        ? "bg-[#0b0f1b]"
-                        : "bg-[#05070d]";
-                      return (
-                        <div
-                          key={track._id}
-                          className={`flex border-b border-gray-900 ${trackRowBg}`}
-                          style={{ minHeight: "90px" }}
-                        >
-                          <div
-                            className={`w-64 border-r border-gray-800/50 p-2 flex flex-col gap-1.5 sticky left-0 z-10 ${
-                              isMenuOpen
-                                ? "bg-gray-800/80"
-                                : isHoveringTrack
-                                ? "bg-gray-900/80"
-                                : trackHasClips
-                                ? "bg-gray-950"
-                                : "bg-[#05060d]"
-                            }`}
-                            style={{
-                              minHeight: "inherit",
-                              borderLeft: `4px solid ${trackAccent}`,
-                            }}
-                            onContextMenu={(e) => openTrackMenu(e, track)}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedTrackId(track._id);
-                            }}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span
-                                  className="w-2.5 h-2.5 rounded-full"
-                                  style={{
-                                    backgroundColor: trackAccent,
-                                    boxShadow:
-                                      selectedTrackId === track._id
-                                        ? `0 0 8px ${trackAccent}`
-                                        : "none",
-                                  }}
-                                />
-                                <span
-                                  className={`text-sm font-medium truncate ${
-                                    selectedTrackId === track._id
-                                      ? "text-orange-400"
-                                      : "text-gray-200"
-                                  }`}
-                                >
-                                  {readableTrackName}
-                                </span>
-                              </div>
-                              <div className="flex gap-1">
-                                <button
-                                  className="text-gray-500 hover:text-white p-1 rounded"
-                                  title="Track options"
-                                  onClick={(e) => openTrackMenu(e, track)}
-                                >
-                                  <FaEllipsisV size={12} />
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    handleUpdateTrack(track._id, {
-                                      muted: !track.muted,
-                                    })
-                                  }
-                                  className={`w-6 h-6 rounded text-xs font-bold ${
-                                    track.muted
-                                      ? "bg-red-600 text-white"
-                                      : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                                  }`}
-                                  title="Mute"
-                                >
-                                  M
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    handleUpdateTrack(track._id, {
-                                      solo: !track.solo,
-                                    })
-                                  }
-                                  className={`w-6 h-6 rounded text-xs font-bold ${
-                                    track.solo
-                                      ? "bg-blue-600 text-white"
-                                      : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                                  }`}
-                                  title="Solo"
-                                >
-                                  S
-                                </button>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="range"
-                                min="0"
-                                max="1"
-                                step="0.01"
-                                value={track.volume}
-                                onChange={(e) =>
-                                  handleUpdateTrack(track._id, {
-                                    volume: parseFloat(e.target.value),
-                                  })
-                                }
-                                className="flex-1 h-1 bg-gray-800 rounded-lg appearance-none cursor-pointer"
-                                style={{ accentColor: trackAccent }}
-                              />
-                            </div>
-                          </div>
-                          <TrackDropZone
-                            trackId={track._id}
-                            track={track}
-                            timelineRef={timelineRef}
-                            pixelsPerSecond={pixelsPerSecond}
-                            secondsPerBeat={secondsPerBeat}
-                            applyMagnet={applyMagnet}
-                            handleDrop={handleDrop}
-                            setDraggedLick={setDraggedLick}
-                            className="relative flex-1"
-                            style={{
-                              backgroundColor: isHoveringTrack
-                                ? "rgba(255,255,255,0.04)"
-                                : "transparent",
-                            }}
-                          >
-                            {/* Wavy Background Pattern */}
-                            <div
-                              className="absolute inset-0 opacity-10"
-                              style={{
-                                backgroundImage: `repeating-linear-gradient(
-                      45deg,
-                      transparent,
-                      transparent 10px,
-                      rgba(255,255,255,0.1) 10px,
-                      rgba(255,255,255,0.1) 20px
-                    )`,
-                              }}
-                            />
-
-                            {/* Timeline Items (Clips only - no chord blocks for user tracks) */}
-                            {(() => {
-                              const timelineItems = track.items || [];
-                              // User tracks only show licks/audio clips, not chord blocks
-                              const combinedItems = timelineItems;
-
-                              return combinedItems
-                                .sort(
-                                  (a, b) =>
-                                    (a.startTime || 0) - (b.startTime || 0)
-                                )
-                                .map((item) => {
-                                  const isSelected =
-                                    focusedClipId === item._id ||
-                                    selectedItem === item._id;
-
-                                  // Calculate Dimensions & Position
-                                  const clipWidth =
-                                    item.duration * pixelsPerSecond;
-                                  const clipLeft =
-                                    item.startTime * pixelsPerSecond;
-
-                                  // Determine Labels
-                                  const isVirtualChord =
-                                    typeof item._id === "string" &&
-                                    item._id.startsWith("chord-");
-                                  const isTimelineChord =
-                                    item.type === "chord" && !isVirtualChord;
-                                  const isChord =
-                                    isTimelineChord ||
-                                    isVirtualChord ||
-                                    item._isChord ||
-                                    (item.chord &&
-                                      (track.trackType === "backing" ||
-                                        track.isBackingTrack) &&
-                                      !item.lickId);
-
-                                  const mainLabel = isChord
-                                    ? item.chordName || item.chord || "Chord"
-                                    : formatLabelValue(item.lickId?.title) ||
-                                      formatLabelValue(item.title) ||
-                                      formatLabelValue(item.name) ||
-                                      formatLabelValue(item.trackName) ||
-                                      readableTrackName ||
-                                      "Clip";
-
-                                  const trackInstrumentLabel =
-                                    formatLabelValue(track.instrumentStyle) ||
-                                    formatLabelValue(track.instrument) ||
-                                    (track.isBackingTrack
-                                      ? "Backing Instrument"
-                                      : "") ||
-                                    readableTrackName;
-                                  const instrumentLabel =
-                                    formatLabelValue(item.instrumentStyle) ||
-                                    trackInstrumentLabel;
-
-                                  const subLabel = isChord
-                                    ? (() => {
-                                        const rhythmVisual =
-                                          getRhythmPatternVisual(item);
-                                        const patternLabel =
-                                          rhythmVisual?.label || null;
-                                        const formattedPatternLabel =
-                                          formatLabelValue(patternLabel);
-                                        return [
-                                          formattedPatternLabel,
-                                          instrumentLabel,
-                                        ]
-                                          .filter(
-                                            (label) => label && label.trim()
-                                          )
-                                          .join(" • ");
-                                      })()
-                                    : instrumentLabel ||
-                                      readableTrackName ||
-                                      null;
-
-                                  const trackAccent = track.color || "#2563eb";
-                                  const isMuted = Boolean(
-                                    track.muted || item.muted
-                                  );
-
-                                  // Prepare MIDI data for MidiClip component
-                                  // For chords, compute MIDI events using getChordMidiEvents
-                                  // For other items, use existing customMidiEvents or midiNotes
-                                  let itemWithMidi = { ...item };
-
-                                  if (isChord) {
-                                    // For chords, compute MIDI events from chord data and rhythm patterns
-                                    const rhythmVisual =
-                                      getRhythmPatternVisual(item);
-                                    const patternSteps =
-                                      rhythmVisual?.steps || [];
-                                    const chordMidiEvents = getChordMidiEvents(
-                                      item,
-                                      item.duration,
-                                      patternSteps
-                                    );
-                                    // Always set customMidiEvents, even if empty, so MidiClip knows to process it
-                                    itemWithMidi = {
-                                      ...item,
-                                      customMidiEvents: chordMidiEvents,
-                                    };
-                                  } else {
-                                    // For non-chord items (licks, etc.), check if they have MIDI data
-                                    // If customMidiEvents exists, use it; otherwise check midiNotes
-                                    if (
-                                      !item.customMidiEvents ||
-                                      item.customMidiEvents.length === 0
-                                    ) {
-                                      if (
-                                        item.midiNotes &&
-                                        Array.isArray(item.midiNotes) &&
-                                        item.midiNotes.length > 0
-                                      ) {
-                                        // Convert midiNotes array to customMidiEvents format
-                                        const duration = item.duration || 1;
-                                        itemWithMidi = {
-                                          ...item,
-                                          customMidiEvents: item.midiNotes.map(
-                                            (pitch) => ({
-                                              pitch: Number(pitch),
-                                              startTime: 0,
-                                              duration: duration,
-                                              velocity: 0.8,
-                                            })
-                                          ),
-                                        };
-                                      } else if (
-                                        item.lickId?.midiNotes &&
-                                        Array.isArray(item.lickId.midiNotes) &&
-                                        item.lickId.midiNotes.length > 0
-                                      ) {
-                                        // Check nested lickId.midiNotes
-                                        const duration = item.duration || 1;
-                                        itemWithMidi = {
-                                          ...item,
-                                          customMidiEvents:
-                                            item.lickId.midiNotes.map(
-                                              (pitch) => ({
-                                                pitch: Number(pitch),
-                                                startTime: 0,
-                                                duration: duration,
-                                                velocity: 0.8,
-                                              })
-                                            ),
-                                        };
-                                      }
-                                    }
-                                    // If customMidiEvents already exists, itemWithMidi is already correct
-                                  }
-
-                                  // Show waveform for licks OR chord items with generated audio
-                                  const showWaveform =
-                                    (item.type === "lick" &&
-                                      item.lickId?.waveformData) ||
-                                    (item.type === "chord" &&
-                                      (item.waveformData ||
-                                        item.audioUrl ||
-                                        item.lickId?.waveformData));
-                                  const showResizeHandles = !isVirtualChord;
-
-                                  // Calculate loop notches
-                                  const loopSegmentDuration =
-                                    item.loopEnabled && item.sourceDuration
-                                      ? item.sourceDuration
-                                      : null;
-                                  const loopRepeats =
-                                    loopSegmentDuration &&
-                                    loopSegmentDuration > 0
-                                      ? Math.floor(
-                                          item.duration / loopSegmentDuration
-                                        )
-                                      : 0;
-                                  const loopNotches = Math.max(
-                                    0,
-                                    loopRepeats - 1
-                                  );
-
-                                  // Check if someone is editing this item
-                                  const activeEditor = activeEditors.get(
-                                    item._id
-                                  );
-                                  const isBeingEdited =
-                                    activeEditor &&
-                                    activeEditor.userId !== user?._id;
-
-                                  return (
-                                    <div
-                                      key={item._id}
-                                      ref={(el) => {
-                                        if (el) {
-                                          clipRefs.current.set(item._id, el);
-                                        } else {
-                                          clipRefs.current.delete(item._id);
-                                        }
-                                      }}
-                                      className={`absolute rounded-md overflow-hidden cursor-pointer group border 
-                                    ${
-                                      isSelected
-                                        ? "border-yellow-400 shadow-md z-50"
-                                        : isBeingEdited
-                                        ? "border-blue-400 shadow-lg z-40"
-                                        : "border-transparent z-10"
-                                    }
-                                  `}
-                                      style={{
-                                        left: `${clipLeft}px`,
-                                        width: `${clipWidth}px`,
-                                        top: "4px",
-                                        bottom: "4px", // Use flex height to fill track lane
-                                        height: "auto", // Allow it to stretch
-                                        backgroundColor: trackAccent, // Fallback color
-                                        opacity:
-                                          isDraggingItem &&
-                                          selectedItem === item._id
-                                            ? 0.8
-                                            : isMuted
-                                            ? 0.45
-                                            : 1,
-                                        filter: isMuted
-                                          ? "grayscale(0.35)"
-                                          : undefined,
-                                        transition:
-                                          isDraggingItem &&
-                                          selectedItem === item._id
-                                            ? "none"
-                                            : "left 0.1s, width 0.1s", // Disable transition during drag
-                                      }}
-                                      onMouseDown={(e) =>
-                                        handleClipMouseDown(e, item, track._id)
-                                      }
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setFocusedClipId(item._id);
-                                      }}
-                                      onDoubleClick={(e) => {
-                                        e.stopPropagation();
-                                        handleOpenMidiEditor(item);
-                                      }}
-                                    >
-                                      {/* Active Editor Indicator */}
-                                      {isBeingEdited && activeEditor && (
-                                        <div className="absolute top-1 right-1 z-50 flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/90 rounded text-white text-[9px] font-medium shadow-lg">
-                                          {activeEditor.avatarUrl ? (
-                                            <img
-                                              src={activeEditor.avatarUrl}
-                                              alt={activeEditor.userName}
-                                              className="w-3 h-3 rounded-full"
-                                            />
-                                          ) : (
-                                            <div className="w-3 h-3 rounded-full bg-blue-600"></div>
-                                          )}
-                                          <span className="truncate max-w-[60px]">
-                                            {activeEditor.userName}
-                                          </span>
-                                          <span className="animate-pulse">
-                                            ●
-                                          </span>
-                                        </div>
-                                      )}
-                                      {/* 1. THE RENDERED CANVAS (The Data Layer) */}
-                                      <div className="absolute inset-0 w-full h-full">
-                                        {showWaveform ? (
-                                          (() => {
-                                            try {
-                                              // Get waveform data from item directly, lickId, or nested property
-                                              const waveformSource =
-                                                item.waveformData ||
-                                                item.lickId?.waveformData ||
-                                                null;
-
-                                              if (!waveformSource) return null;
-
-                                              const waveform =
-                                                typeof waveformSource ===
-                                                "string"
-                                                  ? JSON.parse(waveformSource)
-                                                  : waveformSource;
-                                              const waveformArray =
-                                                Array.isArray(waveform)
-                                                  ? waveform
-                                                  : [];
-
-                                              if (!waveformArray.length)
-                                                return null;
-
-                                              // Get the actual current width from the DOM element
-                                              // This ensures waveform stays correct even during resize drag
-                                              const clipElement =
-                                                clipRefs.current.get(item._id);
-                                              const actualClipWidth =
-                                                clipElement?.offsetWidth ||
-                                                clipWidth;
-
-                                              // ADAPTIVE DENSITY IMPLEMENTATION
-                                              // 1. Determine the full source duration to map samples to time
-                                              const fullSourceDuration =
-                                                item.sourceDuration ||
-                                                item.lickId?.duration ||
-                                                item.duration ||
-                                                1;
-
-                                              // 2. Calculate sample rate of the data
-                                              const totalSamples =
-                                                waveformArray.length;
-                                              const samplesPerSecond =
-                                                totalSamples /
-                                                fullSourceDuration;
-
-                                              // 3. Determine the visible slice of audio
-                                              const startSample = Math.floor(
-                                                (item.offset || 0) *
-                                                  samplesPerSecond
-                                              );
-                                              const endSample = Math.floor(
-                                                ((item.offset || 0) +
-                                                  (item.duration || 0)) *
-                                                  samplesPerSecond
-                                              );
-
-                                              // 4. Get the visible samples (clamped to array bounds)
-                                              const visibleSamples =
-                                                waveformArray.slice(
-                                                  Math.max(0, startSample),
-                                                  Math.min(
-                                                    totalSamples,
-                                                    endSample
-                                                  )
-                                                );
-
-                                              if (!visibleSamples.length)
-                                                return null;
-
-                                              // 5. Calculate step to achieve target density in the visible area
-                                              // We want roughly 1 bar every 5 pixels (3px width + 2px gap)
-                                              const targetBarCount = Math.max(
-                                                10,
-                                                Math.floor(actualClipWidth / 5)
-                                              );
-
-                                              const step = Math.max(
-                                                1,
-                                                Math.ceil(
-                                                  visibleSamples.length /
-                                                    targetBarCount
-                                                )
-                                              );
-
-                                              return (
-                                                <div className="absolute inset-0 overflow-hidden">
-                                                  <div
-                                                    data-clip-waveform="true"
-                                                    className="absolute top-0 bottom-0 h-full flex items-end gap-0.5 opacity-80 px-2 pointer-events-none"
-                                                    style={{
-                                                      width: "100%", // Fill the visible clip
-                                                      left: 0, // No offset needed as we sliced the data
-                                                    }}
-                                                  >
-                                                    {visibleSamples
-                                                      .filter(
-                                                        (_value, idx) =>
-                                                          idx % step === 0
-                                                      )
-                                                      .map((value, idx) => (
-                                                        <div
-                                                          key={idx}
-                                                          className="bg-white rounded-t"
-                                                          style={{
-                                                            width: "3px",
-                                                            flexShrink: 0,
-                                                            height: `${Math.min(
-                                                              100,
-                                                              Math.abs(
-                                                                value || 0
-                                                              ) * 100
-                                                            )}%`,
-                                                          }}
-                                                        />
-                                                      ))}
-                                                  </div>
-                                                </div>
-                                              );
-                                            } catch (e) {
-                                              console.error(
-                                                "Waveform Error:",
-                                                e
-                                              );
-                                              return null;
-                                            }
-                                          })()
-                                        ) : (
-                                          <MidiClip
-                                            data={itemWithMidi}
-                                            width={clipWidth} // Pass explicit width for canvas scaling
-                                            height={82} // Approximate height of track lane (90px - padding)
-                                            color={trackAccent}
-                                            isSelected={isSelected}
-                                            isMuted={isMuted}
-                                          />
-                                        )}
-                                        {/* Always render MidiClip behind waveform if both exist */}
-                                        {showWaveform &&
-                                          (itemWithMidi.customMidiEvents
-                                            ?.length > 0 ||
-                                            itemWithMidi.midiNotes?.length >
-                                              0) && (
-                                            <MidiClip
-                                              data={itemWithMidi}
-                                              width={clipWidth}
-                                              height={82}
-                                              color={trackAccent}
-                                              isSelected={isSelected}
-                                              isMuted={isMuted}
-                                            />
-                                          )}
-                                      </div>
-
-                                      {/* 2. THE HEADER TEXT (HTML Overlay) */}
-                                      <div className="absolute top-0 left-0 right-0 h-6 px-2 flex items-center gap-2 pointer-events-none">
-                                        <span className="text-[11px] font-bold text-white truncate drop-shadow-md">
-                                          {mainLabel}
-                                        </span>
-                                        {clipWidth > 80 && subLabel && (
-                                          <span className="text-[10px] text-white/70 truncate">
-                                            {subLabel}
-                                          </span>
-                                        )}
-                                        {loopNotches > 0 && (
-                                          <div className="flex items-center gap-0.5 ml-auto">
-                                            {Array.from({
-                                              length: loopNotches,
-                                            }).map((_loop, notchIdx) => (
-                                              <span
-                                                key={`loop-notch-${item._id}-${notchIdx}`}
-                                                className="w-1 h-2 rounded-sm bg-white/70"
-                                              />
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-
-                                      {/* 3. RESIZE HANDLES (Keep existing logic) */}
-                                      {showResizeHandles && (
-                                        <div
-                                          data-resize-handle="left"
-                                          className="absolute left-0 top-0 bottom-0 w-4 cursor-ew-resize hover:bg-white/25 z-20 transition-colors border-r border-white/20"
-                                          onMouseDown={(e) =>
-                                            startClipResize(
-                                              e,
-                                              item,
-                                              track._id,
-                                              "left"
-                                            )
-                                          }
-                                        />
-                                      )}
-                                      {showResizeHandles && (
-                                        <div
-                                          data-resize-handle="right"
-                                          className="absolute right-0 top-0 bottom-0 w-4 cursor-ew-resize hover:bg-white/25 z-20 transition-colors border-l border-white/20"
-                                          onMouseDown={(e) =>
-                                            startClipResize(
-                                              e,
-                                              item,
-                                              track._id,
-                                              "right"
-                                            )
-                                          }
-                                        />
-                                      )}
-
-                                      {/* 4. DELETE BUTTON (Only show on Hover/Select) */}
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setFocusedClipId((prev) =>
-                                            prev === item._id ? null : prev
-                                          );
-                                          if (isVirtualChord) {
-                                            handleRemoveChord(item._id);
-                                          } else {
-                                            handleDeleteTimelineItem(item._id);
-                                          }
-                                        }}
-                                        className={`absolute top-1 right-1 w-4 h-4 flex items-center justify-center text-white/50 hover:text-white hover:bg-red-500/80 rounded z-30 transition-opacity ${
-                                          isSelected
-                                            ? "opacity-100"
-                                            : "opacity-0 group-hover:opacity-100"
-                                        }`}
-                                      >
-                                        <FaTimes size={10} />
-                                      </button>
-                                    </div>
-                                  );
-                                });
-                            })()}
-
-                            {/* Drop Zone Indicator */}
-                            {dragOverTrack === track._id &&
-                              dragOverPosition !== null && (
-                                <div
-                                  className="absolute top-0 bottom-0 border-2 border-dashed border-orange-500 bg-orange-500/10"
-                                  style={{
-                                    left: `${
-                                      dragOverPosition * pixelsPerSecond
-                                    }px`,
-                                    width: "100px",
-                                  }}
-                                />
-                              )}
-                          </TrackDropZone>
-                        </div>
-                      );
-                    })}
-
-                    {/* Add Track Button - Under the last track */}
-                    <div
-                      className="flex border-b border-gray-900 bg-[#05070d]"
-                      style={{ minHeight: "90px" }}
-                    >
-                      <div className="w-64 border-r border-gray-800/50 p-2 flex items-center justify-center sticky left-0 z-10 bg-[#05060d]">
-                        <button
-                          onClick={handleAddTrack}
-                          disabled={tracks.length >= 10}
-                          className={`w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-colors ${
-                            tracks.length >= 10
-                              ? "bg-gray-800 text-gray-500 cursor-not-allowed"
-                              : "bg-green-600 hover:bg-green-500 text-white"
-                          }`}
-                          title={
-                            tracks.length >= 10
-                              ? "Maximum of 10 tracks allowed per project"
-                              : "Add a new track"
-                          }
-                        >
-                          <FaPlus size={12} />
-                          Add Track
-                        </button>
-                      </div>
-                      <div className="flex-1 bg-[#05070d]"></div>
-                    </div>
-
-                    {!hasAnyUserClips && !draggedLick && (
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="bg-gray-900/85 border border-gray-800 rounded-lg px-6 py-3 text-gray-300 text-sm text-center">
-                          Drag licks or chords onto any track to build your
-                          arrangement
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Drop Zone Hint */}
-                    {draggedLick && (
-                      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800/90 border border-gray-700 rounded-lg px-6 py-3 text-gray-300 text-sm">
-                        Drag and drop a loop or audio/MIDI file here
-                      </div>
-                    )}
+                    <TimelineView
+                      tracks={tracks}
+                      chordProgression={chordProgression}
+                      pixelsPerSecond={pixelsPerSecond}
+                      pixelsPerBeat={pixelsPerBeat}
+                      secondsPerBeat={secondsPerBeat}
+                      beatsPerMeasure={beatsPerMeasure}
+                      timelineWidth={timelineWidth}
+                      playbackPosition={playbackPosition}
+                      isPlaying={isPlaying}
+                      chordDurationSeconds={chordDurationSeconds}
+                      selectedChordIndex={selectedChordIndex}
+                      collaborators={collaborators}
+                      broadcastCursor={broadcastCursor}
+                      timelineRef={timelineRef}
+                      playheadRef={playheadRef}
+                      clipRefs={clipRefs}
+                      TRACK_COLUMN_WIDTH={TRACK_COLUMN_WIDTH}
+                      calculateTimelineWidth={calculateTimelineWidth}
+                      selectedTrackId={selectedTrackId}
+                      setSelectedTrackId={setSelectedTrackId}
+                      dragOverTrack={dragOverTrack}
+                      setDragOverTrack={setDragOverTrack}
+                      dragOverPosition={dragOverPosition}
+                      setDragOverPosition={setDragOverPosition}
+                      focusedClipId={focusedClipId}
+                      setFocusedClipId={setFocusedClipId}
+                      selectedItem={selectedItem}
+                      setSelectedItem={setSelectedItem}
+                      isDraggingItem={isDraggingItem}
+                      draggedLick={draggedLick}
+                      setDraggedLick={setDraggedLick}
+                      activeEditors={activeEditors}
+                      currentUserId={user?._id}
+                      handleDrop={handleDrop}
+                      handleClipMouseDown={handleClipMouseDown}
+                      handleClipResizeStart={startClipResize}
+                      handleOpenMidiEditor={handleOpenMidiEditor}
+                      handleUpdateTrack={handleUpdateTrack}
+                      handleDeleteTimelineItem={handleDeleteTimelineItem}
+                      handleRemoveChord={handleRemoveChord}
+                      setSelectedChordIndex={setSelectedChordIndex}
+                      openTrackMenu={openTrackMenu}
+                      trackContextMenu={trackContextMenu}
+                      getRhythmPatternVisual={getRhythmPatternVisual}
+                      applyMagnet={applyMagnet}
+                      onTimelineClick={() => {
+                        setFocusedClipId(null);
+                        closeTrackMenu();
+                      }}
+                      hasAnyUserClips={hasAnyUserClips}
+                      userTracksLength={userTracks.length}
+                      onAddTrack={handleAddTrack}
+                      canAddTrack={tracks.length < 10}
+                    />
                   </div>
 
                   <div className="flex border-t border-gray-850">
@@ -5931,6 +2725,6 @@ const ProjectDetailPage = () => {
       </div>
     </DndProvider>
   );
-};
+}; // ProjectDetailPage component
 
 export default ProjectDetailPage;

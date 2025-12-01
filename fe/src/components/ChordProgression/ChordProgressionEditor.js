@@ -1,9 +1,9 @@
 import React from "react";
-import ChordBlock from "../../../../../components/ChordBlock";
+import ChordBlock from "../ChordBlock";
 
 /**
  * ChordProgressionEditor - Editor for chord progression
- * 
+ *
  * Props:
  * - chordProgression: Array - array of chord entries
  * - selectedChordIndex: number | null - currently selected chord index
@@ -25,7 +25,8 @@ const ChordProgressionEditor = ({
   return (
     <div className={`flex items-center gap-1 ${className}`}>
       {chordProgression.map((entry, index) => {
-        const chordName = entry?.chordName || entry?.chord || `Chord ${index + 1}`;
+        const chordName =
+          entry?.chordName || entry?.chord || `Chord ${index + 1}`;
         const isSelected = selectedChordIndex === index;
 
         return (
@@ -48,4 +49,3 @@ const ChordProgressionEditor = ({
 };
 
 export default ChordProgressionEditor;
-

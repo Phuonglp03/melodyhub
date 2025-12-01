@@ -1,9 +1,9 @@
 import React from "react";
-import { TIME_SIGNATURES } from "../../../../../utils/projectHelpers";
+import { TIME_SIGNATURES } from "../../utils/projectHelpers";
 
 /**
  * TimeSignatureControl - Dropdown control for project time signature
- * 
+ *
  * Props:
  * - value: string - current time signature value
  * - onChange: (value: string) => void - callback when time signature changes
@@ -29,4 +29,3 @@ const TimeSignatureControl = ({ value, onChange, className = "" }) => {
 };
 
 export default TimeSignatureControl;
-

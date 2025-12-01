@@ -85,9 +85,21 @@ const MyLicksPage = () => {
 
       const res = await getMyLicks(params);
 
-      if (res.success) {
+      // Handle different response structures
+      if (res?.success) {
+        setLicks(res.data || []);
+        setPagination(res.pagination || null);
+      } else if (Array.isArray(res?.data)) {
+        // Handle case where response is just data array
         setLicks(res.data);
-        setPagination(res.pagination);
+        setPagination(res.pagination || null);
+      } else if (Array.isArray(res)) {
+        // Handle case where response is directly an array
+        setLicks(res);
+        setPagination(null);
+      } else {
+        setLicks([]);
+        setPagination(null);
       }
     } catch (err) {
       console.error("Error fetching my licks:", err);
@@ -108,6 +120,9 @@ const MyLicksPage = () => {
       } else {
         setError(msg || "Failed to load your licks");
       }
+      // Reset to empty array on error
+      setLicks([]);
+      setPagination(null);
     } finally {
       setLoading(false);
     }

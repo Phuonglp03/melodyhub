@@ -2,7 +2,7 @@ import React from "react";
 
 /**
  * TempoControl - Input control for project tempo
- * 
+ *
  * Props:
  * - tempoDraft: string - current tempo draft value
  * - setTempoDraft: (value: string) => void - setter for tempo draft
@@ -39,4 +39,3 @@ const TempoControl = ({
 };
 
 export default TempoControl;
-

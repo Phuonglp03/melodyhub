@@ -2,7 +2,7 @@ import React from "react";
 
 /**
  * ActiveEditorsIndicator - Shows who is currently editing a specific item
- * 
+ *
  * Props:
  * - activeEditors: Map - map of active editors by itemId
  * - itemId: string - ID of the item to check
@@ -14,7 +14,7 @@ const ActiveEditorsIndicator = ({
   className = "",
 }) => {
   const editor = activeEditors.get(itemId);
-  
+
   if (!editor) {
     return null;
   }
@@ -39,4 +39,3 @@ const ActiveEditorsIndicator = ({
 };
 
 export default ActiveEditorsIndicator;
-

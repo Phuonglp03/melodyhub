@@ -42,9 +42,10 @@ const NotificationBell = () => {
   const fetchUnreadCount = useCallback(async () => {
     try {
       const result = await getUnreadNotificationCount();
-      setUnreadCount(result.data?.unreadCount || 0);
+      setUnreadCount(result?.data?.unreadCount || result?.unreadCount || 0);
     } catch (error) {
       console.error("Lỗi khi lấy số lượng thông báo chưa đọc:", error);
+      setUnreadCount(0);
     }
   }, []);
 
@@ -54,7 +55,9 @@ const NotificationBell = () => {
       try {
         setLoading(true);
         const result = await getNotifications({ page: pageNum, limit: 10 });
-        const newNotifications = result.data?.notifications || [];
+        // Handle different response structures
+        const newNotifications =
+          result?.data?.notifications || result?.notifications || [];
 
         if (append) {
           setNotifications((prev) => [...prev, ...newNotifications]);
@@ -62,9 +65,18 @@ const NotificationBell = () => {
           setNotifications(newNotifications);
         }
 
-        setHasMore(result.data?.pagination?.hasNextPage || false);
+        setHasMore(
+          result?.data?.pagination?.hasNextPage ||
+            result?.pagination?.hasNextPage ||
+            false
+        );
       } catch (error) {
         console.error("Lỗi khi lấy danh sách thông báo:", error);
+        // Reset to empty array on error to prevent infinite loading
+        if (!append) {
+          setNotifications([]);
+        }
+        setHasMore(false);
       } finally {
         setLoading(false);
       }

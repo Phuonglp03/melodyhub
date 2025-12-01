@@ -1,9 +1,9 @@
 import React from "react";
-import { KEY_OPTIONS } from "../../../../../utils/projectHelpers";
+import { KEY_OPTIONS } from "../../utils/projectHelpers";
 
 /**
  * KeySignatureControl - Dropdown control for project key
- * 
+ *
  * Props:
  * - value: string - current key value
  * - onChange: (value: string) => void - callback when key changes
@@ -29,4 +29,3 @@ const KeySignatureControl = ({ value, onChange, className = "" }) => {
 };
 
 export default KeySignatureControl;
-

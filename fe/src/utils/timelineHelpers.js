@@ -394,3 +394,49 @@ export const lookupPatternFromMap = (map, key) => {
   return map[strKey] || map[strKey.toLowerCase()] || null;
 };
 
+// Track normalization
+export const normalizeTracks = (incomingTracks = [], trackColorPalette = []) => {
+  // Import TRACK_COLOR_PALETTE if not provided
+  const TRACK_COLOR_PALETTE = trackColorPalette.length
+    ? trackColorPalette
+    : [
+        "#6366f1",
+        "#8b5cf6",
+        "#0ea5e9",
+        "#10b981",
+        "#f97316",
+        "#f43f5e",
+        "#facc15",
+        "#ec4899",
+      ];
+
+  return incomingTracks
+    .map((track, index) => {
+      const fallbackColor =
+        TRACK_COLOR_PALETTE[index % TRACK_COLOR_PALETTE.length];
+      const inferredBacking =
+        track.isBackingTrack ||
+        track.trackType === "backing" ||
+        track.trackName?.toLowerCase() === "backing track";
+      const rawType = (track.trackType || "").toLowerCase();
+      const normalizedType = ["audio", "midi", "backing"].includes(rawType)
+        ? rawType
+        : inferredBacking
+        ? "backing"
+        : "audio";
+      const isBackingTrack = Boolean(
+        inferredBacking || normalizedType === "backing"
+      );
+
+      return {
+        ...track,
+        isBackingTrack,
+        trackType: normalizedType,
+        color: track.color || fallbackColor,
+        instrument: track.instrument || null,
+        defaultRhythmPatternId: track.defaultRhythmPatternId || null,
+        items: (track.items || []).map((item) => normalizeTimelineItem(item)),
+      };
+    })
+    .sort((a, b) => (a.trackOrder ?? 0) - (b.trackOrder ?? 0));
+};
