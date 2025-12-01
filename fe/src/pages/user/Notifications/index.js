@@ -185,8 +185,20 @@ const NotificationsPage = () => {
 
         <Tabs
           activeKey={activeTab}
-          onChange={setActiveTab}
+          onChange={(key) => {
+            // Ngăn chặn navigation không mong muốn - chỉ cho phép các tab hợp lệ
+            if (key === 'all' || key === 'unread' || key === 'read') {
+              setActiveTab(key);
+            }
+          }}
           className="notifications-tabs"
+          onTabClick={(key, e) => {
+            // Ngăn chặn navigation khi click vào tab
+            if (e) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
         >
           <TabPane
             tab={

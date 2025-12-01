@@ -198,6 +198,20 @@ const ChatPage = () => {
     return 'Người dùng';
   };
 
+  // Get unread count
+  const getUnreadCount = (conv) => {
+    if (!conv?.unreadCounts || !currentUserId) return 0;
+    const uid = String(currentUserId);
+    
+    // Handle both Map and plain object
+    if (conv.unreadCounts instanceof Map) {
+      return Number(conv.unreadCounts.get(uid) || 0);
+    }
+    
+    // Handle plain object
+    return Number(conv.unreadCounts[uid] || 0);
+  };
+
   // Fetch peer info if missing
   useEffect(() => {
     const fetchPeerInfo = async () => {
@@ -288,7 +302,16 @@ const ChatPage = () => {
     
     // Status filter
     if (filter === 'unread') {
-      return getUnreadCount(c) > 0;
+      const unreadCount = getUnreadCount(c);
+      // Debug log để kiểm tra
+      if (unreadCount > 0) {
+        console.log('[Chat] Found unread conversation:', {
+          convId: c._id,
+          unreadCount,
+          unreadCounts: c.unreadCounts,
+        });
+      }
+      return unreadCount > 0;
     }
     return true;
   });
@@ -360,13 +383,6 @@ const ChatPage = () => {
     const days = Math.floor(hours / 24);
     if (days < 7) return `${days} ngày trước`;
     return date.toLocaleDateString('vi-VN');
-  };
-
-  // Get unread count
-  const getUnreadCount = (conv) => {
-    if (!conv?.unreadCounts || !currentUserId) return 0;
-    const uid = String(currentUserId);
-    return Number(conv.unreadCounts.get?.(uid) || conv.unreadCounts[uid] || 0);
   };
 
   return (
@@ -501,7 +517,13 @@ const ChatPage = () => {
             {loading ? (
               <div className="chat-loading"><Spin /></div>
             ) : filteredConvs.length === 0 && !searchText ? (
-              <Empty description="Chưa có cuộc trò chuyện" />
+              <Empty 
+                description={
+                  filter === 'unread' 
+                    ? 'Không có tin nhắn chưa đọc' 
+                    : 'Chưa có cuộc trò chuyện'
+                } 
+              />
             ) : (
               filteredConvs.map((conv) => {
                 const peer = getPeer(conv);

@@ -17,7 +17,7 @@ import LickLibraryLayout from "../layouts/LickLibraryLayout";
 
 // Lazy load all page components for code splitting
 const NewsFeed = lazy(() => import("../pages/user/NewFeed"));
-const PersonalFeed = lazy(() => import("../pages/user/NewFeed/Personal"));
+// const PersonalFeed = lazy(() => import("../pages/user/NewFeed/Personal"));
 const UserFeed = lazy(() => import("../pages/user/NewFeed/UserFeed"));
 const ProfilePage = lazy(() => import("../pages/user/Profile"));
 const ChangePasswordPage = lazy(() => import("../pages/user/ChangePassword"));
@@ -204,7 +204,7 @@ const AppRoutes = () => {
               path="livestream/live/:roomId"
               element={<LiveStreamLive />}
             />
-            <Route path="newfeedspersonal" element={<PersonalFeed />} />
+            {/* <Route path="newfeedspersonal" element={<PersonalFeed />} /> */}
             <Route path="users/:userId/newfeeds" element={<UserFeed />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="change-password" element={<ChangePasswordPage />} />
