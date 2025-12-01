@@ -215,18 +215,36 @@ export const changePassword = async (currentPassword, newPassword) => {
 };
 
 // Google login
-export const loginWithGoogle = async (token) => {
+export const loginWithGoogle = async (googleToken) => {
   try {
-    const response = await api.post('/auth/google', { token });
+    const response = await api.post('/auth/google', { token: googleToken });
     
     if (response.data.success) {
-      // Lưu thông tin user và token vào localStorage
-      const { token, user } = response.data;
-      localStorage.setItem('user', JSON.stringify({ ...user, token }));
+      // Backend returns: { success: true, token: accessToken, refreshToken, user: userData }
+      const { token: accessToken, refreshToken, user } = response.data;
+      
+      // Format user data correctly with token structure
+      const userData = {
+        token: accessToken,
+        refreshToken: refreshToken || null, // refreshToken from backend response
+        user: {
+          id: user._id || user.id,
+          email: user.email,
+          username: user.username,
+          displayName: user.displayName,
+          avatarUrl: user.avatarUrl,
+          roleId: user.roleId,
+          verifiedEmail: user.verifiedEmail
+        }
+      };
+      
+      // Note: Redux persist will automatically save to localStorage
+      // Legacy localStorage is kept for backward compatibility only
+      localStorage.setItem('user', JSON.stringify(userData));
       
       return {
         success: true,
-        user
+        data: userData
       };
     }
     
