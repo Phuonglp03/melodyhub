@@ -75,6 +75,7 @@ import ChordBlock from "../../../components/ChordBlock";
 import BandConsole from "../../../components/BandConsole";
 import InviteCollaboratorModal from "../../../components/InviteCollaboratorModal";
 import { useProjectCollaboration } from "../../../hooks/useProjectCollaboration";
+import { collabChannel } from "../../../utils/collabChannel";
 // Extracted hooks
 import { useProjectTimeline } from "../../../hooks/useProjectTimeline";
 import { useProjectChords } from "../../../hooks/useProjectChords";
@@ -622,18 +623,18 @@ const ProjectDetailPage = () => {
 
   // Listen for remote collaboration updates
   useEffect(() => {
-    const handleRemoteChordProgression = (e) => {
+    const handleRemoteChordProgression = (payload) => {
       if (isRemoteUpdateRef.current) return;
       isRemoteUpdateRef.current = true;
-      const { chords } = e.detail;
+      const { chords } = payload || {};
       saveChordProgression(chords, true).finally(() => {
         isRemoteUpdateRef.current = false;
       });
     };
 
-    const handleRemoteLickAdd = (e) => {
+    const handleRemoteLickAdd = (payload) => {
       if (isRemoteUpdateRef.current) return;
-      const { trackId, item } = e.detail;
+      const { trackId, item } = payload || {};
 
       // Optimistically add the item immediately (Google Docs-like)
       if (trackId && item) {
@@ -653,9 +654,10 @@ const ProjectDetailPage = () => {
       // Removed delay for instant updates
     };
 
-    const handleRemoteTimelineUpdate = (e) => {
+    const handleRemoteTimelineUpdate = (payload) => {
       if (isRemoteUpdateRef.current) return;
-      const { itemId, customMidiEvents, isCustomized, updates = {} } = e.detail;
+      const { itemId, customMidiEvents, isCustomized, updates = {} } =
+        payload || {};
 
       if (!itemId) return;
       console.log("[Collaboration] Remote timeline update:", itemId);
@@ -690,9 +692,9 @@ const ProjectDetailPage = () => {
       );
     };
 
-    const handleRemoteTimelineDelete = (e) => {
+    const handleRemoteTimelineDelete = (payload) => {
       if (isRemoteUpdateRef.current) return;
-      const { itemId } = e.detail;
+      const { itemId } = payload || {};
       if (!itemId) return;
       console.log("[Collaboration] Remote timeline delete:", itemId);
 
@@ -704,9 +706,9 @@ const ProjectDetailPage = () => {
       );
     };
 
-    const handleRemoteTimelineBulkUpdate = (e) => {
+    const handleRemoteTimelineBulkUpdate = (payload) => {
       if (isRemoteUpdateRef.current) return;
-      const { items } = e.detail || {};
+      const { items } = payload || {};
       if (!Array.isArray(items) || !items.length) return;
       console.log(
         "[Collaboration] Remote timeline bulk update:",
@@ -733,7 +735,7 @@ const ProjectDetailPage = () => {
       );
     };
 
-    const handleRemoteSettingsUpdate = (e) => {
+    const handleRemoteSettingsUpdate = (payload) => {
       if (isRemoteUpdateRef.current) return;
       const {
         tempo,
@@ -742,7 +744,7 @@ const ProjectDetailPage = () => {
         key,
         style,
         backingInstrumentId,
-      } = e.detail;
+      } = payload || {};
 
       // Apply settings updates optimistically
       if (project) {
@@ -767,9 +769,9 @@ const ProjectDetailPage = () => {
       // Removed refresh call - optimistic update is sufficient
     };
 
-    const handleRemoteTrackAdd = (e) => {
+    const handleRemoteTrackAdd = (payload) => {
       if (isRemoteUpdateRef.current) return;
-      const { track } = e.detail || {};
+      const { track } = payload || {};
       if (!track) return;
       console.log("[Collaboration] Remote track add received:", track?._id);
 
@@ -788,9 +790,9 @@ const ProjectDetailPage = () => {
       });
     };
 
-    const handleRemoteTrackUpdate = (e) => {
+    const handleRemoteTrackUpdate = (payload) => {
       if (isRemoteUpdateRef.current) return;
-      const { trackId, updates } = e.detail;
+      const { trackId, updates } = payload || {};
 
       // Optimistically update track in local state
       if (trackId && updates) {
@@ -804,9 +806,9 @@ const ProjectDetailPage = () => {
       // Removed refresh call - optimistic update is sufficient
     };
 
-    const handleRemoteTrackDelete = (e) => {
+    const handleRemoteTrackDelete = (payload) => {
       if (isRemoteUpdateRef.current) return;
-      const { trackId } = e.detail;
+      const { trackId } = payload || {};
 
       // Optimistically remove track from local state
       if (trackId) {
@@ -816,9 +818,9 @@ const ProjectDetailPage = () => {
       // Removed refresh call - optimistic update is sufficient
     };
 
-    const handleRemoteTimelinePositionUpdate = (e) => {
+    const handleRemoteTimelinePositionUpdate = (payload) => {
       if (isRemoteUpdateRef.current) return;
-      const { itemId, updates } = e.detail;
+      const { itemId, updates } = payload || {};
 
       if (!itemId || !updates) return;
 
@@ -864,12 +866,12 @@ const ProjectDetailPage = () => {
       // Note: Remote updates don't need to be marked dirty since they're already saved on server
     };
 
-    const handleRemotePresence = (e) => {
+    const handleRemotePresence = (payload) => {
       const {
         type,
         collaborators: remoteCollaborators,
         userId: eventUserId,
-      } = e.detail;
+      } = payload || {};
 
       const ensureCollaboratorEntry = (list, userId, profile, roleLabel) => {
         if (!userId) return;
@@ -924,14 +926,14 @@ const ProjectDetailPage = () => {
       }
     };
 
-    const handleRemoteConnection = (e) => {
-      const { connected } = e.detail;
+    const handleRemoteConnection = (payload) => {
+      const { connected } = payload || {};
       setIsConnected(connected);
     };
 
-    const handleRemoteEditingActivity = (e) => {
+    const handleRemoteEditingActivity = (payload) => {
       if (isRemoteUpdateRef.current) return;
-      const { userId, itemId, isEditing } = e.detail;
+      const { userId, itemId, isEditing } = payload || {};
 
       if (!userId || !itemId) return;
 
@@ -963,100 +965,88 @@ const ProjectDetailPage = () => {
       });
     };
 
-    window.addEventListener(
-      "project:remote:chordProgression",
-      handleRemoteChordProgression
-    );
-    window.addEventListener("project:remote:lickAdd", handleRemoteLickAdd);
-    window.addEventListener(
-      "project:remote:timelineUpdate",
-      handleRemoteTimelineUpdate
-    );
-    window.addEventListener(
-      "project:remote:timelineDelete",
-      handleRemoteTimelineDelete
-    );
-    window.addEventListener(
-      "project:remote:settingsUpdate",
-      handleRemoteSettingsUpdate
-    );
-    window.addEventListener("project:remote:trackAdd", handleRemoteTrackAdd);
-    window.addEventListener(
-      "project:remote:trackUpdate",
-      handleRemoteTrackUpdate
-    );
-    window.addEventListener(
-      "project:remote:trackDelete",
-      handleRemoteTrackDelete
-    );
-    window.addEventListener(
-      "project:remote:timelineBulkUpdate",
-      handleRemoteTimelineBulkUpdate
-    );
-    window.addEventListener(
-      "project:remote:timelinePositionUpdate",
-      handleRemoteTimelinePositionUpdate
-    );
-    window.addEventListener("project:remote:presence", handleRemotePresence);
-    window.addEventListener(
-      "project:remote:connection",
-      handleRemoteConnection
-    );
-    window.addEventListener(
-      "project:remote:editingActivity",
-      handleRemoteEditingActivity
-    );
+    const handleRemoteSnapshot = (snapshot) => {
+      if (!snapshot) {
+        if (typeof refreshProjectRef.current === "function") {
+          refreshProjectRef.current(false);
+        }
+        return;
+      }
 
-    return () => {
-      window.removeEventListener(
+      const { project: snapshotProject, tracks: snapshotTracks } = snapshot;
+
+      if (snapshotProject) {
+        setProject((prev) => ({
+          ...(prev || {}),
+          ...snapshotProject,
+        }));
+
+        if (snapshotProject.chordProgression) {
+          setChordProgression(
+            hydrateChordProgression(snapshotProject.chordProgression)
+          );
+        }
+
+        if (snapshotProject.tempo !== undefined) {
+          setTempoDraft(String(snapshotProject.tempo));
+        }
+
+        if (snapshotProject.swingAmount !== undefined) {
+          setSwingDraft(String(snapshotProject.swingAmount));
+        }
+      }
+
+      if (Array.isArray(snapshotTracks)) {
+        const normalizedTracks = normalizeTracks(
+          snapshotTracks,
+          TRACK_COLOR_PALETTE
+        );
+        setTracks(normalizedTracks);
+      } else if (typeof refreshProjectRef.current === "function") {
+        refreshProjectRef.current(false);
+      }
+    };
+
+    const unsubscribers = [
+      collabChannel.on(
         "project:remote:chordProgression",
         handleRemoteChordProgression
-      );
-      window.removeEventListener("project:remote:lickAdd", handleRemoteLickAdd);
-      window.removeEventListener(
+      ),
+      collabChannel.on("project:remote:lickAdd", handleRemoteLickAdd),
+      collabChannel.on(
         "project:remote:timelineUpdate",
         handleRemoteTimelineUpdate
-      );
-      window.removeEventListener(
+      ),
+      collabChannel.on(
         "project:remote:timelineDelete",
         handleRemoteTimelineDelete
-      );
-      window.removeEventListener(
+      ),
+      collabChannel.on(
         "project:remote:settingsUpdate",
         handleRemoteSettingsUpdate
-      );
-      window.removeEventListener(
-        "project:remote:trackAdd",
-        handleRemoteTrackAdd
-      );
-      window.removeEventListener(
-        "project:remote:trackUpdate",
-        handleRemoteTrackUpdate
-      );
-      window.removeEventListener(
-        "project:remote:trackDelete",
-        handleRemoteTrackDelete
-      );
-      window.removeEventListener(
+      ),
+      collabChannel.on("project:remote:trackAdd", handleRemoteTrackAdd),
+      collabChannel.on("project:remote:trackUpdate", handleRemoteTrackUpdate),
+      collabChannel.on("project:remote:trackDelete", handleRemoteTrackDelete),
+      collabChannel.on(
         "project:remote:timelineBulkUpdate",
         handleRemoteTimelineBulkUpdate
-      );
-      window.removeEventListener(
+      ),
+      collabChannel.on(
         "project:remote:timelinePositionUpdate",
         handleRemoteTimelinePositionUpdate
-      );
-      window.removeEventListener(
-        "project:remote:presence",
-        handleRemotePresence
-      );
-      window.removeEventListener(
-        "project:remote:connection",
-        handleRemoteConnection
-      );
-      window.removeEventListener(
+      ),
+      collabChannel.on("project:remote:presence", handleRemotePresence),
+      collabChannel.on("project:remote:connection", handleRemoteConnection),
+      collabChannel.on(
         "project:remote:editingActivity",
         handleRemoteEditingActivity
-      );
+      ),
+      collabChannel.on("project:remote:snapshot", handleRemoteSnapshot),
+    ];
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe && unsubscribe());
     };
   }, [
     collaborators,

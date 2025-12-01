@@ -33,6 +33,7 @@
     "react-scripts": "5.0.1",
     "redux": "^5.0.1",
     "redux-persist": "^6.0.0",
+    "nanoid": "^5.0.7",
     "socket.io-client": "^4.8.1",
     "styled-components": "^6.1.19",
     "tone": "^15.1.22",

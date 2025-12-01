@@ -19,6 +19,11 @@ import {
   DEFAULT_KEY,
   DEFAULT_TIME_SIGNATURE,
 } from "../utils/musicTheory.js";
+import {
+  getCollabState,
+  getMissingOps,
+  setSnapshot,
+} from "../services/collabStateService.js";
 
 const TRACK_TYPES = ["audio", "midi", "backing"];
 const TIMELINE_ITEM_TYPES = ["lick", "chord", "midi"];
@@ -668,6 +673,155 @@ export const deleteProject = async (req, res) => {
       success: false,
       message: "Failed to delete project",
       error: error.message,
+    });
+  }
+};
+
+export const getProjectCollabState = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+    const fromVersion = Number(req.query.fromVersion || 0);
+
+    const project = await Project.findById(projectId).populate(
+      "creatorId",
+      "username displayName avatarUrl"
+    );
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const isOwner = project.creatorId?._id?.toString?.() === userId;
+    const collaborator = await ProjectCollaborator.findOne({
+      projectId: project._id,
+      userId: new mongoose.Types.ObjectId(userId),
+      status: "accepted",
+    });
+
+    if (!isOwner && !collaborator && !project.isPublic) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this project",
+      });
+    }
+
+    const collabState = await getCollabState(projectId);
+    let snapshotPayload = collabState.snapshot;
+
+    const hydrateSnapshot = async () => {
+      const tracks = await ProjectTrack.find({ projectId: project._id })
+        .sort({ trackOrder: 1 })
+        .lean();
+      const trackIds = tracks.map((t) => t._id);
+      const timelineItems = trackIds.length
+        ? await ProjectTimelineItem.find({ trackId: { $in: trackIds } })
+            .populate("lickId", "title audioUrl duration waveformData")
+            .populate("userId", "username displayName avatarUrl")
+            .sort({ startTime: 1 })
+            .lean()
+        : [];
+
+      const tracksWithItems = tracks.map((track) => ({
+        ...track,
+        items: timelineItems
+          .filter(
+            (item) => String(item.trackId) === String(track._id ?? track.id)
+          )
+          .map((item) => ({
+            ...item,
+          })),
+      }));
+
+      return {
+        project: normalizeProjectResponse(project),
+        tracks: tracksWithItems,
+      };
+    };
+
+    const snapshotMissingItems =
+      snapshotPayload &&
+      Array.isArray(snapshotPayload.tracks) &&
+      snapshotPayload.tracks.some(
+        (track) => !Array.isArray(track?.items) || track.items.length === undefined
+      );
+
+    if (!snapshotPayload || snapshotMissingItems) {
+      snapshotPayload = await hydrateSnapshot();
+      await setSnapshot(projectId, snapshotPayload, collabState.version);
+    }
+
+    const ops = await getMissingOps(projectId, fromVersion);
+
+    res.json({
+      success: true,
+      data: {
+        version: collabState.version,
+        snapshot: snapshotPayload,
+        ops,
+      },
+    });
+  } catch (error) {
+    console.error("[ProjectController] getProjectCollabState error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch collaboration state",
+    });
+  }
+};
+
+export const getProjectCollabDebug = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+    const sinceVersion = Number(req.query.since || 0);
+
+    const project = await Project.findById(projectId).select(
+      "creatorId isPublic"
+    );
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const isOwner = String(project.creatorId) === String(userId);
+    const collaborator = await ProjectCollaborator.findOne({
+      projectId: project._id,
+      userId: new mongoose.Types.ObjectId(userId),
+      status: "accepted",
+    });
+
+    if (!isOwner && !collaborator && !project.isPublic) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this project",
+      });
+    }
+
+    const state = await getCollabState(projectId);
+    const ops = await getMissingOps(projectId, sinceVersion);
+
+    res.json({
+      success: true,
+      data: {
+        projectId,
+        version: state.version,
+        updatedAt: state.updatedAt,
+        snapshotAvailable: !!state.snapshot,
+        snapshotKeys: state.snapshot ? Object.keys(state.snapshot) : [],
+        ops,
+      },
+    });
+  } catch (error) {
+    console.error("[ProjectController] getProjectCollabDebug error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch collaboration debug info",
     });
   }
 };

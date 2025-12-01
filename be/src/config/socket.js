@@ -10,12 +10,24 @@ import {
   uploadMessageText,
   downloadMessageText,
 } from "../services/messageStorageService.js";
+import {
+  applyOperation,
+  getCollabState,
+  getMissingOps,
+} from "../services/collabStateService.js";
+import {
+  addCollaboratorPresence,
+  removeCollaboratorPresence,
+  listCollaborators,
+  updateCursorPosition,
+  heartbeatPresence,
+} from "../services/collabPresenceService.js";
 import { createClient } from "redis";
 import { createAdapter } from "@socket.io/redis-adapter";
+import { recordCollabMetric } from "../utils/collabMetrics.js";
 let io;
 
-// Track active collaborators per project: { projectId: Map<userId, { user, cursor, socketIds }> }
-const projectCollaborators = new Map();
+const COLLAB_V2_ENABLED = process.env.COLLAB_V2 !== "off";
 
 // Track viewers per room: { roomId: Set of userIds }
 const roomViewers = new Map();
@@ -325,66 +337,42 @@ export const socketServer = (httpServer) => {
         socket.data.projectId = projectId;
         socket.data.userId = userId;
 
-        // Track collaborator
-        if (!projectCollaborators.has(projectId)) {
-          projectCollaborators.set(projectId, new Map());
-        }
-        const collaborators = projectCollaborators.get(projectId);
-
-        if (!collaborators.has(userId)) {
-          collaborators.set(userId, {
-            userId,
-            cursor: null,
-            socketIds: new Set(),
-          });
-        }
-        collaborators.get(userId).socketIds.add(socket.id);
-
-        // Get user info for presence
         const user = await User.findById(userId).select(
           "displayName username avatarUrl"
         );
 
         if (!user) {
-          collaborators.get(userId).socketIds.delete(socket.id);
-          if (collaborators.get(userId).socketIds.size === 0) {
-            collaborators.delete(userId);
-          }
-          if (collaborators.size === 0) {
-            projectCollaborators.delete(projectId);
-          }
           socket.leave(`project:${projectId}`);
           return socket.emit("project:error", { message: "User not found" });
         }
 
-        collaborators.get(userId).user = {
+        const presencePayload = {
           _id: user._id,
           displayName: user.displayName || user.username,
           username: user.username,
           avatarUrl: user.avatarUrl,
         };
 
-        // Broadcast presence update to others in room
-        const activeCollaborators = Array.from(collaborators.values()).map(
-          (c) => ({
-            userId: c.userId,
-            user: c.user,
-            cursor: c.cursor,
-          })
-        );
+        if (COLLAB_V2_ENABLED) {
+          await addCollaboratorPresence(
+            projectId,
+            userId,
+            presencePayload,
+            socket.id
+          );
+          const activeCollaborators = await listCollaborators(projectId);
 
-        socket.to(`project:${projectId}`).emit("project:presence", {
-          type: "JOIN",
-          userId,
-          user: collaborators.get(userId)?.user,
-          collaborators: activeCollaborators,
-        });
+          socket.to(`project:${projectId}`).emit("project:presence", {
+            type: "JOIN",
+            userId,
+            user: presencePayload,
+          });
 
-        // Send current collaborators to the new joiner
-        socket.emit("project:presence", {
-          type: "SYNC",
-          collaborators: activeCollaborators,
-        });
+          socket.emit("project:presence", {
+            type: "SYNC",
+            collaborators: activeCollaborators,
+          });
+        }
 
         console.log(`[Socket.IO] User ${userId} joined project ${projectId}`);
       } catch (err) {
@@ -393,41 +381,106 @@ export const socketServer = (httpServer) => {
       }
     });
 
-    socket.on("project:action", (payload) => {
+    socket.on("project:action", async (payload = {}) => {
       const { projectId, userId } = socket.data;
       if (!projectId || !userId) {
         return socket.emit("project:error", {
           message: "Not in a project room",
         });
       }
-
-      // Broadcast to all others in the project room (excluding sender)
-      socket.to(`project:${projectId}`).emit("project:update", {
-        ...payload,
-        senderId: userId,
-        timestamp: Date.now(),
+      const payloadBytes = payload?.data
+        ? Buffer.byteLength(JSON.stringify(payload.data))
+        : 0;
+      recordCollabMetric("project_action_received", {
+        projectId,
+        userId,
+        type: payload.type,
+        collabOpId: payload.collabOpId,
+        payloadBytes,
       });
 
-      console.log(
-        `[Socket.IO] project:action ${payload.type} from ${userId} in project ${projectId}`
-      );
+      if (!COLLAB_V2_ENABLED) {
+        const broadcastPayload = {
+          ...payload,
+          senderId: userId,
+          timestamp: Date.now(),
+        };
+        socket.to(`project:${projectId}`).emit("project:update", broadcastPayload);
+        recordCollabMetric("project_action_broadcast", {
+          projectId,
+          userId,
+          type: payload.type,
+          collabOpId: payload.collabOpId,
+        });
+        return;
+      }
+
+      try {
+        const operationResult = await applyOperation(
+          projectId,
+          {
+            type: payload.type,
+            payload: payload.data,
+            collabOpId: payload.collabOpId,
+          },
+          {
+            senderId: userId,
+            snapshot: payload.snapshot,
+            collabOpId: payload.collabOpId,
+          }
+        );
+
+        const broadcastPayload = {
+          type: payload.type,
+          data: payload.data,
+          senderId: userId,
+          timestamp: operationResult.op.timestamp,
+          version: operationResult.version,
+          collabOpId: payload.collabOpId || operationResult.op.collabOpId || null,
+        };
+
+        socket.to(`project:${projectId}`).emit("project:update", broadcastPayload);
+        socket.emit("project:ack", {
+          type: payload.type,
+          version: operationResult.version,
+          collabOpId: broadcastPayload.collabOpId,
+        });
+        recordCollabMetric("project_action_broadcast", {
+          projectId,
+          userId,
+          type: payload.type,
+          version: operationResult.version,
+          collabOpId: broadcastPayload.collabOpId,
+          payloadBytes,
+        });
+
+        console.log(
+          `[Socket.IO] project:action ${payload.type} v${operationResult.version} from ${userId} in project ${projectId}`
+        );
+      } catch (err) {
+        console.error("[Socket.IO] project:action error:", err);
+        socket.emit("project:error", {
+          message: "Failed to apply collaboration action",
+        });
+      }
     });
 
     socket.on("project:cursor", (data) => {
       const { projectId, userId } = socket.data;
       if (!projectId || !userId) return;
 
-      // Update cursor for this user
-      const collaborators = projectCollaborators.get(projectId);
-      if (collaborators && collaborators.has(userId)) {
-        collaborators.get(userId).cursor = data; // { sectionId, barIndex }
-      }
-
-      // Broadcast cursor update to others
-      socket.to(`project:${projectId}`).emit("project:cursor_update", {
-        userId,
-        cursor: data,
-      });
+      const run = async () => {
+        if (COLLAB_V2_ENABLED) {
+          await updateCursorPosition(projectId, userId, data);
+        }
+        socket.to(`project:${projectId}`).emit("project:cursor_update", {
+          userId,
+          cursor: data,
+        });
+      };
+      run().catch((err) =>
+        console.error("[Socket.IO] project:cursor error:", err)
+      );
     });
 
     socket.on("project:editing_activity", (data) => {
@@ -442,31 +495,104 @@ export const socketServer = (httpServer) => {
       });
     });
 
-    socket.on("project:leave", ({ projectId }) => {
+    socket.on("project:leave", async ({ projectId }) => {
       if (!projectId) return;
       socket.leave(`project:${projectId}`);
 
       const { userId } = socket.data;
       if (userId) {
-        const collaborators = projectCollaborators.get(projectId);
-        if (collaborators && collaborators.has(userId)) {
-          collaborators.get(userId).socketIds.delete(socket.id);
-
-          // If user has no more sockets, remove them
-          if (collaborators.get(userId).socketIds.size === 0) {
-            collaborators.delete(userId);
-
-            // Broadcast leave event
+        if (COLLAB_V2_ENABLED) {
+          const remaining = await removeCollaboratorPresence(
+            projectId,
+            userId,
+            socket.id
+          );
+          if (!remaining) {
             socket.to(`project:${projectId}`).emit("project:presence", {
               type: "LEAVE",
               userId,
             });
           }
+        } else {
+          socket.to(`project:${projectId}`).emit("project:presence", {
+            type: "LEAVE",
+            userId,
+          });
         }
+      }
+    });
 
-        // Clean up empty project
-        if (collaborators && collaborators.size === 0) {
-          projectCollaborators.delete(projectId);
+    socket.on("project:heartbeat", () => {
+      const { projectId, userId } = socket.data;
+      if (!projectId || !userId || !COLLAB_V2_ENABLED) return;
+      recordCollabMetric("project_heartbeat", {
+        projectId,
+        userId,
+        socketId: socket.id,
+      });
+      heartbeatPresence(projectId, userId).catch((err) =>
+        console.error("[Socket.IO] project:heartbeat error:", err)
+      );
+    });
+
+    socket.on("project:resync", async ({ projectId, fromVersion }, reply) => {
+      if (!projectId) {
+        if (typeof reply === "function") {
+          reply({ success: false, message: "projectId required" });
+        }
+        return;
+      }
+
+      if (!COLLAB_V2_ENABLED) {
+        if (typeof reply === "function") {
+          reply({
+            success: false,
+            message: "Collaboration v2 is disabled",
+          });
+        } else {
+          socket.emit("project:error", {
+            message: "Collaboration resync not available",
+          });
+        }
+        return;
+      }
+
+      recordCollabMetric("resync_request", {
+        projectId,
+        socketId: socket.id,
+        fromVersion,
+      });
+
+      try {
+        const state = await getCollabState(projectId);
+        const ops = await getMissingOps(projectId, fromVersion || 0);
+        const payload = {
+          success: true,
+          projectId,
+          version: state.version,
+          snapshot: state.snapshot,
+          ops,
+        };
+        recordCollabMetric("resync_success", {
+          projectId,
+          socketId: socket.id,
+          fromVersion,
+          version: state.version,
+          ops: ops.length,
+        });
+        if (typeof reply === "function") {
+          reply(payload);
+        } else {
+          socket.emit("project:resync:response", payload);
+        }
+      } catch (err) {
+        console.error("[Socket.IO] project:resync error:", err);
+        if (typeof reply === "function") {
+          reply({ success: false, message: err.message });
+        } else {
+          socket.emit("project:error", {
+            message: "Failed to fetch collaboration state",
+          });
         }
       }
     });
@@ -510,24 +636,19 @@ export const socketServer = (httpServer) => {
 
       // Handle project collaboration disconnect
       const { projectId, userId } = socket.data;
-      if (projectId && userId) {
-        const collaborators = projectCollaborators.get(projectId);
-        if (collaborators && collaborators.has(userId)) {
-          collaborators.get(userId).socketIds.delete(socket.id);
-
-          if (collaborators.get(userId).socketIds.size === 0) {
-            collaborators.delete(userId);
-
-            socket.to(`project:${projectId}`).emit("project:presence", {
-              type: "LEAVE",
-              userId,
-            });
-          }
-        }
-
-        if (collaborators && collaborators.size === 0) {
-          projectCollaborators.delete(projectId);
-        }
+      if (projectId && userId && COLLAB_V2_ENABLED) {
+        removeCollaboratorPresence(projectId, userId, socket.id)
+          .then((remaining) => {
+            if (!remaining) {
+              socket.to(`project:${projectId}`).emit("project:presence", {
+                type: "LEAVE",
+                userId,
+              });
+            }
+          })
+          .catch((err) =>
+            console.error("[Socket.IO] presence cleanup error:", err)
+          );
       }
     });
   });

@@ -23,6 +23,8 @@ import {
   acceptInvitation,
   declineInvitation,
   removeCollaborator,
+  getProjectCollabState,
+  getProjectCollabDebug,
 } from "../controllers/projectController.js";
 import { generateAIBackingTrack } from "../controllers/sunoAIController.js";
 import middlewareController from "../middleware/auth.js";
@@ -94,6 +96,9 @@ router.post("/:projectId/invite/decline", declineInvitation);
 
 // Remove collaborator route - MUST be before /:projectId route
 router.delete("/:projectId/collaborators/:userId", removeCollaborator);
+
+router.get("/:projectId/collab/state", getProjectCollabState);
+router.get("/:projectId/collab/debug", getProjectCollabDebug);
 
 router.get("/:projectId", getProjectById);
 

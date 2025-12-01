@@ -3,11 +3,50 @@
 // For ProjectDetailPage only (Studio collaboration removed)
 import { useEffect, useRef, useCallback } from "react";
 import { getSocket } from "../services/user/socketService";
+import { fetchCollabState } from "../services/user/collabService";
+import { collabChannel } from "../utils/collabChannel";
+import { nanoid } from "nanoid";
+
+const HEARTBEAT_INTERVAL =
+  Number(process.env.REACT_APP_COLLAB_HEARTBEAT_MS) || 15000;
+const RESYNC_RETRY_MS = Number(process.env.REACT_APP_COLLAB_RESYNC_MS) || 5000;
+const STALE_RESYNC_MS = Number(process.env.REACT_APP_COLLAB_STALE_MS) || 45000;
+const ACTIVITY_CHECK_INTERVAL =
+  Number(process.env.REACT_APP_COLLAB_ACTIVITY_MS) || 15000;
+const COLLAB_DEBUG =
+  (process.env.REACT_APP_COLLAB_DEBUG || "").toLowerCase() === "true";
+const BROADCAST_THROTTLE = {
+  TIMELINE_ITEM_POSITION_UPDATE: 75,
+  TIMELINE_ITEM_UPDATE: 100,
+  CHORD_PROGRESSION_UPDATE: 120,
+};
+
+const REMOTE_EVENT_MAP = {
+  CHORD_PROGRESSION_UPDATE: "project:remote:chordProgression",
+  LICK_ADD_TO_TIMELINE: "project:remote:lickAdd",
+  TIMELINE_ITEM_UPDATE: "project:remote:timelineUpdate",
+  TIMELINE_ITEM_DELETE: "project:remote:timelineDelete",
+  TIMELINE_ITEMS_BULK_UPDATE: "project:remote:timelineBulkUpdate",
+  TIMELINE_ITEM_POSITION_UPDATE: "project:remote:timelinePositionUpdate",
+  PROJECT_SETTINGS_UPDATE: "project:remote:settingsUpdate",
+  TRACK_ADD: "project:remote:trackAdd",
+  TRACK_UPDATE: "project:remote:trackUpdate",
+  TRACK_DELETE: "project:remote:trackDelete",
+};
 
 export const useProjectCollaboration = (projectId, user) => {
   const isRemoteUpdate = useRef(false);
   const socketRef = useRef(null);
   const hasJoinedRef = useRef(false);
+  const versionRef = useRef(0);
+  const heartbeatTimerRef = useRef(null);
+  const resyncTimeoutRef = useRef(null);
+  const resyncInFlightRef = useRef(false);
+  const throttleTimersRef = useRef({});
+  const throttlePayloadRef = useRef({});
+  const lastActivityRef = useRef(Date.now());
+  const activityIntervalRef = useRef(null);
+  const debugEventsRef = useRef([]);
   const resolvedUserId =
     user?._id ??
     user?.id ??
@@ -16,6 +55,186 @@ export const useProjectCollaboration = (projectId, user) => {
     user?.userId ??
     user?.user?.userId ??
     null;
+
+  const emitChannelEvent = useCallback((event, detail) => {
+    collabChannel.emit(event, detail);
+  }, []);
+
+  const recordDebugEvent = useCallback((label, data = {}) => {
+    if (!COLLAB_DEBUG) return;
+    const entry = {
+      ts: new Date().toISOString(),
+      label,
+      ...data,
+    };
+    debugEventsRef.current = [...debugEventsRef.current.slice(-99), entry];
+    if (typeof window !== "undefined") {
+      window.__COLLAB_DEBUG_LOGS__ = debugEventsRef.current;
+    }
+    // eslint-disable-next-line no-console
+    console.log("[CollabDebug]", label, data);
+  }, []);
+
+  const cleanupHeartbeat = () => {
+    if (heartbeatTimerRef.current) {
+      clearInterval(heartbeatTimerRef.current);
+      heartbeatTimerRef.current = null;
+    }
+  };
+
+  const cleanupActivityWatcher = () => {
+    if (activityIntervalRef.current) {
+      clearInterval(activityIntervalRef.current);
+      activityIntervalRef.current = null;
+    }
+  };
+
+  const markActivity = useCallback(() => {
+    lastActivityRef.current = Date.now();
+  }, []);
+
+  const startHeartbeat = () => {
+    cleanupHeartbeat();
+    heartbeatTimerRef.current = setInterval(() => {
+      if (socketRef.current?.connected && projectId && resolvedUserId) {
+        socketRef.current.emit("project:heartbeat", { projectId });
+      }
+    }, HEARTBEAT_INTERVAL);
+  };
+
+  const performResync = useCallback(async () => {
+    if (!projectId) return;
+    if (resyncInFlightRef.current) return;
+    if (resyncTimeoutRef.current) {
+      clearTimeout(resyncTimeoutRef.current);
+      resyncTimeoutRef.current = null;
+    }
+    resyncInFlightRef.current = true;
+    const resyncStartedAt = performance.now();
+    recordDebugEvent("resync:start", {
+      projectId,
+      fromVersion: versionRef.current,
+      viaSocket: !!socketRef.current?.connected,
+    });
+
+    const fromVersion = versionRef.current;
+    let result = null;
+
+    const socket = socketRef.current;
+
+    if (socket?.connected) {
+      result = await new Promise((resolve) => {
+        try {
+          socket
+            .timeout(4000)
+            .emit("project:resync", { projectId, fromVersion }, (response) => {
+              resolve(response);
+            });
+        } catch (err) {
+          console.error("[Collaboration] resync request failed:", err);
+          recordDebugEvent("resync:error", {
+            projectId,
+            source: "socket",
+            error: err?.message,
+          });
+          resolve(null);
+        }
+      });
+    }
+
+    if (!result?.success) {
+      try {
+        const apiData = await fetchCollabState(projectId, fromVersion);
+        if (apiData) {
+          result = {
+            success: true,
+            version: apiData.version,
+            snapshot: apiData.snapshot,
+            ops: apiData.ops,
+            source: "rest",
+          };
+        }
+      } catch (err) {
+        console.error("[Collaboration] REST resync failed:", err);
+        recordDebugEvent("resync:error", {
+          projectId,
+          source: "rest",
+          error: err?.message,
+        });
+      }
+    }
+
+    if (result?.success) {
+      if (result.snapshot) {
+        emitChannelEvent("project:remote:snapshot", result.snapshot);
+      }
+      if (result.version && result.version > versionRef.current) {
+        versionRef.current = result.version;
+      }
+      if (Array.isArray(result.ops)) {
+        result.ops.forEach((op) => {
+          if (!op || op.version <= versionRef.current) return;
+          versionRef.current = op.version;
+          if (op.senderId === resolvedUserId) return;
+          emitChannelEvent(REMOTE_EVENT_MAP[op.type] ?? op.type, op.payload);
+        });
+      }
+      markActivity();
+      recordDebugEvent("resync:success", {
+        projectId,
+        source: result.source || (socket?.connected ? "socket" : "rest"),
+        version: result.version,
+        opsApplied: result.ops?.length || 0,
+        durationMs: Math.round(performance.now() - resyncStartedAt),
+      });
+    } else {
+      recordDebugEvent("resync:failed", {
+        projectId,
+        durationMs: Math.round(performance.now() - resyncStartedAt),
+      });
+    }
+
+    resyncInFlightRef.current = false;
+  }, [
+    emitChannelEvent,
+    projectId,
+    resolvedUserId,
+    markActivity,
+    recordDebugEvent,
+  ]);
+
+  const scheduleResync = useCallback(() => {
+    if (resyncInFlightRef.current) return;
+    if (resyncTimeoutRef.current) return;
+    resyncTimeoutRef.current = setTimeout(() => {
+      resyncTimeoutRef.current = null;
+      performResync();
+    }, RESYNC_RETRY_MS);
+    recordDebugEvent("resync:scheduled", {
+      projectId,
+      delayMs: RESYNC_RETRY_MS,
+    });
+  }, [performResync, projectId, recordDebugEvent]);
+
+  const applyRemotePayload = useCallback(
+    (payload) => {
+      if (!payload?.type) return;
+      const eventName = REMOTE_EVENT_MAP[payload.type];
+      if (!eventName) {
+        console.warn("[Collaboration] Unknown update type:", payload.type);
+        return;
+      }
+      isRemoteUpdate.current = true;
+      try {
+        emitChannelEvent(eventName, payload.data);
+      } catch (err) {
+        console.error("[Collaboration] Error applying remote update:", err);
+      } finally {
+        isRemoteUpdate.current = false;
+      }
+    },
+    [emitChannelEvent]
+  );
 
   useEffect(() => {
     if (!projectId || !resolvedUserId) return;
@@ -29,7 +248,6 @@ export const useProjectCollaboration = (projectId, user) => {
     socketRef.current = socket;
     hasJoinedRef.current = false;
 
-    // Helper function to join project room (connection-aware)
     const joinProject = () => {
       if (!socket || !projectId || !resolvedUserId) return;
 
@@ -37,246 +255,259 @@ export const useProjectCollaboration = (projectId, user) => {
         console.log("[Collaboration] Joining project:", projectId);
         socket.emit("project:join", { projectId, userId: resolvedUserId });
         hasJoinedRef.current = true;
-      } else {
-        console.log(
-          "[Collaboration] Socket not connected, waiting for connection..."
-        );
-        // Will be handled by connect event listener
+        startHeartbeat();
       }
     };
 
-    // Try to join immediately if already connected
     if (socket.connected) {
       joinProject();
     }
 
-    // Listen for remote updates
     socket.on("project:update", (payload) => {
-      console.log("[Collaboration] Received remote update:", payload.type);
-      // Ignore our own updates
+      markActivity();
+      recordDebugEvent("recv:project:update", {
+        type: payload?.type,
+        version: payload?.version,
+        collabOpId: payload?.collabOpId,
+      });
+      if (!payload?.version) return;
+      const currentVersion = versionRef.current;
+      if (payload.version <= currentVersion) return;
+
+      if (payload.version > currentVersion + 1) {
+        console.warn(
+          "[Collaboration] Version gap detected, requesting resync",
+          currentVersion,
+          payload.version
+        );
+        recordDebugEvent("recv:project:update:gap", {
+          currentVersion,
+          incomingVersion: payload.version,
+        });
+        performResync();
+        return;
+      }
+
+      versionRef.current = payload.version;
       if (payload.senderId === resolvedUserId) return;
-      if (isRemoteUpdate.current) return;
+      applyRemotePayload(payload);
+    });
 
-      isRemoteUpdate.current = true;
-
-      try {
-        switch (payload.type) {
-          // ProjectDetailPage actions
-          case "CHORD_PROGRESSION_UPDATE":
-            // This will be handled by ProjectDetailPage's own handler
-            window.dispatchEvent(
-              new CustomEvent("project:remote:chordProgression", {
-                detail: payload.data,
-              })
-            );
-            break;
-
-          case "LICK_ADD_TO_TIMELINE":
-            window.dispatchEvent(
-              new CustomEvent("project:remote:lickAdd", {
-                detail: payload.data,
-              })
-            );
-            break;
-
-          case "TIMELINE_ITEM_UPDATE":
-            window.dispatchEvent(
-              new CustomEvent("project:remote:timelineUpdate", {
-                detail: payload.data,
-              })
-            );
-            break;
-
-          case "TIMELINE_ITEM_DELETE":
-            window.dispatchEvent(
-              new CustomEvent("project:remote:timelineDelete", {
-                detail: payload.data,
-              })
-            );
-            break;
-
-          case "TIMELINE_ITEMS_BULK_UPDATE":
-            window.dispatchEvent(
-              new CustomEvent("project:remote:timelineBulkUpdate", {
-                detail: payload.data,
-              })
-            );
-            break;
-
-          case "TIMELINE_ITEM_POSITION_UPDATE":
-            window.dispatchEvent(
-              new CustomEvent("project:remote:timelinePositionUpdate", {
-                detail: payload.data,
-              })
-            );
-            break;
-
-          case "PROJECT_SETTINGS_UPDATE":
-            window.dispatchEvent(
-              new CustomEvent("project:remote:settingsUpdate", {
-                detail: payload.data,
-              })
-            );
-            break;
-
-          case "TRACK_ADD":
-            window.dispatchEvent(
-              new CustomEvent("project:remote:trackAdd", {
-                detail: payload.data,
-              })
-            );
-            break;
-
-          case "TRACK_UPDATE":
-            window.dispatchEvent(
-              new CustomEvent("project:remote:trackUpdate", {
-                detail: payload.data,
-              })
-            );
-            break;
-
-          case "TRACK_DELETE":
-            window.dispatchEvent(
-              new CustomEvent("project:remote:trackDelete", {
-                detail: payload.data,
-              })
-            );
-            break;
-
-          default:
-            console.warn("[Collaboration] Unknown update type:", payload.type);
-        }
-      } catch (err) {
-        console.error("[Collaboration] Error applying remote update:", err);
-      } finally {
-        isRemoteUpdate.current = false;
+    socket.on("project:ack", ({ version, collabOpId }) => {
+      markActivity();
+      recordDebugEvent("recv:project:ack", {
+        version,
+        collabOpId,
+      });
+      if (typeof version === "number") {
+        versionRef.current = Math.max(versionRef.current, version);
       }
     });
 
-    // Listen for presence updates
     socket.on("project:presence", (data) => {
-      console.log(
-        "[Collaboration] Presence update:",
-        data.type || "update",
-        data
-      );
-      // ProjectDetailPage - use custom events
-      window.dispatchEvent(
-        new CustomEvent("project:remote:presence", { detail: data })
-      );
+      markActivity();
+      recordDebugEvent("recv:project:presence", {
+        type: data?.type,
+        count: data?.collaborators?.length,
+      });
+      emitChannelEvent("project:remote:presence", data);
     });
 
-    // Listen for cursor updates
     socket.on("project:cursor_update", (data) => {
       if (data.userId !== resolvedUserId) {
-        window.dispatchEvent(
-          new CustomEvent("project:remote:cursor", { detail: data })
-        );
+        emitChannelEvent("project:remote:cursor", data);
       }
+      markActivity();
+      recordDebugEvent("recv:project:cursor", {
+        userId: data?.userId,
+      });
     });
 
-    // Listen for editing activity updates
     socket.on("project:editing_activity", (data) => {
       if (data.userId !== resolvedUserId) {
-        window.dispatchEvent(
-          new CustomEvent("project:remote:editingActivity", { detail: data })
-        );
+        emitChannelEvent("project:remote:editingActivity", data);
       }
+      markActivity();
+      recordDebugEvent("recv:project:editing_activity", data);
     });
 
-    // Listen for errors
     socket.on("project:error", (error) => {
-      console.error("[Collaboration] Error:", error);
-      window.dispatchEvent(
-        new CustomEvent("project:remote:error", {
-          detail: { error, projectId },
-        })
-      );
+      emitChannelEvent("project:remote:error", { error, projectId });
+      recordDebugEvent("recv:project:error", error);
     });
 
-    // Listen for connection status
+    socket.on("project:resync:response", (payload) => {
+      if (!payload?.success) return;
+      if (payload.version && payload.version > versionRef.current) {
+        versionRef.current = payload.version;
+      }
+      if (Array.isArray(payload.ops)) {
+        payload.ops.forEach((op) => {
+          if (!op || op.senderId === resolvedUserId) return;
+          emitChannelEvent(REMOTE_EVENT_MAP[op.type] ?? op.type, op.payload);
+        });
+      }
+      markActivity();
+      recordDebugEvent("recv:project:resync:response", {
+        version: payload.version,
+        ops: payload.ops?.length,
+      });
+    });
+
     socket.on("connect", () => {
       console.log("[Collaboration] Socket connected");
-      window.dispatchEvent(
-        new CustomEvent("project:remote:connection", {
-          detail: { connected: true },
-        })
-      );
+      emitChannelEvent("project:remote:connection", {
+        connected: true,
+      });
+      markActivity();
+      recordDebugEvent("socket:connect", { socketId: socket.id });
 
-      // Rejoin project if we were previously joined
       if (hasJoinedRef.current && projectId && resolvedUserId) {
         console.log(
           "[Collaboration] Reconnecting, rejoining project:",
           projectId
         );
         socket.emit("project:join", { projectId, userId: resolvedUserId });
-      } else if (!hasJoinedRef.current && projectId && resolvedUserId) {
-        // First time connection - join project
+      } else if (!hasJoinedRef.current) {
         joinProject();
       }
+      performResync();
     });
 
     socket.on("disconnect", (reason) => {
       console.log("[Collaboration] Socket disconnected:", reason);
       hasJoinedRef.current = false;
-      window.dispatchEvent(
-        new CustomEvent("project:remote:connection", {
-          detail: { connected: false },
-        })
-      );
+      cleanupHeartbeat();
+      cleanupActivityWatcher();
+      emitChannelEvent("project:remote:connection", {
+        connected: false,
+      });
+      scheduleResync();
+      recordDebugEvent("socket:disconnect", { reason });
     });
 
-    // Check initial connection status (socket may already be connected)
     if (socket.connected) {
-      window.dispatchEvent(
-        new CustomEvent("project:remote:connection", {
-          detail: { connected: true },
-        })
-      );
+      emitChannelEvent("project:remote:connection", {
+        connected: true,
+      });
+      markActivity();
+      recordDebugEvent("socket:connected-initial", { socketId: socket.id });
     }
 
+    cleanupActivityWatcher();
+    activityIntervalRef.current = setInterval(() => {
+      if (!socketRef.current?.connected) return;
+      if (Date.now() - lastActivityRef.current >= STALE_RESYNC_MS) {
+        recordDebugEvent("resync:idle-trigger", {
+          idleMs: Date.now() - lastActivityRef.current,
+        });
+        performResync();
+      }
+    }, ACTIVITY_CHECK_INTERVAL);
+
     return () => {
+      cleanupHeartbeat();
+      cleanupActivityWatcher();
+      if (resyncTimeoutRef.current) {
+        clearTimeout(resyncTimeoutRef.current);
+        resyncTimeoutRef.current = null;
+      }
       if (hasJoinedRef.current) {
         socket.emit("project:leave", { projectId });
         hasJoinedRef.current = false;
       }
+      Object.values(throttleTimersRef.current).forEach((timer) => {
+        if (timer) clearTimeout(timer);
+      });
+      throttleTimersRef.current = {};
+      throttlePayloadRef.current = {};
       socket.off("project:update");
       socket.off("project:presence");
       socket.off("project:cursor_update");
+      socket.off("project:editing_activity");
       socket.off("project:error");
+      socket.off("project:resync:response");
+      socket.off("project:ack");
       socket.off("connect");
       socket.off("disconnect");
     };
-  }, [projectId, resolvedUserId]);
+  }, [
+    projectId,
+    resolvedUserId,
+    applyRemotePayload,
+    emitChannelEvent,
+    performResync,
+    scheduleResync,
+    markActivity,
+    recordDebugEvent,
+  ]);
 
-  // Broadcast change to other collaborators
-  const broadcast = useCallback(
-    (type, data) => {
-      if (isRemoteUpdate.current || !socketRef.current) return;
-
-      if (!socketRef.current.connected) {
+  const sendAction = useCallback(
+    (type, data, options = {}) => {
+      if (!socketRef.current?.connected) {
         console.warn(
           "[Collaboration] Cannot broadcast - socket not connected",
           type
         );
         return;
       }
-
-      console.log("[Collaboration] Broadcasting:", type, data);
+      markActivity();
+      const collabOpId = options.collabOpId || nanoid();
       socketRef.current.emit("project:action", {
         type,
         data,
         projectId,
+        collabOpId,
       });
+      recordDebugEvent("emit:project:action", {
+        type,
+        collabOpId,
+        payloadBytes: data ? JSON.stringify(data).length : 0,
+      });
+      return collabOpId;
     },
-    [projectId]
+    [projectId, markActivity, recordDebugEvent]
   );
 
-  // Broadcast cursor position
-  const broadcastCursor = useCallback((sectionId, barIndex) => {
-    if (!socketRef.current) return;
+  const broadcast = useCallback(
+    (type, data) => {
+      if (isRemoteUpdate.current) return;
+      const throttleMs = BROADCAST_THROTTLE[type];
+      if (!throttleMs) {
+        sendAction(type, data);
+        return;
+      }
 
-    if (!socketRef.current.connected) {
+      throttlePayloadRef.current[type] = {
+        data,
+        collabOpId: nanoid(),
+      };
+      recordDebugEvent("throttle:queue", {
+        type,
+        collabOpId: throttlePayloadRef.current[type].collabOpId,
+      });
+      if (throttleTimersRef.current[type]) return;
+
+      throttleTimersRef.current[type] = setTimeout(() => {
+        const payloadPackage = throttlePayloadRef.current[type];
+        delete throttlePayloadRef.current[type];
+        throttleTimersRef.current[type] = null;
+        if (payloadPackage) {
+          sendAction(type, payloadPackage.data, {
+            collabOpId: payloadPackage.collabOpId,
+          });
+          recordDebugEvent("throttle:flush", {
+            type,
+            collabOpId: payloadPackage.collabOpId,
+          });
+        }
+      }, throttleMs);
+    },
+    [sendAction, recordDebugEvent]
+  );
+
+  const broadcastCursor = useCallback((sectionId, barIndex) => {
+    if (!socketRef.current?.connected) {
       console.warn(
         "[Collaboration] Cannot broadcast cursor - socket not connected"
       );
@@ -289,12 +520,9 @@ export const useProjectCollaboration = (projectId, user) => {
     });
   }, []);
 
-  // Broadcast editing activity (who is editing what)
   const broadcastEditingActivity = useCallback(
     (itemId, isEditing) => {
-      if (!socketRef.current || isRemoteUpdate.current) return;
-
-      if (!socketRef.current.connected) {
+      if (!socketRef.current?.connected || isRemoteUpdate.current) {
         console.warn(
           "[Collaboration] Cannot broadcast editing activity - socket not connected"
         );
