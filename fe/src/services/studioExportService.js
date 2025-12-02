@@ -1,7 +1,6 @@
 // src/services/studioExportService.js
 import * as Tone from "tone";
 import { scheduleProject, calculateDuration } from "../utils/audioScheduler";
-import api from "./api";
 import { uploadAudio } from "./cloudinaryService";
 
 // Helper: Convert AudioBuffer to WAV Blob
@@ -86,7 +85,7 @@ const generateWaveformFromBuffer = (buffer) => {
  * Export project to WAV and upload to Cloudinary
  * @param {Object} projectState - Full studio state { song, bandSettings }
  * @param {string} projectId - Project ID
- * @returns {Promise<{success: boolean, audioUrl?: string}>}
+ * @returns {Promise<{success: boolean, audioUrl?: string, waveformData?: number[], duration?: number}>}
  */
 export const saveProjectWithAudio = async (projectState, projectId) => {
   try {
@@ -200,17 +199,8 @@ export const saveProjectWithAudio = async (projectState, projectId) => {
     // Generate waveform data from audio buffer
     const waveformData = generateWaveformFromBuffer(buffer);
 
-    console.log("[Export] Saving project metadata...");
-    await api.put(`/projects/${projectId}`, {
-      ...projectState.song,
-      bandSettings: projectState.bandSettings,
-      audioUrl,
-      audioDuration: duration,
-      waveformData,
-    });
-
     console.log("[Export] Complete!", audioUrl);
-    return { success: true, audioUrl, waveformData };
+    return { success: true, audioUrl, waveformData, duration };
   } catch (error) {
     console.error("[Export] Failed:", error);
     throw error;

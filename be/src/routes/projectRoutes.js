@@ -25,6 +25,7 @@ import {
   removeCollaborator,
   getProjectCollabState,
   getProjectCollabDebug,
+  exportProjectAudio,
 } from "../controllers/projectController.js";
 import { generateAIBackingTrack } from "../controllers/sunoAIController.js";
 import middlewareController from "../middleware/auth.js";
@@ -102,6 +103,9 @@ router.get("/:projectId/collab/debug", getProjectCollabDebug);
 
 router.get("/:projectId", getProjectById);
 
+// Save exported audio metadata for a project
+router.post("/:projectId/export-audio", exportProjectAudio);
+
 router.put(
   "/:projectId",
   [
@@ -113,7 +117,7 @@ router.put(
       .matches(/^\d+\/\d+$/),
     body("status")
       .optional()
-      .isIn(["draft", "active", "completed", "inactive"]),
+      .isIn(["draft", "active", "inactive"]),
   ],
   validate,
   updateProject

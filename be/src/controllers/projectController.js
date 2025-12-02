@@ -607,6 +607,70 @@ export const patchProject = async (req, res) => {
   }
 };
 
+// Save exported project audio metadata (audioUrl, duration, waveformData)
+export const exportProjectAudio = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+    const { audioUrl, audioDuration, waveformData } = req.body || {};
+
+    if (!audioUrl) {
+      return res.status(400).json({
+        success: false,
+        message: "audioUrl is required for project export",
+      });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    // Only owner can save export metadata
+    if (project.creatorId.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the project owner can export the project",
+      });
+    }
+
+    // Only allow export for active projects
+    if (project.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        message: "Project must be active before exporting audio",
+      });
+    }
+
+    project.audioUrl = audioUrl;
+    if (typeof audioDuration === "number" && audioDuration > 0) {
+      project.audioDuration = audioDuration;
+    }
+    if (Array.isArray(waveformData) && waveformData.length) {
+      project.waveformData = waveformData;
+    }
+    project.exportedAt = new Date();
+
+    await project.save();
+
+    res.json({
+      success: true,
+      message: "Project export saved successfully",
+      data: normalizeProjectResponse(project),
+    });
+  } catch (error) {
+    console.error("Error saving project export:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to save project export",
+      error: error.message,
+    });
+  }
+};
+
 // Get all available instruments
 // export const getInstruments = async (req, res) => {
 //   try {

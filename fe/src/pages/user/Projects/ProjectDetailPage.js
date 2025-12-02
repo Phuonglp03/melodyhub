@@ -50,6 +50,7 @@ import {
   generateBackingTrack as generateBackingTrackAPI,
   generateAIBackingTrack,
 } from "../../../services/user/projectService";
+import { createPost as createPostApi } from "../../../services/user/post";
 import BackingTrackPanel from "../../../components/BackingTrackPanel";
 import MidiEditor from "../../../components/MidiEditor";
 import AIGenerationLoadingModal from "../../../components/AIGenerationLoadingModal";
@@ -2446,7 +2447,71 @@ const ProjectDetailPage = () => {
                   projectKey={projectKey}
                   style={projectStyle}
                   bandSettings={bandSettings}
+                  status={project?.status}
+                  timeSignature={normalizedTimeSignature}
+                  onExportComplete={(exportData) => {
+                    setProject((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            audioUrl: exportData.audioUrl,
+                            audioDuration: exportData.audioDuration,
+                            waveformData: exportData.waveformData,
+                          }
+                        : prev
+                    );
+                  }}
                 />
+                <button
+                  type="button"
+                  disabled={!project?.audioUrl}
+                  onClick={async () => {
+                    if (!project?.audioUrl) {
+                      alert("Please export project audio before sharing.");
+                      return;
+                    }
+                    try {
+                      console.log("(NO $) [DEBUG][ProjectExport] ShareToFeed:", {
+                        projectId,
+                        hasAudioUrl: !!project.audioUrl,
+                      });
+
+                      const payload = {
+                        postType: "status_update",
+                        textContent: `🎵 New project export: ${
+                          project.title || "Untitled Project"
+                        }`,
+                        media: [
+                          {
+                            url: project.audioUrl,
+                            type: "audio",
+                          },
+                        ],
+                      };
+                      const res = await createPostApi(payload);
+                      if (res?.success) {
+                        alert("Shared to feed!");
+                      } else {
+                        alert("Failed to share. Please try again.");
+                      }
+                    } catch (err) {
+                      console.error("Error sharing project export:", err);
+                      alert(
+                        err?.response?.data?.message ||
+                          err?.message ||
+                          "Failed to share project export"
+                      );
+                    }
+                  }}
+                  className="h-9 px-3 rounded-full bg-gray-900 text-white text-xs font-medium flex items-center gap-2 hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={
+                    project?.audioUrl
+                      ? "Share this exported audio to your feed"
+                      : "Export audio first to share"
+                  }
+                >
+                  Share to Feed
+                </button>
                 <CollaborationPanel
                   collaborators={collaborators}
                   currentUserId={user?._id}

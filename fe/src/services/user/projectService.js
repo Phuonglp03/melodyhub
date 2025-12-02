@@ -234,6 +234,25 @@ export const generateAIBackingTrack = async (projectId, data) => {
   }
 };
 
+// Save exported project audio metadata (audioUrl, duration, waveformData)
+export const saveProjectExport = async (projectId, data) => {
+  try {
+    // (NO $) [DEBUG][ProjectExport] Saving export metadata to backend
+    console.log("(NO $) [DEBUG][ProjectExport] saveProjectExport:", {
+      projectId,
+      hasAudioUrl: !!data?.audioUrl,
+      hasWaveform: Array.isArray(data?.waveformData),
+      audioDuration: data?.audioDuration,
+    });
+
+    const res = await api.post(`/projects/${projectId}/export-audio`, data);
+    return res.data;
+  } catch (error) {
+    console.error("Error saving project export:", error?.response || error);
+    throw error;
+  }
+};
+
 // Invite collaborator to project (backend expects email)
 export const inviteCollaborator = async (
   projectId,
