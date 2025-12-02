@@ -35,7 +35,6 @@ import BackingTrackPanel from "../../../components/BackingTrackPanel";
 import MidiEditor from "../../../components/MidiEditor";
 import AIGenerationLoadingModal from "../../../components/AIGenerationLoadingModal";
 import MidiClip from "../../../components/MidiClip";
-import { convertProjectToStudioState } from "../Studio/studioTransformers";
 // Note: Tone.js is now accessed through useAudioEngine hook instead of direct import
 // This follows the rule: "NEVER store Tone.js objects in Redux" - all audio objects
 // are managed through the singleton audioEngine
@@ -448,7 +447,6 @@ const ProjectDetailPage = () => {
     menuTrack,
     menuPosition,
     formattedPlayTime,
-    studioSeed,
   } = computedValues;
 
   const {
@@ -613,6 +611,11 @@ const ProjectDetailPage = () => {
             setUserRole(response.data.userRole);
           }
 
+          // Load collaborators from API response
+          if (response.data.collaborators) {
+            setCollaborators(response.data.collaborators);
+          }
+
           // Initialize backingTrack state if a backing track exists
           const existingBackingTrack = normalized.find(
             (track) =>
@@ -663,6 +666,7 @@ const ProjectDetailPage = () => {
       setLoadingLicks,
       setProject,
       setUserRole,
+      setCollaborators,
       setError,
       setLoading,
       updateBandSettings,
@@ -792,7 +796,6 @@ const ProjectDetailPage = () => {
     midiEditorHook || {};
 
   // chordDurationSeconds, chordItems, and chordPalette are now in useProjectChords hook
-  // studioSeed is now in computedValues hook
 
   // reorderChordProgression is now in useProjectChords hook
 

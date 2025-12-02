@@ -1,5 +1,4 @@
 import { useMemo, useCallback } from "react";
-import { convertProjectToStudioState } from "../pages/user/Studio/studioTransformers";
 import {
   normalizeTimeSignaturePayload,
   clampSwingAmount,
@@ -215,23 +214,6 @@ export const useProjectComputed = ({
     [playbackPosition]
   );
 
-  // Studio seed for conversion
-  const studioSeed = useMemo(() => {
-    if (!project) return null;
-    const base = convertProjectToStudioState({
-      ...project,
-      chordProgression,
-    });
-    if (!base) return null;
-    return {
-      ...base,
-      projectId: project._id || project.id || projectId,
-      projectTitle:
-        base.projectTitle || project.title || project.name || "Untitled",
-      licks: availableLicks, // share current lick list to studio
-    };
-  }, [project, chordProgression, projectId, availableLicks]);
-
   return {
     resolvedBackingInstrumentId,
     instrumentHighlightId,
@@ -248,7 +230,5 @@ export const useProjectComputed = ({
     menuTrack,
     menuPosition,
     formattedPlayTime,
-    studioSeed,
   };
 };
-

@@ -1,6 +1,7 @@
 // src/services/studioExportService.js
 import * as Tone from "tone";
 import { scheduleProject, calculateDuration } from "../utils/audioScheduler";
+import { normalizeTracks } from "../utils/timelineHelpers";
 import api from "./api";
 
 // Helper: Convert AudioBuffer to WAV Blob
@@ -100,90 +101,224 @@ const uploadProjectAudioToServer = async (projectId, file) => {
  * @param {string} projectId - Project ID
  * @returns {Promise<{success: boolean, audioUrl?: string, waveformData?: number[], duration?: number}>}
  */
-export const saveProjectWithAudio = async (projectState, projectId) => {
+// NOTE: Legacy backing-only export (saveProjectWithAudio) has been removed.
+
+/**
+ * Fetch full project timeline (tracks + items) for export
+ * @param {string} projectId
+ */
+const fetchProjectTimelineForExport = async (projectId) => {
+  const response = await api.get(`/projects/${projectId}/export-timeline`);
+
+  return response.data;
+};
+
+/**
+ * Export full studio project (all tracks + timeline items) via Tone.Offline
+ * and upload the rendered WAV to the backend.
+ *
+ * @param {string} projectId
+ * @returns {Promise<{success: boolean, audioUrl?: string, waveformData?: number[], duration?: number}>}
+ */
+export const exportFullProjectAudio = async (projectId) => {
+  if (!projectId) {
+    throw new Error("projectId is required for full project export");
+  }
+
   try {
-    console.log("[Export] Starting audio render...");
-    const duration = calculateDuration(projectState.song);
+    console.log("(NO $) [DEBUG][FullMixExport] Fetching timeline for export:", {
+      projectId,
+    });
 
-    // Create offline context and render
-    const buffer = await Tone.Offline(async ({ transport }) => {
-      // Create fresh samplers for offline context
-      // Note: In production, you'd want to reuse loaded buffers from SampleManager
-      const piano = new Tone.PolySynth(Tone.Synth, {
-        oscillator: { type: "triangle" },
-        envelope: { attack: 0.02, decay: 0.3, sustain: 0.4, release: 0.8 },
-      }).toDestination();
+    const timelineResponse = await fetchProjectTimelineForExport(projectId);
 
-      const bass = new Tone.MonoSynth({
-        oscillator: { type: "triangle" },
-        envelope: { attack: 0.05, decay: 0.2, sustain: 0.6, release: 0.4 },
-      }).toDestination();
+    if (!timelineResponse?.success || !timelineResponse?.data) {
+      throw new Error(
+        timelineResponse?.message || "Failed to fetch project timeline"
+      );
+    }
 
-      const drums = {
-        kick: new Tone.MembraneSynth({
-          pitchDecay: 0.05,
-          octaves: 6,
-        }).toDestination(),
-        snare: new Tone.NoiseSynth({
-          noise: { type: "white" },
-          envelope: { attack: 0.001, decay: 0.2, sustain: 0 },
-        }).toDestination(),
-        hihat: new Tone.MetalSynth({
-          frequency: 200,
-          envelope: { attack: 0.001, decay: 0.1, release: 0.01 },
-          harmonicity: 5.1,
-          modulationIndex: 32,
-          resonance: 4000,
-          octaves: 1.5,
-        }).toDestination(),
+    const { project, timeline } = timelineResponse.data;
+    const rawTracks = timeline?.tracks || [];
+    const itemsByTrackId = timeline?.itemsByTrackId || {};
+
+    // Attach items to tracks
+    const tracksWithItems = rawTracks.map((track) => {
+      const key = String(track._id || track.id);
+      return {
+        ...track,
+        items: itemsByTrackId[key] || [],
       };
-      drums.hihat.volume.value = -10;
+    });
 
-      // Load lick players (if any)
-      const licks = {};
-      const allLicks = projectState.song.sections.flatMap((s) => s.licks || []);
-      for (const lick of allLicks) {
-        if (lick.audioUrl && (lick.id || lick.lickId)) {
+    const normalizedTracks = normalizeTracks(tracksWithItems);
+
+    // Determine export duration from timeline (fallback to 0 if none)
+    const duration =
+      typeof timeline?.durationSeconds === "number" &&
+      timeline.durationSeconds > 0
+        ? timeline.durationSeconds
+        : normalizedTracks.reduce((maxEnd, track) => {
+            const trackMax = (track.items || []).reduce((innerMax, item) => {
+              const start = Number(item.startTime) || 0;
+              const dur = Number(item.duration) || 0;
+              return Math.max(innerMax, start + dur);
+            }, 0);
+            return Math.max(maxEnd, trackMax);
+          }, 0);
+
+    if (!duration || duration <= 0) {
+      throw new Error("Project has no audio clips to export");
+    }
+
+    // Debug: Log all items to see their structure
+    const allItems = normalizedTracks.flatMap((t) => t.items || []);
+    const itemsWithAudio = allItems.filter((item) => {
+      const audioUrl =
+        item.audioUrl ||
+        item.audio_url ||
+        item.lickId?.audioUrl ||
+        item.lickId?.audio_url ||
+        null;
+      return !!audioUrl;
+    });
+
+    console.log("(NO $) [DEBUG][FullMixExport] Timeline summary:", {
+      projectId,
+      projectTitle: project?.title,
+      trackCount: normalizedTracks.length,
+      itemCount: allItems.length,
+      itemsWithAudio: itemsWithAudio.length,
+      itemsWithoutAudio: allItems.length - itemsWithAudio.length,
+      durationSeconds: duration,
+    });
+
+    // Log sample items for debugging
+    if (allItems.length > 0) {
+      console.log("(NO $) [DEBUG][FullMixExport] Sample items:", {
+        firstItem: allItems[0],
+        firstItemWithAudio: itemsWithAudio[0] || null,
+        itemTypes: allItems.map((i) => ({
+          type: i.type,
+          hasAudioUrl: !!(i.audioUrl || i.audio_url),
+          hasLickId: !!i.lickId,
+          lickIdHasAudioUrl: !!(i.lickId?.audioUrl || i.lickId?.audio_url),
+        })),
+      });
+    }
+
+    const buffer = await Tone.Offline(async ({ transport }) => {
+      const players = [];
+
+      // Schedule all clips from tracks for offline render
+      for (const track of normalizedTracks) {
+        if (track.muted) continue;
+
+        const trackVolume = track.volume || 1;
+        const soloMultiplier = track.solo ? 1 : 0.7;
+        const effectiveVolume = trackVolume * soloMultiplier;
+
+        for (const item of track.items || []) {
+          const clipId = item._id || item.id;
+          const clipStart = item.startTime || 0;
+
+          // Skip virtual chords (no real audio)
+          if (typeof clipId === "string" && clipId.startsWith("chord-")) {
+            console.log("(NO $) [DEBUG][FullMixExport] Skipping virtual chord:", clipId);
+            continue;
+          }
+
+          const audioUrl =
+            item.audioUrl ||
+            item.audio_url ||
+            item.lickId?.audioUrl ||
+            item.lickId?.audio_url ||
+            null;
+
+          if (!audioUrl) {
+            console.log("(NO $) [DEBUG][FullMixExport] Item has no audioUrl:", {
+              clipId,
+              itemType: item.type,
+              hasLickId: !!item.lickId,
+              lickIdStructure: item.lickId ? Object.keys(item.lickId) : null,
+              itemKeys: Object.keys(item),
+            });
+            continue;
+          }
+
           try {
-            const player = new Tone.Player(lick.audioUrl).toDestination();
-            player.volume.value = -3;
-            await player.load();
-            licks[lick.id || lick.lickId] = player;
-          } catch (err) {
-            console.warn(`[Export] Failed to load lick ${lick.id}:`, err);
+            const player = new Tone.Player({
+              url: audioUrl,
+            }).toDestination();
+
+            // Apply volume (convert gain to dB)
+            player.volume.value = Tone.gainToDb(effectiveVolume);
+
+            players.push(player);
+
+            // Sync to transport and schedule
+            const offset = item.offset || 0;
+            const clipDuration = item.duration || 0;
+            const playbackRate = item.playbackRate || 1;
+
+            player.playbackRate = playbackRate;
+            player.sync().start(clipStart, offset, clipDuration);
+          } catch (error) {
+            console.error(
+              "[FullMixExport] Failed to prepare player for clip",
+              clipId,
+              error
+            );
           }
         }
       }
 
-      // Wait for all samples to load
-      await Tone.loaded();
-
-      // Schedule the music
-      // Ensure bandSettings is included in song data
-      const songDataWithSettings = {
-        ...projectState.song,
-        bandSettings: projectState.bandSettings || {
-          volumes: { drums: 0.8, bass: 0.8, piano: 0.8 },
-          mutes: { drums: false, bass: false, piano: false },
-        },
-      };
-      scheduleProject(transport, songDataWithSettings, {
-        piano,
-        bass,
-        drums,
-        licks,
+      console.log("(NO $) [DEBUG][FullMixExport] Prepared players:", {
+        projectId,
+        playerCount: players.length,
+        totalTracks: normalizedTracks.length,
+        tracksProcessed: normalizedTracks.filter((t) => !t.muted).length,
+        totalItems: normalizedTracks.reduce((sum, t) => sum + (t.items?.length || 0), 0),
       });
+
+      if (!players.length) {
+        // Provide more helpful error message
+        const totalItems = normalizedTracks.reduce(
+          (sum, t) => sum + (t.items?.length || 0),
+          0
+        );
+        const itemsWithAudio = normalizedTracks.reduce((sum, track) => {
+          if (track.muted) return sum;
+          return (
+            sum +
+            (track.items || []).filter((item) => {
+              const audioUrl =
+                item.audioUrl ||
+                item.audio_url ||
+                item.lickId?.audioUrl ||
+                item.lickId?.audio_url;
+              return !!audioUrl;
+            }).length
+          );
+        }, 0);
+
+        throw new Error(
+          `No audio clips were scheduled for export. Found ${totalItems} timeline items, but only ${itemsWithAudio} have audio URLs. Make sure your licks have audio files uploaded, or generate backing track audio first.`
+        );
+      }
+
+      await Tone.loaded();
 
       transport.start();
     }, duration);
 
-    console.log("[Export] Audio rendered, converting to WAV...");
+    console.log("[FullMixExport] Audio rendered, converting to WAV...");
     const wavBlob = audioBufferToWav(buffer);
-    const file = new File([wavBlob], `project_${projectId}.wav`, {
+    const file = new File([wavBlob], `project_full_${projectId}.wav`, {
       type: "audio/wav",
     });
 
-    console.log("(NO $) [DEBUG][ProjectExport] Uploading via API...", {
+    console.log("(NO $) [DEBUG][FullMixExport] Uploading via API...", {
       fileName: file.name,
       fileSize: file.size,
       fileType: file.type,
@@ -193,7 +328,7 @@ export const saveProjectWithAudio = async (projectState, projectId) => {
     const uploadResponse = await uploadProjectAudioToServer(projectId, file);
 
     if (!uploadResponse?.success) {
-      console.error("[Export] Upload failed:", uploadResponse);
+      console.error("[FullMixExport] Upload failed:", uploadResponse);
       throw new Error(
         uploadResponse?.message || "Failed to upload audio to server"
       );
@@ -212,11 +347,10 @@ export const saveProjectWithAudio = async (projectState, projectId) => {
         ? uploadData.duration
         : duration;
 
-    console.log("[Export] Generating waveform data...");
-    // Generate waveform data from audio buffer
+    console.log("[FullMixExport] Generating waveform data...");
     const waveformData = generateWaveformFromBuffer(buffer);
 
-    console.log("[Export] Complete!", audioUrl);
+    console.log("[FullMixExport] Complete!", audioUrl);
     return {
       success: true,
       audioUrl,
@@ -224,7 +358,13 @@ export const saveProjectWithAudio = async (projectState, projectId) => {
       duration: uploadedDuration,
     };
   } catch (error) {
-    console.error("[Export] Failed:", error);
+    console.error("[FullMixExport] Failed:", error);
+    // (NO $) [DEBUG] log with flattened error details for easier reporting
+    console.log("(NO $) [DEBUG][FullMixExport][Error]", {
+      message: error?.message,
+      name: error?.name,
+      stack: error?.stack,
+    });
     throw error;
   }
 };

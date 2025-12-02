@@ -57,7 +57,6 @@ const ProjectDetailPage = lazy(() =>
     default: module.ProjectDetailPage,
   }))
 );
-const StudioPage = lazy(() => import("../pages/user/Studio/StudioPage"));
 
 // Lazy load admin pages
 const AdminDashboard = lazy(() =>
@@ -237,15 +236,6 @@ const AppRoutes = () => {
               element={
                 <ProtectedRoute>
                   <ProjectDetailPage />
-                </ProtectedRoute>
-              }
-            />
-            {/* Studio Page - New Music Composition Studio */}
-            <Route
-              path="studio/:projectId"
-              element={
-                <ProtectedRoute>
-                  <StudioPage />
                 </ProtectedRoute>
               }
             />

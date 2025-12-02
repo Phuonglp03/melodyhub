@@ -27,6 +27,7 @@ import {
   getProjectCollabDebug,
   exportProjectAudio,
   uploadProjectAudioFile,
+  getProjectTimelineForExport,
 } from "../controllers/projectController.js";
 import { generateAIBackingTrack } from "../controllers/sunoAIController.js";
 import middlewareController from "../middleware/auth.js";
@@ -79,7 +80,7 @@ router.get("/instruments", getInstruments);
 // Get rhythm patterns - MUST be before /:projectId route
 router.get("/rhythm-patterns", getRhythmPatterns);
 
-// Phase 5: Invite collaborator - MUST be before /:projectId route
+// Invite collaborator - MUST be before /:projectId route
 router.post(
   "/:projectId/invite",
   [
@@ -104,6 +105,9 @@ router.get("/:projectId/collab/state", getProjectCollabState);
 router.get("/:projectId/collab/debug", getProjectCollabDebug);
 
 router.get("/:projectId", getProjectById);
+
+// Full-project timeline for audio export (tracks + timeline items)
+router.get("/:projectId/export-timeline", getProjectTimelineForExport);
 
 // Save exported audio metadata for a project
 router.post(
