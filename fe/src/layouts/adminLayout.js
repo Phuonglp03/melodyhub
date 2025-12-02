@@ -3,6 +3,8 @@ import React, { useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { logout } from "../redux/authSlice";
+import NotificationBell from "../components/NotificationBell";
+import NotificationToastContainer from "../components/NotificationToastContainer";
 import { 
   Home, 
   UserPlus, 
@@ -25,7 +27,6 @@ const AdminLayout = () => {
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.auth);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [notificationCount] = useState(3);
 
   const handleLogout = () => {
     dispatch(logout());
@@ -141,15 +142,9 @@ const AdminLayout = () => {
 
             {/* Actions */}
             <div className="flex items-center space-x-3">
-              <button className="relative p-2.5 hover:bg-gray-800/50 rounded-xl transition-all duration-200 group">
-                <Bell size={20} className="group-hover:scale-110 transition-transform" />
-                {notificationCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-r from-red-500 to-pink-500 rounded-full text-xs flex items-center justify-center font-bold animate-pulse">
-                    {notificationCount}
-                  </span>
-                )}
-              </button>
-              
+              {/* Notification bell giống phía user */}
+              <NotificationBell />
+
               <button className="p-2.5 hover:bg-gray-800/50 rounded-xl transition-all duration-200 group">
                 <User size={20} className="group-hover:scale-110 transition-transform" />
               </button>
@@ -172,6 +167,9 @@ const AdminLayout = () => {
           <Outlet />
         </div>
       </div>
+
+      {/* Toast thông báo giống user layout */}
+      <NotificationToastContainer />
     </div>
   );
 };

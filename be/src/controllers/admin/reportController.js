@@ -3,7 +3,7 @@ import Post from '../../models/Post.js';
 import PostLike from '../../models/PostLike.js';
 import PostComment from '../../models/PostComment.js';
 import mongoose from 'mongoose';
-import { createNotification } from '../../utils/notificationHelper.js';
+import { createNotification, notifyAdminsPostReported } from '../../utils/notificationHelper.js';
 import { getSocketIo } from '../../config/socket.js';
 import { getReportLimit } from '../../services/reportSettingService.js';
 
@@ -78,6 +78,17 @@ export const reportPost = async (req, res) => {
     });
 
     await report.save();
+
+    // Gửi thông báo cho admin biết có report mới
+    try {
+      await notifyAdminsPostReported({
+        postId,
+        reporterId,
+        reason,
+      });
+    } catch (notifErr) {
+      console.warn('[ReportPost] Lỗi khi gửi thông báo report post cho admin:', notifErr?.message);
+    }
 
     // Check current pending reports count
     const pendingReportsCount = await ContentReport.countDocuments({

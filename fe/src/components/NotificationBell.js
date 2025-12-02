@@ -305,12 +305,20 @@ const NotificationBell = () => {
   // Lấy icon theo loại thông báo
   const getNotificationIcon = (type) => {
     switch (type) {
-      case "like_post":
-        return "❤️";
-      case "comment_post":
-        return "💬";
-      case "follow":
-        return "👤";
+      case 'like_post':
+        return '❤️';
+      case 'comment_post':
+        return '💬';
+      case 'follow':
+        return '👤';
+      case 'lick_pending_review':
+        return '🎸';
+      case 'lick_approved':
+        return '✅';
+      case 'lick_rejected':
+        return '❌';
+      case 'post_reported':
+        return '🚩';
       case "project_invite":
         return "🎵";
       default:
