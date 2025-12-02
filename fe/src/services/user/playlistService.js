@@ -26,7 +26,7 @@ export const getCommunityPlaylists = async (params = {}) => {
   }
 };
 
-// Get user's playlists
+// Get current user's playlists
 export const getMyPlaylists = async (params = {}) => {
   try {
     const {
@@ -48,6 +48,36 @@ export const getMyPlaylists = async (params = {}) => {
     return res.data;
   } catch (error) {
     console.error("Error fetching playlists:", error);
+    throw error;
+  }
+};
+
+// Get playlists of a specific user (by userId)
+export const getPlaylistsByUser = async (userId, params = {}) => {
+  try {
+    if (!userId) throw new Error("userId is required");
+
+    const {
+      search = "",
+      isPublic,
+      page = 1,
+      limit = 20,
+    } = params;
+
+    const queryParams = {
+      page: page.toString(),
+      limit: limit.toString(),
+    };
+
+    if (search) queryParams.search = search;
+    if (isPublic !== undefined) queryParams.isPublic = isPublic.toString();
+
+    const res = await api.get(`/playlists/user/${userId}`, {
+      params: queryParams,
+    });
+    return res.data;
+  } catch (error) {
+    console.error("Error fetching playlists by user:", error);
     throw error;
   }
 };

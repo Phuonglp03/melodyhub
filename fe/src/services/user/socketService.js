@@ -309,6 +309,71 @@ export const onDmConversationUpdated = (callback) => {
   getSocket()?.on("dm:conversation:updated", callback);
 };
 
+// DM request status events (accepted / declined)
+export const onDmRequestAccepted = (callback) => {
+  console.log('[DM] listen dm:request:accepted');
+  const socket = getSocket();
+  if (socket) {
+    const wrappedCallback = (payload) => {
+      console.log('[DM] Received dm:request:accepted event:', payload);
+      callback(payload);
+    };
+    socket.on('dm:request:accepted', wrappedCallback);
+    // Store wrapped callback for cleanup
+    if (!socket._dmRequestAcceptedCallbacks) {
+      socket._dmRequestAcceptedCallbacks = [];
+    }
+    socket._dmRequestAcceptedCallbacks.push({ original: callback, wrapped: wrappedCallback });
+  }
+};
+export const offDmRequestAccepted = (callback) => {
+  console.log('[DM] off dm:request:accepted');
+  const socket = getSocket();
+  if (socket && socket._dmRequestAcceptedCallbacks) {
+    const found = socket._dmRequestAcceptedCallbacks.find(cb => cb.original === callback);
+    if (found) {
+      socket.off('dm:request:accepted', found.wrapped);
+      socket._dmRequestAcceptedCallbacks = socket._dmRequestAcceptedCallbacks.filter(cb => cb !== found);
+    } else {
+      socket.off('dm:request:accepted', callback);
+    }
+  } else if (socket) {
+    socket.off('dm:request:accepted', callback);
+  }
+};
+
+export const onDmRequestDeclined = (callback) => {
+  console.log('[DM] listen dm:request:declined');
+  const socket = getSocket();
+  if (socket) {
+    const wrappedCallback = (payload) => {
+      console.log('[DM] Received dm:request:declined event:', payload);
+      callback(payload);
+    };
+    socket.on('dm:request:declined', wrappedCallback);
+    // Store wrapped callback for cleanup
+    if (!socket._dmRequestDeclinedCallbacks) {
+      socket._dmRequestDeclinedCallbacks = [];
+    }
+    socket._dmRequestDeclinedCallbacks.push({ original: callback, wrapped: wrappedCallback });
+  }
+};
+export const offDmRequestDeclined = (callback) => {
+  console.log('[DM] off dm:request:declined');
+  const socket = getSocket();
+  if (socket && socket._dmRequestDeclinedCallbacks) {
+    const found = socket._dmRequestDeclinedCallbacks.find(cb => cb.original === callback);
+    if (found) {
+      socket.off('dm:request:declined', found.wrapped);
+      socket._dmRequestDeclinedCallbacks = socket._dmRequestDeclinedCallbacks.filter(cb => cb !== found);
+    } else {
+      socket.off('dm:request:declined', callback);
+    }
+  } else if (socket) {
+    socket.off('dm:request:declined', callback);
+  }
+};
+
 export const offDmNew = (callback) => {
   console.log("[DM] off dm:new");
   getSocket()?.off("dm:new", callback);

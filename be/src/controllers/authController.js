@@ -426,8 +426,9 @@ export const register = async (req, res) => {
       });
     }
 
+    // Địa chỉ chi tiết (addressLine) chỉ là phần bổ sung (số nhà, tên đường),
+    // nên KHÔNG bắt buộc khi đăng ký. Người dùng chỉ cần chọn Tỉnh/Quận/Phường.
     const requiredAddressFields = [
-      { value: addressLine, message: 'Địa chỉ chi tiết không được để trống' },
       { value: provinceCode, message: 'Vui lòng chọn tỉnh/thành phố' },
       { value: provinceName, message: 'Vui lòng chọn tỉnh/thành phố' },
       { value: districtCode, message: 'Vui lòng chọn quận/huyện' },
@@ -442,7 +443,8 @@ export const register = async (req, res) => {
       }
     }
 
-    const normalizedAddressLine = addressLine.trim();
+    const normalizedAddressLine =
+      typeof addressLine === 'string' ? addressLine.trim() : '';
     const fullLocation = [
       normalizedAddressLine,
       wardName.trim(),
@@ -677,5 +679,43 @@ export const resetPassword = async (req, res) => {
   } catch (error) {
     console.error('Error in resetPassword:', error);
     res.status(500).json({ message: 'An error occurred. Please try again later.' });
+  }
+};
+
+// Change password controller (for logged-in users)
+export const changePassword = async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Yêu cầu đăng nhập' });
+    }
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Vui lòng nhập đầy đủ mật khẩu hiện tại và mật khẩu mới' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
+    }
+
+    const user = await User.findById(userId).select('+passwordHash');
+    if (!user) {
+      return res.status(404).json({ message: 'Không tìm thấy người dùng' });
+    }
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Mật khẩu hiện tại không chính xác' });
+    }
+
+    user.passwordHash = newPassword;
+    await user.save();
+
+    return res.status(200).json({ message: 'Đổi mật khẩu thành công' });
+  } catch (error) {
+    console.error('Error in changePassword:', error);
+    return res.status(500).json({ message: 'Đã xảy ra lỗi. Vui lòng thử lại sau.' });
   }
 };

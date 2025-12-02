@@ -42,6 +42,7 @@ import "./models/ProjectTrack.js";
 import "./models/RoomChat.js";
 import "./models/Tag.js";
 import "./models/UserFollow.js";
+import "./models/SystemSetting.js";
 
 // Import routes
 import authRoutes from "./routes/authRoutes.js";
@@ -68,6 +69,7 @@ const httpServer = http.createServer(app);
 app.use(
   helmet({
     crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false, // Allow postMessage for OAuth popups
     contentSecurityPolicy: false,
   })
 );

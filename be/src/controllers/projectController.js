@@ -252,6 +252,7 @@ export const getUserProjects = async (req, res) => {
   try {
     const userId = req.userId;
     const { filter = "all" } = req.query; // "all", "my-projects", "collaborations"
+    const { status } = req.query; // Optional status filter: "draft", "active", "completed", "inactive"
 
     let matchQuery = {};
 
@@ -286,6 +287,23 @@ export const getUserProjects = async (req, res) => {
           { _id: { $in: projectIds } },
         ],
       };
+    }
+
+    // Add status filter if provided
+    // When using $or, we need to use $and to combine with status filter
+    if (status) {
+      if (matchQuery.$or) {
+        // If we have $or, wrap it with $and to combine with status
+        matchQuery = {
+          $and: [
+            matchQuery,
+            { status: status }
+          ]
+        };
+      } else {
+        // Otherwise, just add status directly
+        matchQuery.status = status;
+      }
     }
 
     const projects = await Project.find(matchQuery)

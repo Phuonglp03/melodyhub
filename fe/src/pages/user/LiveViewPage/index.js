@@ -260,8 +260,6 @@ const LiveViewPage = () => {
     <>
       {/* Global Styles for Scrollbar & VideoJS Tweaks */}
       <style>{`
-        body { margin: 0; overflow: hidden; background: #0e0e10; }
-        
         /* VideoJS Customization */
         .video-js .vjs-control-bar { background: linear-gradient(to top, rgba(0,0,0,0.9), transparent) !important; }
         .video-js .vjs-big-play-button {
@@ -282,25 +280,34 @@ const LiveViewPage = () => {
       `}</style>
 
       <div style={{ 
-        display: 'flex', 
-        height: '100vh', 
+        display: 'flex',  
+        height: 'calc(100vh - 72px)',
+        width: '100vw',
+        position: 'fixed',
+        top: '72px',
+        left: 0,
         background: '#0e0e10',
         color: '#efeff1',
-        overflow: 'hidden'
+        overflow: 'hidden',
+        zIndex: 1
       }}>
-        
         {/* LEFT COLUMN: VIDEO & INFO */}
-        <div style={{ 
-          flex: 1, 
-          display: 'flex', 
-          flexDirection: 'column', 
-          overflowY: 'auto',
-          position: 'relative'
-        }} className="custom-scrollbar">
+        <div 
+          data-liveview-scroll
+          style={{ 
+            flex: 1, 
+            display: 'flex', 
+            flexDirection: 'column', 
+            overflowY: 'auto',
+            position: 'relative'
+          }} 
+          className="custom-scrollbar"
+        >
           
           {/* Video Player Container */}
           <div style={{ 
-            width: '100%', 
+            width: '95%', 
+            margin: '0 auto',
             background: '#000', 
             aspectRatio: '16/9',
             position: 'relative',
@@ -359,11 +366,42 @@ const LiveViewPage = () => {
                     />
                   </div>
                   <div>
-                    <div style={{ 
-                      fontSize: '16px', 
-                      fontWeight: '600', 
-                      color: '#9147ff' 
-                    }}>
+                    <div 
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (room.hostId?._id) {
+                          // Use navigate to stay in same tab
+                          navigate(`/users/${room.hostId._id}/newfeeds`);
+                        }
+                      }}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          if (room.hostId?._id) {
+                            navigate(`/users/${room.hostId._id}/newfeeds`);
+                          }
+                        }
+                      }}
+                      style={{ 
+                        fontSize: '16px', 
+                        fontWeight: '600', 
+                        color: '#9147ff',
+                        cursor: 'pointer',
+                        transition: 'opacity 0.2s',
+                        userSelect: 'none',
+                        display: 'inline-block',
+                        outline: 'none'
+                      }}
+                      onMouseEnter={(e) => e.target.style.opacity = '0.8'}
+                      onMouseLeave={(e) => e.target.style.opacity = '1'}
+                    >
                       {room.hostId?.displayName || 'Unknown Host'}
                     </div>
                     <div style={{ fontSize: '13px', color: '#adadb8' }}>

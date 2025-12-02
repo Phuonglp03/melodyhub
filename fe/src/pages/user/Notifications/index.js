@@ -7,7 +7,6 @@ import {
   Button,
   Space,
   Avatar,
-  Divider,
   Tabs,
   Badge,
 } from "antd";
@@ -49,7 +48,6 @@ const NotificationsPage = () => {
         }
 
         const result = await getNotifications(params);
-        // Handle different response structures
         const newNotifications =
           result?.data?.notifications || result?.notifications || [];
 
@@ -66,7 +64,6 @@ const NotificationsPage = () => {
         );
       } catch (error) {
         console.error("Lỗi khi lấy danh sách thông báo:", error);
-        // Reset to empty array on error to prevent infinite loading
         if (!append) {
           setNotifications([]);
         }
@@ -78,7 +75,7 @@ const NotificationsPage = () => {
     []
   );
 
-  // Load more
+  // Load thêm
   const loadMore = () => {
     if (!loading && hasMore) {
       const nextPage = page + 1;
@@ -89,7 +86,7 @@ const NotificationsPage = () => {
     }
   };
 
-  // Đánh dấu thông báo là đã đọc
+  // Đánh dấu đã đọc
   const handleMarkAsRead = async (notificationId) => {
     try {
       await markNotificationAsRead(notificationId);
@@ -101,7 +98,7 @@ const NotificationsPage = () => {
     }
   };
 
-  // Đánh dấu tất cả là đã đọc
+  // Đánh dấu tất cả đã đọc
   const handleMarkAllAsRead = async () => {
     try {
       await markAllNotificationsAsRead();
@@ -121,7 +118,7 @@ const NotificationsPage = () => {
     }
   };
 
-  // Xử lý click vào thông báo
+  // Xử lý click
   const handleNotificationClick = (notification) => {
     if (!notification.isRead) {
       handleMarkAsRead(notification._id);
@@ -132,7 +129,7 @@ const NotificationsPage = () => {
     }
   };
 
-  // Format thời gian
+  // Định dạng thời gian
   const formatTime = (dateString) => {
     if (!dateString) return "";
     const date = new Date(dateString);
@@ -158,7 +155,7 @@ const NotificationsPage = () => {
     });
   };
 
-  // Lấy icon theo loại thông báo
+  // Icon theo loại thông báo
   const getNotificationIcon = (type) => {
     switch (type) {
       case "like_post":
@@ -172,7 +169,7 @@ const NotificationsPage = () => {
     }
   };
 
-  // Lắng nghe thông báo mới từ socket
+  // Lắng nghe socket
   useEffect(() => {
     const handleNewNotification = (notification) => {
       console.log("[Notification] Nhận thông báo mới:", notification);
@@ -186,7 +183,7 @@ const NotificationsPage = () => {
     };
   }, []);
 
-  // Load dữ liệu khi tab thay đổi
+  // Reload khi chuyển tab
   useEffect(() => {
     setPage(1);
     const isRead =
@@ -220,18 +217,25 @@ const NotificationsPage = () => {
 
         <Tabs
           activeKey={activeTab}
-          onChange={setActiveTab}
+          onChange={(key) => {
+            if (key === "all" || key === "unread" || key === "read") {
+              setActiveTab(key);
+            }
+          }}
           className="notifications-tabs"
+          onTabClick={(key, e) => {
+            if (e) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
         >
           <TabPane
             tab={
               <span>
                 Tất cả
                 {notifications.length > 0 && (
-                  <Badge
-                    count={notifications.length}
-                    style={{ marginLeft: 8 }}
-                  />
+                  <Badge count={notifications.length} style={{ marginLeft: 8 }} />
                 )}
               </span>
             }
@@ -308,10 +312,7 @@ const NotificationsPage = () => {
                                 size={40}
                               />
                               <div>
-                                <Text
-                                  strong
-                                  style={{ color: "#fff", fontSize: 15 }}
-                                >
+                                <Text strong style={{ color: "#fff", fontSize: 15 }}>
                                   {notification.actorId.displayName ||
                                     notification.actorId.username}
                                 </Text>

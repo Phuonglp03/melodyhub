@@ -17,9 +17,10 @@ import LickLibraryLayout from "../layouts/LickLibraryLayout";
 
 // Lazy load all page components for code splitting
 const NewsFeed = lazy(() => import("../pages/user/NewFeed"));
-const PersonalFeed = lazy(() => import("../pages/user/NewFeed/Personal"));
+// const PersonalFeed = lazy(() => import("../pages/user/NewFeed/Personal"));
 const UserFeed = lazy(() => import("../pages/user/NewFeed/UserFeed"));
 const ProfilePage = lazy(() => import("../pages/user/Profile"));
+const ChangePasswordPage = lazy(() => import("../pages/user/ChangePassword"));
 const ArchivedPosts = lazy(() => import("../pages/user/ArchivedPosts"));
 const Login = lazy(() => import("../pages/auth/Login"));
 const Register = lazy(() => import("../pages/auth/Register"));
@@ -77,6 +78,9 @@ const AdminLiveroomManagement = lazy(() =>
 const AdminLickApprovement = lazy(() =>
   import("../pages/admin/AdminSite/LickApprovement")
 );
+const AdminReportSettings = lazy(() =>
+  import("../pages/admin/AdminSite/ReportSettings")
+);
 
 // Loading component for Suspense fallback
 const LoadingSpinner = () => (
@@ -103,9 +107,13 @@ const AppRoutes = () => {
     dispatch(refreshUser());
   }, [dispatch]);
 
-  // Defer socket initialization - only initialize when user navigates to pages that need it
-  // Socket will be initialized lazily in ChatPage, LiveStreamCreate, LiveStreamLive components
-  // This reduces initial startup overhead
+  // Khởi tạo Socket.IO khi đã có thông tin user để nhận thông báo realtime (like, comment, DM badge, ...)
+  useEffect(() => {
+    const userId = user?.user?.id;
+    if (userId) {
+      initSocket(userId);
+    }
+  }, [user?.user?.id]);
 
   if (isLoading) {
     return (
@@ -172,6 +180,7 @@ const AppRoutes = () => {
               element={<AdminLiveroomManagement />}
             />
             <Route path="lick-approvement" element={<AdminLickApprovement />} />
+            <Route path="report-settings" element={<AdminReportSettings />} />
           </Route>
 
           {/* Protected routes */}
@@ -195,9 +204,10 @@ const AppRoutes = () => {
               path="livestream/live/:roomId"
               element={<LiveStreamLive />}
             />
-            <Route path="newfeedspersonal" element={<PersonalFeed />} />
+            {/* <Route path="newfeedspersonal" element={<PersonalFeed />} /> */}
             <Route path="users/:userId/newfeeds" element={<UserFeed />} />
             <Route path="profile" element={<ProfilePage />} />
+            <Route path="change-password" element={<ChangePasswordPage />} />
             <Route path="archived-posts" element={<ArchivedPosts />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="notifications" element={<NotificationsPage />} />

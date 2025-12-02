@@ -72,7 +72,14 @@ export const googleLogin = createAsyncThunk(
   'auth/googleLogin',
   async (token, thunkAPI) => {
     try {
-      return await loginWithGoogleService(token);
+      const response = await loginWithGoogleService(token);
+      
+      // If login is successful
+      if (response.success && response.data) {
+        return response;
+      }
+      
+      return thunkAPI.rejectWithValue(response.message || 'Đăng nhập Google thất bại');
     } catch (error) {
       const message =
         (error.response &&
@@ -223,16 +230,32 @@ const authSlice = createSlice({
       })
       .addCase(googleLogin.pending, (state) => {
         state.isLoading = true;
+        state.isError = false;
+        state.message = '';
       })
       .addCase(googleLogin.fulfilled, (state, action) => {
         state.isLoading = false;
         state.isSuccess = true;
-        state.user = action.payload.user;
+        state.isError = false;
+        state.message = 'Đăng nhập Google thành công';
+        
+        // ✅ action.payload.data contains { token, refreshToken, user }
+        if (action.payload?.data) {
+          state.user = action.payload.data;
+          console.log('[authSlice] Google login successful, user data saved:', {
+            hasToken: !!action.payload.data.token,
+            hasRefreshToken: !!action.payload.data.refreshToken,
+            userId: action.payload.data.user?.id,
+            tokenPreview: action.payload.data.token?.substring(0, 30) + '...'
+          });
+        } else {
+          console.error('[authSlice] Google login payload missing data:', action.payload);
+        }
       })
       .addCase(googleLogin.rejected, (state, action) => {
         state.isLoading = false;
         state.isError = true;
-        state.message = action.payload;
+        state.message = action.payload || 'Đăng nhập Google thất bại';
         state.user = null;
       })
       .addCase(logout.fulfilled, (state) => {

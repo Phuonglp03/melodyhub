@@ -28,6 +28,19 @@ export const getCommunityLicks = async (params = {}) => {
   }
 };
 
+// Get top public licks for leaderboard (sorted by likes on backend)
+export const getTopLicksLeaderboard = async (limit = 10) => {
+  try {
+    const res = await api.get("/licks/leaderboard", {
+      params: { limit: limit.toString() },
+    });
+    return res.data;
+  } catch (error) {
+    console.error("Error fetching top licks leaderboard:", error);
+    throw error;
+  }
+};
+
 export const getMyLicks = async (params = {}) => {
   try {
     const queryParams = { page: 1, limit: 50, ...params };
@@ -35,6 +48,19 @@ export const getMyLicks = async (params = {}) => {
     return res.data;
   } catch (error) {
     console.error("Error fetching my licks:", error);
+    throw error;
+  }
+};
+
+// Get licks of a specific user (by userId)
+export const getLicksByUser = async (userId, params = {}) => {
+  try {
+    if (!userId) throw new Error("userId is required");
+    const queryParams = { page: 1, limit: 50, ...params };
+    const res = await api.get(`/licks/user/${userId}`, { params: queryParams });
+    return res.data;
+  } catch (error) {
+    console.error("Error fetching licks by user:", error);
     throw error;
   }
 };

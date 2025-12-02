@@ -69,13 +69,15 @@ const Login = () => {
         // If login is successful
         messageApi.success('Đăng nhập thành công!');
         
-        // Redirect to the intended page or home
-        const from = location.state?.from?.pathname || '/';
-        navigate(from, { replace: true });
+        if (result.user?.roleId === 'admin') {
+          window.location.href = '/admin'; 
+        } else {
+          navigate(from, { replace: true });
+        }
       }
     } catch (error) {
       console.error('Login error:', error);
-      // Error message will be shown by the useEffect hook
+      messageApi.error(error || 'Login failed. Please try again.');
     }
   };
 
@@ -161,11 +163,16 @@ const Login = () => {
                 <GoogleSignIn 
                   buttonText="Continue with Google"
                   onSuccess={(user) => {
-                    messageApi.success('Logged in successfully!');
-                    navigate(from, { replace: true });
+                    messageApi.success('Đăng nhập thành công!');
+                    // Check if user is admin
+                    if (user?.roleId === 'admin') {
+                      window.location.href = '/admin';
+                    } else {
+                      navigate(from, { replace: true });
+                    }
                   }}
                   onError={(error) => {
-                    messageApi.error(error || 'Login failed. Please try again.');
+                    messageApi.error(error || 'Đăng nhập thất bại. Vui lòng thử lại.');
                   }}
                 />
               </div>

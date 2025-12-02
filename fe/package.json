@@ -48,7 +48,7 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
-  "proxy": "https://api.melodyhub.online",
+  "proxy": "https://api.melodyhub.website",
   "eslintConfig": {
     "extends": [
       "react-app",

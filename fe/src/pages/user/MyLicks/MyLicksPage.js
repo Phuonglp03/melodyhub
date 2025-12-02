@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaSearch, FaPlus, FaFilter, FaLock, FaTimes } from "react-icons/fa";
+import {
+  FaSearch,
+  FaPlus,
+  FaFilter,
+  FaLock,
+  FaTimes,
+  FaInfoCircle,
+  FaCheckCircle,
+} from "react-icons/fa";
 import {
   deleteLick,
   updateLick as apiUpdateLick,
@@ -270,6 +278,13 @@ const MyLicksPage = () => {
         : `/licks/${lickId}`;
       const title = lick.title || "My new lick";
       const textContent = `🎸 ${title}\n${shareUrl}`;
+      const MAX_POST_TEXT_LENGTH = 300;
+      if (textContent.length > MAX_POST_TEXT_LENGTH) {
+        alert(
+          `Nội dung không được vượt quá ${MAX_POST_TEXT_LENGTH} ký tự (hiện tại: ${textContent.length})`
+        );
+        return;
+      }
       await createPostApi({ postType: "status_update", textContent });
       alert("Shared to your feed!"); // replace with toast if available
     } catch (err) {
@@ -387,6 +402,8 @@ const MyLicksPage = () => {
     e.preventDefault();
     if (!editingLick) return;
     setSaving(true);
+    // ⭐ LOGIC: Chỉ cho phép gửi isPublic/isFeatured nếu đã active
+    const canEditSettings = editingLick.status === "active";
     try {
       const payload = {
         title: editForm.title,
@@ -395,9 +412,14 @@ const MyLicksPage = () => {
         tempo: editForm.tempo,
         difficulty: editForm.difficulty,
         status: editForm.status,
-        isPublic: editForm.isPublic,
-        isFeatured: editForm.isFeatured,
+        // isPublic: editForm.isPublic,
+        // isFeatured: editForm.isFeatured,
       };
+      // ⭐ LOGIC: Chỉ gửi settings nếu được phép
+      if (canEditSettings) {
+        payload.isPublic = editForm.isPublic;
+        payload.isFeatured = editForm.isFeatured;
+      }
 
       const res = await apiUpdateLick(editingLick.lick_id, payload);
       let updatedTags = editingLick.tags || [];
@@ -488,13 +510,13 @@ const MyLicksPage = () => {
                   difficulty: updated.difficulty ?? editForm.difficulty,
                   status: updated.status ?? editForm.status,
                   is_public:
-                    typeof updated.isPublic === "boolean"
+                    canEditSettings && typeof updated.isPublic === "boolean"
                       ? updated.isPublic
-                      : editForm.isPublic,
+                      : l.is_public,
                   is_featured:
-                    typeof updated.isFeatured === "boolean"
+                    canEditSettings && typeof updated.isFeatured === "boolean"
                       ? updated.isFeatured
-                      : editForm.isFeatured,
+                      : l.is_featured,
                   tags: updatedTags,
                 }
               : l
@@ -522,6 +544,7 @@ const MyLicksPage = () => {
       setSaving(false);
     }
   };
+  const canEditSettings = editingLick?.status === "active";
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -703,7 +726,7 @@ const MyLicksPage = () => {
       {isEditOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
-            className="absolute inset-0 bg-black/60"
+            className="fixed inset-0 bg-black/60"
             onClick={() => {
               if (!saving) {
                 setIsEditOpen(false);
@@ -711,9 +734,11 @@ const MyLicksPage = () => {
               }
             }}
           />
-          <div className="relative z-10 w-full max-w-2xl mx-4 bg-gray-900 border border-gray-800 rounded-lg shadow-xl">
-            <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-white">Edit Lick</h2>
+          <div className="relative z-10 w-full max-w-2xl mx-4 my-8 bg-gray-900 border border-gray-800 rounded-lg shadow-xl max-h-[90vh] flex flex-col overflow-y-auto">
+            <div className="px-5 py-3 border-t border-b border-gray-800 flex items-center justify-between flex-shrink-0 sticky top-4 bg-gray-900/95 backdrop-blur-sm rounded-t-lg">
+              <h2 className="text-base font-semibold text-white tracking-wide">
+                Edit Lick
+              </h2>
               <button
                 className="text-gray-400 hover:text-white"
                 onClick={() => {
@@ -726,33 +751,55 @@ const MyLicksPage = () => {
                 ✕
               </button>
             </div>
-            <form onSubmit={handleEditSubmit} className="px-6 py-5 space-y-4">
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">
-                  Title
-                </label>
-                <input
-                  name="title"
-                  value={editForm.title}
-                  onChange={handleEditChange}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  required
-                />
+            <form
+              onSubmit={handleEditSubmit}
+              className="px-5 py-4 space-y-6 overflow-y-auto"
+            >
+              {/* Basic info */}
+              <div className="space-y-3">
+                <p className="text-xs font-semibold tracking-wide text-gray-400 uppercase">
+                  Basic Info
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">
+                      Title
+                    </label>
+                    <input
+                      name="title"
+                      value={editForm.title}
+                      onChange={handleEditChange}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      placeholder="Name this lick so you can find it later"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">
+                      Description
+                    </label>
+                    <textarea
+                      name="description"
+                      value={editForm.description}
+                      onChange={handleEditChange}
+                      rows={3}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                      placeholder="Add context: where to use this lick, feel, or tips to play it..."
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">
-                  Description
-                </label>
-                <textarea
-                  name="description"
-                  value={editForm.description}
-                  onChange={handleEditChange}
-                  rows={3}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-300 mb-1">Tags</label>
+
+              {/* Tags section */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold tracking-wide text-gray-400 uppercase">
+                    Tags & Mood
+                  </p>
+                  <span className="text-[11px] text-gray-500">
+                    Help you search and recommend this lick
+                  </span>
+                </div>
                 {Object.keys(tagGroups).length > 0 ? (
                   <div className="bg-gray-900/40 border border-gray-800 rounded-lg p-4">
                     <TagFlowBoard
@@ -818,101 +865,150 @@ const MyLicksPage = () => {
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-gray-300 mb-1">
-                    Key
-                  </label>
-                  <input
-                    name="key"
-                    value={editForm.key}
-                    onChange={handleEditChange}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-300 mb-1">
-                    Tempo (BPM)
-                  </label>
-                  <input
-                    name="tempo"
-                    value={editForm.tempo}
-                    onChange={handleEditChange}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-300 mb-1">
-                    Difficulty
-                  </label>
-                  <select
-                    name="difficulty"
-                    value={editForm.difficulty}
-                    onChange={handleEditChange}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  >
-                    <option value="">Select</option>
-                    <option value="beginner">Beginner</option>
-                    <option value="intermediate">Intermediate</option>
-                    <option value="advanced">Advanced</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-300 mb-1">
-                    Status
-                  </label>
-                  <select
-                    name="status"
-                    value={editForm.status}
-                    onChange={handleEditChange}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  >
-                    <option value="">Select</option>
-                    <option value="active">Active</option>
-                    <option value="draft">Draft</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
+              {/* Technical details */}
+              <div className="space-y-3">
+                <p className="text-xs font-semibold tracking-wide text-gray-400 uppercase">
+                  Technical Details
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">
+                      Key
+                    </label>
+                    <input
+                      name="key"
+                      value={editForm.key}
+                      onChange={handleEditChange}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">
+                      Tempo (BPM)
+                    </label>
+                    <input
+                      name="tempo"
+                      value={editForm.tempo}
+                      onChange={handleEditChange}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">
+                      Difficulty
+                    </label>
+                    <select
+                      name="difficulty"
+                      value={editForm.difficulty}
+                      onChange={handleEditChange}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    >
+                      <option value="">Select</option>
+                      <option value="beginner">Beginner</option>
+                      <option value="intermediate">Intermediate</option>
+                      <option value="advanced">Advanced</option>
+                    </select>
+                  </div>
+                  {/* Status (Read-only) */}
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-1">
+                      Status
+                    </label>
+                    <div
+                      className={`w-full px-3 py-2 text-sm font-bold uppercase rounded-md border border-gray-700 ${
+                        editingLick.status === "active"
+                          ? "bg-green-900/30 text-green-400"
+                          : editingLick.status === "pending"
+                          ? "bg-yellow-900/30 text-yellow-400"
+                          : "bg-gray-800 text-gray-400"
+                      }`}
+                    >
+                      {editingLick.status}
+                    </div>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-center gap-6">
-                <label className="inline-flex items-center gap-2 text-sm text-gray-300">
-                  <input
-                    type="checkbox"
-                    name="isPublic"
-                    checked={editForm.isPublic}
-                    onChange={handleEditChange}
-                    className="form-checkbox h-4 w-4 text-orange-500 bg-gray-800 border-gray-700"
-                  />
-                  Public
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm text-gray-300">
-                  <input
-                    type="checkbox"
-                    name="isFeatured"
-                    checked={editForm.isFeatured}
-                    onChange={handleEditChange}
-                    className="form-checkbox h-4 w-4 text-orange-500 bg-gray-800 border-gray-700"
-                  />
-                  Featured
-                </label>
+
+              {/* ⭐ SETTINGS SECTION: PUBLIC & FEATURED ⭐ */}
+              <div
+                className={`mt-4 p-4 rounded-lg border ${
+                  canEditSettings
+                    ? "bg-gray-800/30 border-gray-700"
+                    : "bg-gray-800/50 border-gray-700/50 opacity-75"
+                }`}
+              >
+                <div className="flex items-center gap-6">
+                  {/* Public Checkbox */}
+                  <label
+                    className={`inline-flex items-center gap-3 text-sm ${
+                      canEditSettings
+                        ? "text-gray-300 cursor-pointer"
+                        : "text-gray-500 cursor-not-allowed"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      name="isPublic"
+                      checked={editForm.isPublic}
+                      onChange={handleEditChange}
+                      disabled={!canEditSettings} // Disable nếu pending
+                      className="form-checkbox h-5 w-5 text-orange-500 bg-gray-800 border-gray-600 rounded disabled:opacity-50"
+                    />
+                    <span className="font-medium">Public</span>
+                  </label>
+
+                  {/* Featured Checkbox */}
+                  <label
+                    className={`inline-flex items-center gap-3 text-sm ${
+                      canEditSettings
+                        ? "text-gray-300 cursor-pointer"
+                        : "text-gray-500 cursor-not-allowed"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      name="isFeatured"
+                      checked={editForm.isFeatured}
+                      onChange={handleEditChange}
+                      disabled={!canEditSettings} // Disable nếu pending
+                      className="form-checkbox h-5 w-5 text-orange-500 bg-gray-800 border-gray-600 rounded disabled:opacity-50"
+                    />
+                    <span className="font-medium">Featured</span>
+                  </label>
+                </div>
+
+                {/* Helper Text */}
+                {!canEditSettings && (
+                  <div className="mt-3 flex items-start gap-2 text-xs text-yellow-500 bg-yellow-900/10 p-2 rounded">
+                    <FaLock size={12} className="mt-0.5 flex-shrink-0" />
+                    <span>
+                      Visibility settings are locked while{" "}
+                      <strong>Pending Approval</strong>. Once approved, you can
+                      change these.
+                    </span>
+                  </div>
+                )}
+                {canEditSettings && (
+                  <div className="mt-3 flex items-center gap-2 text-xs text-green-400">
+                    <FaCheckCircle size={12} />
+                    <span>
+                      Lick is active. You can update visibility settings.
+                    </span>
+                  </div>
+                )}
               </div>
-              <div className="flex justify-end gap-3 pt-2">
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-gray-800 mt-4 bg-gray-900">
                 <button
                   type="button"
-                  className="px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-700"
-                  onClick={() => {
-                    if (!saving) {
-                      setIsEditOpen(false);
-                      setEditingLick(null);
-                    }
-                  }}
-                  disabled={saving}
+                  className="px-4 py-1.5 text-sm bg-gray-800 text-white rounded-md hover:bg-gray-700"
+                  onClick={() => !saving && setIsEditOpen(false)}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md disabled:opacity-50"
+                  className="px-4 py-1.5 text-sm bg-orange-600 hover:bg-orange-700 text-white rounded-md disabled:opacity-50"
                   disabled={saving}
                 >
                   {saving ? "Saving..." : "Save Changes"}
