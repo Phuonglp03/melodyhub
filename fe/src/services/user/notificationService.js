@@ -47,5 +47,23 @@ export const deleteNotification = async (notificationId) => {
   return res.data;
 };
 
+/**
+ * Accept project invitation
+ * @param {string} projectId
+ */
+export const acceptProjectInvitation = async (projectId) => {
+  const res = await api.post(`/projects/${projectId}/invite/accept`);
+  return res.data;
+};
+
+/**
+ * Decline project invitation
+ * @param {string} projectId
+ */
+export const declineProjectInvitation = async (projectId) => {
+  const res = await api.post(`/projects/${projectId}/invite/decline`);
+  return res.data;
+};
+
 
 

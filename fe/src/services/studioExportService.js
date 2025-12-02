@@ -2,7 +2,6 @@
 import * as Tone from "tone";
 import { scheduleProject, calculateDuration } from "../utils/audioScheduler";
 import api from "./api";
-import { uploadAudio } from "./cloudinaryService";
 
 // Helper: Convert AudioBuffer to WAV Blob
 const audioBufferToWav = (buffer) => {
@@ -53,11 +52,53 @@ const audioBufferToWav = (buffer) => {
   return new Blob([arrayBuffer], { type: "audio/wav" });
 };
 
+// Generate waveform data from AudioBuffer
+const generateWaveformFromBuffer = (buffer) => {
+  try {
+    const channelData = buffer.getChannelData(0); // Use first channel
+    const samples = 100; // Number of waveform bars
+    const blockSize = Math.floor(channelData.length / samples);
+    const waveform = [];
+
+    for (let i = 0; i < samples; i++) {
+      let sum = 0;
+      for (let j = 0; j < blockSize; j++) {
+        const index = i * blockSize + j;
+        if (index < channelData.length) {
+          sum += Math.abs(channelData[index]);
+        }
+      }
+      const average = sum / blockSize;
+      // Normalize to 0-1 range
+      waveform.push(Math.min(1, Math.max(0.1, average * 2)));
+    }
+
+    return waveform;
+  } catch (error) {
+    console.error("[Export] Error generating waveform:", error);
+    // Return default waveform if generation fails
+    return Array.from({ length: 100 }, () => 0.5);
+  }
+};
+
+const uploadProjectAudioToServer = async (projectId, file) => {
+  const formData = new FormData();
+  formData.append("audio", file);
+  formData.append("fileName", file.name);
+
+  const response = await api.post(
+    `/projects/${projectId}/export-audio/upload`,
+    formData
+  );
+
+  return response.data;
+};
+
 /**
  * Export project to WAV and upload to Cloudinary
  * @param {Object} projectState - Full studio state { song, bandSettings }
  * @param {string} projectId - Project ID
- * @returns {Promise<{success: boolean, audioUrl?: string}>}
+ * @returns {Promise<{success: boolean, audioUrl?: string, waveformData?: number[], duration?: number}>}
  */
 export const saveProjectWithAudio = async (projectState, projectId) => {
   try {
@@ -142,41 +183,46 @@ export const saveProjectWithAudio = async (projectState, projectId) => {
       type: "audio/wav",
     });
 
-    console.log("[Export] Uploading to Cloudinary...", {
+    console.log("(NO $) [DEBUG][ProjectExport] Uploading via API...", {
       fileName: file.name,
       fileSize: file.size,
       fileType: file.type,
-    });
-    // Upload directly to Cloudinary using the cloudinaryService
-    // Note: uploadAudio already sets resource_type to "video" and default folder
-    // We just need to override the folder for project-specific organization
-    const uploadResult = await uploadAudio(file, {
-      folder: `projects/${projectId}`,
+      projectId,
     });
 
-    if (!uploadResult.success) {
-      console.error("[Export] Upload failed:", uploadResult);
+    const uploadResponse = await uploadProjectAudioToServer(projectId, file);
+
+    if (!uploadResponse?.success) {
+      console.error("[Export] Upload failed:", uploadResponse);
       throw new Error(
-        uploadResult.error || "Failed to upload audio to Cloudinary"
+        uploadResponse?.message || "Failed to upload audio to server"
       );
     }
 
-    const audioUrl = uploadResult.data?.secure_url || uploadResult.data?.url;
+    const uploadData = uploadResponse.data || {};
+    const audioUrl =
+      uploadData.cloudinaryUrl || uploadData.secure_url || uploadData.url;
 
     if (!audioUrl) {
-      throw new Error("Upload succeeded but no URL returned from Cloudinary");
+      throw new Error("Upload succeeded but no URL returned from server");
     }
 
-    console.log("[Export] Saving project metadata...");
-    await api.put(`/projects/${projectId}`, {
-      ...projectState.song,
-      bandSettings: projectState.bandSettings,
-      audioUrl,
-      audioDuration: duration,
-    });
+    const uploadedDuration =
+      typeof uploadData.duration === "number" && uploadData.duration > 0
+        ? uploadData.duration
+        : duration;
+
+    console.log("[Export] Generating waveform data...");
+    // Generate waveform data from audio buffer
+    const waveformData = generateWaveformFromBuffer(buffer);
 
     console.log("[Export] Complete!", audioUrl);
-    return { success: true, audioUrl };
+    return {
+      success: true,
+      audioUrl,
+      waveformData,
+      duration: uploadedDuration,
+    };
   } catch (error) {
     console.error("[Export] Failed:", error);
     throw error;

@@ -7,6 +7,8 @@ import User from "../models/User.js";
 import Lick from "../models/Lick.js";
 import Instrument from "../models/Instrument.js";
 import PlayingPattern from "../models/PlayingPattern.js";
+import Notification from "../models/Notification.js";
+import { uploadFromBuffer } from "../utils/cloudinaryUploader.js";
 import {
   getAllInstruments,
   getInstrumentById,
@@ -18,6 +20,11 @@ import {
   DEFAULT_KEY,
   DEFAULT_TIME_SIGNATURE,
 } from "../utils/musicTheory.js";
+import {
+  getCollabState,
+  getMissingOps,
+  setSnapshot,
+} from "../services/collabStateService.js";
 
 const TRACK_TYPES = ["audio", "midi", "backing"];
 const TIMELINE_ITEM_TYPES = ["lick", "chord", "midi"];
@@ -32,6 +39,39 @@ const normalizeTimelineItemType = (value, fallback = "lick") => {
   if (typeof value !== "string") return fallback;
   const normalized = value.toLowerCase();
   return TIMELINE_ITEM_TYPES.includes(normalized) ? normalized : fallback;
+};
+
+// Helper function to check if user can edit project
+// Returns: { canEdit: boolean, isOwner: boolean, role: string }
+const checkEditPermission = async (projectId, userId) => {
+  const project = await Project.findById(projectId);
+  if (!project) {
+    return { canEdit: false, isOwner: false, role: null };
+  }
+
+  const isOwner = project.creatorId.toString() === userId;
+  if (isOwner) {
+    return { canEdit: true, isOwner: true, role: "owner" };
+  }
+
+  // Only accepted collaborators can edit
+  const collaborator = await ProjectCollaborator.findOne({
+    projectId: project._id,
+    userId: new mongoose.Types.ObjectId(userId),
+    status: "accepted",
+  });
+
+  if (collaborator) {
+    // Check role - viewers cannot edit
+    const canEdit = collaborator.role !== "viewer";
+    return {
+      canEdit,
+      isOwner: false,
+      role: collaborator.role,
+    };
+  }
+
+  return { canEdit: false, isOwner: false, role: null };
 };
 
 const ensureProjectCoreFields = (project) => {
@@ -220,9 +260,10 @@ export const getUserProjects = async (req, res) => {
       // Only projects where user is the owner
       matchQuery = { creatorId: new mongoose.Types.ObjectId(userId) };
     } else if (filter === "collaborations") {
-      // Only projects where user is a collaborator but not owner
+      // Only projects where user is a collaborator but not owner (accepted only)
       const collaborations = await ProjectCollaborator.find({
         userId: new mongoose.Types.ObjectId(userId),
+        status: "accepted",
       }).select("projectId");
 
       const projectIds = collaborations.map((c) => c.projectId);
@@ -232,9 +273,10 @@ export const getUserProjects = async (req, res) => {
         creatorId: { $ne: new mongoose.Types.ObjectId(userId) },
       };
     } else {
-      // All projects (owner or collaborator)
+      // All projects (owner or accepted collaborator)
       const collaborations = await ProjectCollaborator.find({
         userId: new mongoose.Types.ObjectId(userId),
+        status: "accepted",
       }).select("projectId");
 
       const projectIds = collaborations.map((c) => c.projectId);
@@ -268,9 +310,39 @@ export const getUserProjects = async (req, res) => {
       .populate("creatorId", "username displayName avatarUrl")
       .sort({ updatedAt: -1 });
 
+    // Get pending invitations for the user
+    const pendingInvitations = await ProjectCollaborator.find({
+      userId: new mongoose.Types.ObjectId(userId),
+      status: "pending",
+    })
+      .populate({
+        path: "projectId",
+        select: "title description creatorId updatedAt",
+        populate: {
+          path: "creatorId",
+          select: "username displayName avatarUrl",
+        },
+      })
+      .lean();
+
+    const pendingInvitationsData = pendingInvitations
+      .filter((inv) => inv.projectId) // Filter out deleted projects
+      .map((inv) => ({
+        _id: inv.projectId._id,
+        title: inv.projectId.title,
+        description: inv.projectId.description,
+        creatorId: inv.projectId.creatorId,
+        updatedAt: inv.projectId.updatedAt,
+        invitationId: inv._id,
+        invitationRole: inv.role,
+        invitationStatus: "pending",
+        isInvitation: true,
+      }));
+
     res.json({
       success: true,
       data: projects.map((project) => normalizeProjectResponse(project)),
+      pendingInvitations: pendingInvitationsData,
     });
   } catch (error) {
     console.error("Error fetching user projects:", error);
@@ -301,13 +373,32 @@ export const getProjectById = async (req, res) => {
       });
     }
 
-    // Check if user is owner or collaborator
+    // Check if user is owner or accepted collaborator only
     const isOwner = project.creatorId._id.toString() === userId;
     const isCollaborator = await ProjectCollaborator.findOne({
       projectId: project._id,
       userId: new mongoose.Types.ObjectId(userId),
+      status: "accepted",
     });
 
+    // Block pending and declined users from accessing project
+    const pendingOrDeclined = await ProjectCollaborator.findOne({
+      projectId: project._id,
+      userId: new mongoose.Types.ObjectId(userId),
+      status: { $in: ["pending", "declined"] },
+    });
+
+    if (pendingOrDeclined) {
+      return res.status(403).json({
+        success: false,
+        message:
+          pendingOrDeclined.status === "pending"
+            ? "Please accept the invitation first to access this project"
+            : "Your invitation to this project was declined",
+      });
+    }
+
+    // Only owner, accepted collaborators, or public projects can be accessed
     if (!isOwner && !isCollaborator && !project.isPublic) {
       return res.status(403).json({
         success: false,
@@ -328,9 +419,10 @@ export const getProjectById = async (req, res) => {
       .populate("userId", "username displayName avatarUrl")
       .sort({ startTime: 1 });
 
-    // Get collaborators
+    // Get accepted and pending collaborators (owners/admins can see pending invites)
     const collaborators = await ProjectCollaborator.find({
       projectId: project._id,
+      status: { $in: ["accepted", "pending"] },
     }).populate("userId", "username displayName avatarUrl");
 
     // Organize timeline items by track
@@ -534,6 +626,135 @@ export const patchProject = async (req, res) => {
   }
 };
 
+// Upload rendered project audio file to Cloudinary
+export const uploadProjectAudioFile = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Audio file is required",
+      });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    if (project.creatorId.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the project owner can upload exports",
+      });
+    }
+
+    if (project.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        message: "Project must be active before uploading audio",
+      });
+    }
+
+    const folder = `projects/${projectId}/exports`;
+    const uploadResult = await uploadFromBuffer(
+      req.file.buffer,
+      folder,
+      "video"
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Project audio uploaded successfully",
+      data: {
+        publicId: uploadResult.public_id,
+        cloudinaryUrl: uploadResult.secure_url,
+        url: uploadResult.secure_url || uploadResult.url,
+        duration: uploadResult.duration,
+        bytes: uploadResult.bytes,
+        format: uploadResult.format,
+        folder,
+      },
+    });
+  } catch (error) {
+    console.error("Error uploading project audio:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to upload project audio",
+      error: error.message,
+    });
+  }
+};
+
+// Save exported project audio metadata (audioUrl, duration, waveformData)
+export const exportProjectAudio = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+    const { audioUrl, audioDuration, waveformData } = req.body || {};
+
+    if (!audioUrl) {
+      return res.status(400).json({
+        success: false,
+        message: "audioUrl is required for project export",
+      });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    // Only owner can save export metadata
+    if (project.creatorId.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the project owner can export the project",
+      });
+    }
+
+    // Only allow export for active projects
+    if (project.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        message: "Project must be active before exporting audio",
+      });
+    }
+
+    project.audioUrl = audioUrl;
+    if (typeof audioDuration === "number" && audioDuration > 0) {
+      project.audioDuration = audioDuration;
+    }
+    if (Array.isArray(waveformData) && waveformData.length) {
+      project.waveformData = waveformData;
+    }
+    project.exportedAt = new Date();
+
+    await project.save();
+
+    res.json({
+      success: true,
+      message: "Project export saved successfully",
+      data: normalizeProjectResponse(project),
+    });
+  } catch (error) {
+    console.error("Error saving project export:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to save project export",
+      error: error.message,
+    });
+  }
+};
+
 // Get all available instruments
 // export const getInstruments = async (req, res) => {
 //   try {
@@ -604,6 +825,156 @@ export const deleteProject = async (req, res) => {
   }
 };
 
+export const getProjectCollabState = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+    const fromVersion = Number(req.query.fromVersion || 0);
+
+    const project = await Project.findById(projectId).populate(
+      "creatorId",
+      "username displayName avatarUrl"
+    );
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const isOwner = project.creatorId?._id?.toString?.() === userId;
+    const collaborator = await ProjectCollaborator.findOne({
+      projectId: project._id,
+      userId: new mongoose.Types.ObjectId(userId),
+      status: "accepted",
+    });
+
+    if (!isOwner && !collaborator && !project.isPublic) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this project",
+      });
+    }
+
+    const collabState = await getCollabState(projectId);
+    let snapshotPayload = collabState.snapshot;
+
+    const hydrateSnapshot = async () => {
+      const tracks = await ProjectTrack.find({ projectId: project._id })
+        .sort({ trackOrder: 1 })
+        .lean();
+      const trackIds = tracks.map((t) => t._id);
+      const timelineItems = trackIds.length
+        ? await ProjectTimelineItem.find({ trackId: { $in: trackIds } })
+            .populate("lickId", "title audioUrl duration waveformData")
+            .populate("userId", "username displayName avatarUrl")
+            .sort({ startTime: 1 })
+            .lean()
+        : [];
+
+      const tracksWithItems = tracks.map((track) => ({
+        ...track,
+        items: timelineItems
+          .filter(
+            (item) => String(item.trackId) === String(track._id ?? track.id)
+          )
+          .map((item) => ({
+            ...item,
+          })),
+      }));
+
+      return {
+        project: normalizeProjectResponse(project),
+        tracks: tracksWithItems,
+      };
+    };
+
+    const snapshotMissingItems =
+      snapshotPayload &&
+      Array.isArray(snapshotPayload.tracks) &&
+      snapshotPayload.tracks.some(
+        (track) =>
+          !Array.isArray(track?.items) || track.items.length === undefined
+      );
+
+    if (!snapshotPayload || snapshotMissingItems) {
+      snapshotPayload = await hydrateSnapshot();
+      await setSnapshot(projectId, snapshotPayload, collabState.version);
+    }
+
+    const ops = await getMissingOps(projectId, fromVersion);
+
+    res.json({
+      success: true,
+      data: {
+        version: collabState.version,
+        snapshot: snapshotPayload,
+        ops,
+      },
+    });
+  } catch (error) {
+    console.error("[ProjectController] getProjectCollabState error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch collaboration state",
+    });
+  }
+};
+
+export const getProjectCollabDebug = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+    const sinceVersion = Number(req.query.since || 0);
+
+    const project = await Project.findById(projectId).select(
+      "creatorId isPublic"
+    );
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    const isOwner = String(project.creatorId) === String(userId);
+    const collaborator = await ProjectCollaborator.findOne({
+      projectId: project._id,
+      userId: new mongoose.Types.ObjectId(userId),
+      status: "accepted",
+    });
+
+    if (!isOwner && !collaborator && !project.isPublic) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this project",
+      });
+    }
+
+    const state = await getCollabState(projectId);
+    const ops = await getMissingOps(projectId, sinceVersion);
+
+    res.json({
+      success: true,
+      data: {
+        projectId,
+        version: state.version,
+        updatedAt: state.updatedAt,
+        snapshotAvailable: !!state.snapshot,
+        snapshotKeys: state.snapshot ? Object.keys(state.snapshot) : [],
+        ops,
+      },
+    });
+  } catch (error) {
+    console.error("[ProjectController] getProjectCollabDebug error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch collaboration debug info",
+    });
+  }
+};
+
 // Add clip to timeline
 export const addLickToTimeline = async (req, res) => {
   try {
@@ -648,16 +1019,14 @@ export const addLickToTimeline = async (req, res) => {
       });
     }
 
-    const isOwner = project.creatorId.toString() === userId;
-    const collaborator = await ProjectCollaborator.findOne({
-      projectId: project._id,
-      userId: new mongoose.Types.ObjectId(userId),
-    });
+    // Check edit permission - only owner and accepted collaborators (not viewers) can edit
+    const { canEdit } = await checkEditPermission(projectId, userId);
 
-    if (!isOwner && !collaborator) {
+    if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have access to this project",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -782,16 +1151,14 @@ export const updateTimelineItem = async (req, res) => {
       });
     }
 
-    const isOwner = project.creatorId.toString() === userId;
-    const collaborator = await ProjectCollaborator.findOne({
-      projectId: project._id,
-      userId: new mongoose.Types.ObjectId(userId),
-    });
+    // Check edit permission - only owner and accepted collaborators (not viewers) can edit
+    const { canEdit } = await checkEditPermission(projectId, userId);
 
-    if (!isOwner && (!collaborator || collaborator.role === "viewer")) {
+    if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -966,27 +1333,18 @@ export const bulkUpdateTimelineItems = async (req, res) => {
       });
     }
 
-    const isOwner = project.creatorId.toString() === userId;
-    let collaborator = null;
+    // Check edit permission - only owner and accepted collaborators (not viewers) can edit
+    const { canEdit } = await checkEditPermission(projectId, userId);
 
-    if (!isOwner) {
-      try {
-        collaborator = await ProjectCollaborator.findOne({
-          projectId: project._id,
-          userId: new mongoose.Types.ObjectId(userId),
-        });
-      } catch (err) {
-        console.error("Error checking collaborator:", err);
-        // Continue as if not collaborator, will fail permission check below
-      }
-    }
-
-    if (!isOwner && (!collaborator || collaborator.role === "viewer")) {
+    if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
+
+    // Permission already checked by checkEditPermission above
 
     const sanitizeOne = (payload = {}) => {
       const update = {};
@@ -1125,16 +1483,14 @@ export const deleteTimelineItem = async (req, res) => {
       });
     }
 
-    const isOwner = project.creatorId.toString() === userId;
-    const collaborator = await ProjectCollaborator.findOne({
-      projectId: project._id,
-      userId: new mongoose.Types.ObjectId(userId),
-    });
+    // Check edit permission - only owner and accepted collaborators (not viewers) can edit
+    const { canEdit } = await checkEditPermission(projectId, userId);
 
-    if (!isOwner && (!collaborator || collaborator.role === "viewer")) {
+    if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -1188,16 +1544,14 @@ export const updateChordProgression = async (req, res) => {
       });
     }
 
-    const isOwner = project.creatorId.toString() === userId;
-    const collaborator = await ProjectCollaborator.findOne({
-      projectId: project._id,
-      userId: new mongoose.Types.ObjectId(userId),
-    });
+    // Check edit permission - only owner and accepted collaborators (not viewers) can edit
+    const { canEdit } = await checkEditPermission(projectId, userId);
 
-    if (!isOwner && (!collaborator || collaborator.role === "viewer")) {
+    if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -1263,16 +1617,26 @@ export const addTrack = async (req, res) => {
       });
     }
 
-    const isOwner = project.creatorId.toString() === userId;
-    const collaborator = await ProjectCollaborator.findOne({
-      projectId: project._id,
-      userId: new mongoose.Types.ObjectId(userId),
-    });
+    // Check edit permission - only owner and accepted collaborators (not viewers) can edit
+    const { canEdit } = await checkEditPermission(projectId, userId);
 
-    if (!isOwner && (!collaborator || collaborator.role === "viewer")) {
+    if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
+      });
+    }
+
+    // Check track limit (max 10 tracks per project)
+    const trackCount = await ProjectTrack.countDocuments({
+      projectId: project._id,
+    });
+    if (trackCount >= 10) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Maximum of 10 tracks allowed per project. Please remove a track before adding a new one.",
       });
     }
 
@@ -1365,16 +1729,14 @@ export const updateTrack = async (req, res) => {
       });
     }
 
-    const isOwner = project.creatorId.toString() === userId;
-    const collaborator = await ProjectCollaborator.findOne({
-      projectId: project._id,
-      userId: new mongoose.Types.ObjectId(userId),
-    });
+    // Check edit permission - only owner and accepted collaborators (not viewers) can edit
+    const { canEdit } = await checkEditPermission(projectId, userId);
 
-    if (!isOwner && (!collaborator || collaborator.role === "viewer")) {
+    if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -1470,16 +1832,14 @@ export const deleteTrack = async (req, res) => {
       });
     }
 
-    const isOwner = project.creatorId.toString() === userId;
-    const collaborator = await ProjectCollaborator.findOne({
-      projectId: project._id,
-      userId: new mongoose.Types.ObjectId(userId),
-    });
+    // Check edit permission - only owner and accepted collaborators (not viewers) can edit
+    const { canEdit } = await checkEditPermission(projectId, userId);
 
-    if (!isOwner && (!collaborator || collaborator.role === "viewer")) {
+    if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have permission to edit this project",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -1634,16 +1994,14 @@ export const generateBackingTrack = async (req, res) => {
       });
     }
 
-    const isOwner = project.creatorId.toString() === userId;
-    const collaborator = await ProjectCollaborator.findOne({
-      projectId: project._id,
-      userId: new mongoose.Types.ObjectId(userId),
-    });
+    // Check edit permission - only owner and accepted collaborators (not viewers) can edit
+    const { canEdit } = await checkEditPermission(projectId, userId);
 
-    if (!isOwner && !collaborator) {
+    if (!canEdit) {
       return res.status(403).json({
         success: false,
-        message: "You do not have access to this project",
+        message:
+          "You do not have permission to edit this project. Please accept the invitation first.",
       });
     }
 
@@ -2124,6 +2482,451 @@ export const getInstruments = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch instruments",
+      error: error.message,
+    });
+  }
+};
+
+// Phase 5: Invite collaborator to project
+export const inviteCollaborator = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { email, role = "contributor" } = req.body;
+    const userId = req.userId;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    // Validate role
+    const validRoles = ["viewer", "contributor", "admin"];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+      });
+    }
+
+    // Find project
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    // Check if user is owner or admin
+    const isOwner = String(project.creatorId) === String(userId);
+    const userCollaborator = await ProjectCollaborator.findOne({
+      projectId,
+      userId,
+      role: { $in: ["admin"] },
+    });
+
+    if (!isOwner && !userCollaborator) {
+      return res.status(403).json({
+        success: false,
+        message: "Only project owners and admins can invite collaborators",
+      });
+    }
+
+    // Find user by email
+    const invitedUser = await User.findOne({ email: email.toLowerCase() });
+    if (!invitedUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User with this email not found",
+      });
+    }
+
+    // Check if already a collaborator
+    const existingCollaborator = await ProjectCollaborator.findOne({
+      projectId,
+      userId: invitedUser._id,
+    });
+
+    if (existingCollaborator) {
+      // If declined, allow re-inviting by updating status to pending
+      if (existingCollaborator.status === "declined") {
+        existingCollaborator.status = "pending";
+        existingCollaborator.role = role;
+        await existingCollaborator.save();
+
+        // Create new notification
+        const inviter = await User.findById(userId);
+        const notification = new Notification({
+          userId: invitedUser._id,
+          type: "project_invite",
+          actorId: userId,
+          message: `${
+            inviter?.displayName || inviter?.username || "Someone"
+          } invited you to collaborate on "${project.title}"`,
+          linkUrl: `/projects/${projectId}`,
+        });
+        await notification.save();
+
+        return res.json({
+          success: true,
+          message: "Invitation sent successfully",
+          data: {
+            collaborator: existingCollaborator,
+            user: {
+              _id: invitedUser._id,
+              displayName: invitedUser.displayName,
+              username: invitedUser.username,
+              avatarUrl: invitedUser.avatarUrl,
+              email: invitedUser.email,
+            },
+          },
+        });
+      }
+
+      // If pending, update role if different and resend notification
+      if (existingCollaborator.status === "pending") {
+        if (existingCollaborator.role !== role) {
+          existingCollaborator.role = role;
+          await existingCollaborator.save();
+        }
+
+        // Create new notification to remind them
+        const inviter = await User.findById(userId);
+        const notification = new Notification({
+          userId: invitedUser._id,
+          type: "project_invite",
+          actorId: userId,
+          message: `${
+            inviter?.displayName || inviter?.username || "Someone"
+          } invited you to collaborate on "${project.title}"`,
+          linkUrl: `/projects/${projectId}`,
+        });
+        await notification.save();
+
+        return res.json({
+          success: true,
+          message: "Invitation updated and resent",
+          data: {
+            collaborator: existingCollaborator,
+            user: {
+              _id: invitedUser._id,
+              displayName: invitedUser.displayName,
+              username: invitedUser.username,
+              avatarUrl: invitedUser.avatarUrl,
+              email: invitedUser.email,
+            },
+          },
+        });
+      }
+
+      // If already accepted, check if role needs updating
+      if (existingCollaborator.status === "accepted") {
+        if (existingCollaborator.role !== role) {
+          existingCollaborator.role = role;
+          await existingCollaborator.save();
+          return res.json({
+            success: true,
+            message: "Collaborator role updated",
+            data: {
+              collaborator: existingCollaborator,
+              user: {
+                _id: invitedUser._id,
+                displayName: invitedUser.displayName,
+                username: invitedUser.username,
+                avatarUrl: invitedUser.avatarUrl,
+                email: invitedUser.email,
+              },
+            },
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          message: "User is already a collaborator with this role",
+        });
+      }
+    }
+
+    // Create new collaborator with pending status
+    const collaborator = new ProjectCollaborator({
+      projectId,
+      userId: invitedUser._id,
+      role,
+      status: "pending",
+    });
+    await collaborator.save();
+
+    // Get inviter info for notification
+    const inviter = await User.findById(userId);
+
+    // Create notification for the invited user
+    const notification = new Notification({
+      userId: invitedUser._id,
+      type: "project_invite",
+      actorId: userId,
+      message: `${
+        inviter?.displayName || inviter?.username || "Someone"
+      } invited you to collaborate on "${project.title}"`,
+      linkUrl: `/projects/${projectId}`,
+    });
+    await notification.save();
+
+    res.status(201).json({
+      success: true,
+      message: "Collaborator invited successfully",
+      data: {
+        collaborator,
+        user: {
+          _id: invitedUser._id,
+          displayName: invitedUser.displayName,
+          username: invitedUser.username,
+          avatarUrl: invitedUser.avatarUrl,
+          email: invitedUser.email,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error inviting collaborator:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to invite collaborator",
+      error: error.message,
+    });
+  }
+};
+
+// Accept project invitation
+export const acceptInvitation = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+
+    // Find collaboration (any status)
+    const collaborator = await ProjectCollaborator.findOne({
+      projectId,
+      userId,
+    });
+
+    if (!collaborator) {
+      return res.status(404).json({
+        success: false,
+        message: "Invitation not found",
+      });
+    }
+
+    // If already accepted, return success
+    if (collaborator.status === "accepted") {
+      // Mark related notification as read
+      await Notification.updateMany(
+        {
+          userId,
+          type: "project_invite",
+          linkUrl: `/projects/${projectId}`,
+          isRead: false,
+        },
+        { isRead: true }
+      );
+
+      return res.json({
+        success: true,
+        message: "You are already a collaborator on this project",
+        data: { collaborator },
+      });
+    }
+
+    // If declined, allow re-accepting
+    if (collaborator.status === "declined") {
+      collaborator.status = "accepted";
+      await collaborator.save();
+
+      // Mark related notification as read
+      await Notification.updateMany(
+        {
+          userId,
+          type: "project_invite",
+          linkUrl: `/projects/${projectId}`,
+          isRead: false,
+        },
+        { isRead: true }
+      );
+
+      return res.json({
+        success: true,
+        message: "Invitation accepted successfully",
+        data: { collaborator },
+      });
+    }
+
+    // If pending, accept it
+    if (collaborator.status === "pending") {
+      collaborator.status = "accepted";
+      await collaborator.save();
+
+      // Mark related notification as read
+      await Notification.updateMany(
+        {
+          userId,
+          type: "project_invite",
+          linkUrl: `/projects/${projectId}`,
+          isRead: false,
+        },
+        { isRead: true }
+      );
+
+      return res.json({
+        success: true,
+        message: "Invitation accepted successfully",
+        data: { collaborator },
+      });
+    }
+
+    // Should not reach here, but handle unknown status
+    return res.status(400).json({
+      success: false,
+      message: "Invalid invitation status",
+    });
+  } catch (error) {
+    console.error("Error accepting invitation:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to accept invitation",
+      error: error.message,
+    });
+  }
+};
+
+// Decline project invitation
+export const declineInvitation = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+
+    // Find collaboration (any status, but typically pending)
+    const collaborator = await ProjectCollaborator.findOne({
+      projectId,
+      userId,
+    });
+
+    if (!collaborator) {
+      return res.status(404).json({
+        success: false,
+        message: "Invitation not found",
+      });
+    }
+
+    // If already declined, return success
+    if (collaborator.status === "declined") {
+      // Mark related notification as read
+      await Notification.updateMany(
+        {
+          userId,
+          type: "project_invite",
+          linkUrl: `/projects/${projectId}`,
+          isRead: false,
+        },
+        { isRead: true }
+      );
+
+      return res.json({
+        success: true,
+        message: "Invitation already declined",
+        data: { collaborator },
+      });
+    }
+
+    // Update status to declined
+    collaborator.status = "declined";
+    await collaborator.save();
+
+    // Mark related notification as read
+    await Notification.updateMany(
+      {
+        userId,
+        type: "project_invite",
+        linkUrl: `/projects/${projectId}`,
+        isRead: false,
+      },
+      { isRead: true }
+    );
+
+    res.json({
+      success: true,
+      message: "Invitation declined",
+      data: { collaborator },
+    });
+  } catch (error) {
+    console.error("Error declining invitation:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to decline invitation",
+      error: error.message,
+    });
+  }
+};
+
+// Remove collaborator from project (owner or admin only)
+export const removeCollaborator = async (req, res) => {
+  try {
+    const { projectId, userId: collaboratorUserId } = req.params;
+    const userId = req.userId; // Current user (owner/admin)
+
+    // Find project
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    // Prevent removing yourself before auth checks
+    if (String(collaboratorUserId) === String(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot remove yourself from your own project",
+      });
+    }
+
+    // Check if current user is owner or admin
+    const isOwner = String(project.creatorId) === String(userId);
+    const userCollaborator = await ProjectCollaborator.findOne({
+      projectId,
+      userId,
+      role: { $in: ["admin"] },
+      status: "accepted",
+    });
+
+    if (!isOwner && !userCollaborator) {
+      return res.status(403).json({
+        success: false,
+        message: "Only project owners and admins can remove collaborators",
+      });
+    }
+
+    // Find and remove the collaborator
+    const collaborator = await ProjectCollaborator.findOneAndDelete({
+      projectId,
+      userId: collaboratorUserId,
+    });
+
+    if (!collaborator) {
+      return res.status(404).json({
+        success: false,
+        message: "Collaborator not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Collaborator removed successfully",
+      data: { collaborator },
+    });
+  } catch (error) {
+    console.error("Error removing collaborator:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove collaborator",
       error: error.message,
     });
   }

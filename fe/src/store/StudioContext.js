@@ -1,72 +1,113 @@
 // src/store/StudioContext.js
-import React, { createContext, useContext, useReducer, useCallback } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useReducer,
+  useCallback,
+} from "react";
 
 // Initial State
 const initialState = {
   song: {
-    key: 'C',
+    key: "C",
     bpm: 120,
-    style: 'Swing',
+    style: "Swing",
     sections: [],
   },
   selectedSectionId: null,
   selectedBarIndex: null,
   bandSettings: {
-    style: 'Swing',
+    style: "Swing",
     volumes: { drums: 0.8, bass: 0.8, piano: 0.8 },
     mutes: { drums: false, bass: false, piano: false },
   },
   isPlaying: false,
   currentBeat: 0,
+  collaborators: [], // [{ userId, user: { displayName, avatarUrl }, cursor: { sectionId, barIndex } }]
+  isConnected: false,
 };
 
 // Action Types
 const ActionTypes = {
-  SET_KEY: 'SET_KEY',
-  SET_BPM: 'SET_BPM',
-  SET_STYLE: 'SET_STYLE',
-  ADD_SECTION: 'ADD_SECTION',
-  DELETE_SECTION: 'DELETE_SECTION',
-  UPDATE_CHORD: 'UPDATE_CHORD',
-  SELECT_BAR: 'SELECT_BAR',
-  ADD_LICK_TO_TIMELINE: 'ADD_LICK_TO_TIMELINE',
-  REMOVE_LICK_FROM_TIMELINE: 'REMOVE_LICK_FROM_TIMELINE',
-  MOVE_LICK_ON_TIMELINE: 'MOVE_LICK_ON_TIMELINE',
-  RESIZE_LICK_ON_TIMELINE: 'RESIZE_LICK_ON_TIMELINE',
-  SET_BAND_VOLUME: 'SET_BAND_VOLUME',
-  TOGGLE_MUTE: 'TOGGLE_MUTE',
-  SET_PLAYING: 'SET_PLAYING',
-  SET_CURRENT_BEAT: 'SET_CURRENT_BEAT',
-  LOAD_PROJECT: 'LOAD_PROJECT',
-  CLEAR_SELECTION: 'CLEAR_SELECTION',
+  SET_KEY: "SET_KEY",
+  SET_BPM: "SET_BPM",
+  SET_STYLE: "SET_STYLE",
+  ADD_SECTION: "ADD_SECTION",
+  DELETE_SECTION: "DELETE_SECTION",
+  UPDATE_CHORD: "UPDATE_CHORD",
+  SELECT_BAR: "SELECT_BAR",
+  ADD_LICK_TO_TIMELINE: "ADD_LICK_TO_TIMELINE",
+  REMOVE_LICK_FROM_TIMELINE: "REMOVE_LICK_FROM_TIMELINE",
+  MOVE_LICK_ON_TIMELINE: "MOVE_LICK_ON_TIMELINE",
+  RESIZE_LICK_ON_TIMELINE: "RESIZE_LICK_ON_TIMELINE",
+  SET_BAND_VOLUME: "SET_BAND_VOLUME",
+  TOGGLE_MUTE: "TOGGLE_MUTE",
+  SET_PLAYING: "SET_PLAYING",
+  SET_CURRENT_BEAT: "SET_CURRENT_BEAT",
+  LOAD_PROJECT: "LOAD_PROJECT",
+  CLEAR_SELECTION: "CLEAR_SELECTION",
+  SET_COLLABORATORS: "SET_COLLABORATORS",
+  ADD_COLLABORATOR: "ADD_COLLABORATOR",
+  REMOVE_COLLABORATOR: "REMOVE_COLLABORATOR",
+  UPDATE_COLLABORATOR_CURSOR: "UPDATE_COLLABORATOR_CURSOR",
+  SET_CONNECTION_STATUS: "SET_CONNECTION_STATUS",
 };
 
-const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+const generateId = () =>
+  `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
 const getDiatonicChords = (key) => {
-  const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-  
+  const notes = [
+    "C",
+    "C#",
+    "D",
+    "D#",
+    "E",
+    "F",
+    "F#",
+    "G",
+    "G#",
+    "A",
+    "A#",
+    "B",
+  ];
+
   // Handle key as object (new format) or string (legacy format)
   let keyString;
   if (typeof key === "object" && key !== null) {
     // New format: { root, scale, name }
-    keyString = key.name || `${notes[key.root || 0]} ${key.scale === "minor" ? "Minor" : "Major"}`;
+    keyString =
+      key.name ||
+      `${notes[key.root || 0]} ${key.scale === "minor" ? "Minor" : "Major"}`;
   } else {
     // Legacy format: string
     keyString = key || "C Major";
   }
-  
-  const keyIndex = notes.indexOf(keyString.replace('m', '').replace(' Major', '').replace(' Minor', '').split(' ')[0] || 'C');
-  const isMinor = keyString.toLowerCase().includes('minor') || (keyString.toLowerCase().includes('m') && !keyString.toLowerCase().includes('major'));
+
+  const keyIndex = notes.indexOf(
+    keyString
+      .replace("m", "")
+      .replace(" Major", "")
+      .replace(" Minor", "")
+      .split(" ")[0] || "C"
+  );
+  const isMinor =
+    keyString.toLowerCase().includes("minor") ||
+    (keyString.toLowerCase().includes("m") &&
+      !keyString.toLowerCase().includes("major"));
 
   if (isMinor) {
     const intervals = [0, 2, 3, 5, 7, 8, 10];
-    const qualities = ['m7', 'm7b5', 'maj7', 'm7', 'm7', 'maj7', '7'];
-    return intervals.map((interval, i) => notes[(keyIndex + interval) % 12] + qualities[i]);
+    const qualities = ["m7", "m7b5", "maj7", "m7", "m7", "maj7", "7"];
+    return intervals.map(
+      (interval, i) => notes[(keyIndex + interval) % 12] + qualities[i]
+    );
   } else {
     const intervals = [0, 2, 4, 5, 7, 9, 11];
-    const qualities = ['maj7', 'm7', 'm7', 'maj7', '7', 'm7', 'm7b5'];
-    return intervals.map((interval, i) => notes[(keyIndex + interval) % 12] + qualities[i]);
+    const qualities = ["maj7", "m7", "m7", "maj7", "7", "m7", "m7b5"];
+    return intervals.map(
+      (interval, i) => notes[(keyIndex + interval) % 12] + qualities[i]
+    );
   }
 };
 
@@ -89,7 +130,7 @@ function studioReducer(state, action) {
       const newSection = {
         id: generateId(),
         label: action.payload,
-        bars: Array(8).fill(''),
+        bars: Array(8).fill(""),
         licks: [],
       };
       return {
@@ -105,8 +146,14 @@ function studioReducer(state, action) {
           ...state.song,
           sections: state.song.sections.filter((s) => s.id !== action.payload),
         },
-        selectedSectionId: state.selectedSectionId === action.payload ? null : state.selectedSectionId,
-        selectedBarIndex: state.selectedSectionId === action.payload ? null : state.selectedBarIndex,
+        selectedSectionId:
+          state.selectedSectionId === action.payload
+            ? null
+            : state.selectedSectionId,
+        selectedBarIndex:
+          state.selectedSectionId === action.payload
+            ? null
+            : state.selectedBarIndex,
       };
 
     case ActionTypes.UPDATE_CHORD: {
@@ -131,7 +178,9 @@ function studioReducer(state, action) {
       const currentSection = newSections.find((s) => s.id === targetSectionId);
 
       if (currentSection && nextBarIndex >= currentSection.bars.length) {
-        const currentIndex = newSections.findIndex((s) => s.id === targetSectionId);
+        const currentIndex = newSections.findIndex(
+          (s) => s.id === targetSectionId
+        );
         if (currentIndex < newSections.length - 1) {
           nextSectionId = newSections[currentIndex + 1].id;
           nextBarIndex = 0;
@@ -167,7 +216,7 @@ function studioReducer(state, action) {
       const lickInstance = {
         id: generateId(),
         lickId: lickData?._id || lickData?.id || generateId(),
-        name: lickData?.title || lickData?.name || 'Lick',
+        name: lickData?.title || lickData?.name || "Lick",
         startBar: barIndex,
         duration: lickData?.duration || lickData?.length || 2,
         audioUrl:
@@ -182,7 +231,9 @@ function studioReducer(state, action) {
       const newSections = state.song.sections.map((section) => {
         if (section.id === sectionId) {
           const existing = Array.isArray(section.licks) ? section.licks : [];
-          const updatedLicks = [...existing, lickInstance].sort((a, b) => a.startBar - b.startBar);
+          const updatedLicks = [...existing, lickInstance].sort(
+            (a, b) => a.startBar - b.startBar
+          );
           return { ...section, licks: updatedLicks };
         }
         return section;
@@ -207,8 +258,14 @@ function studioReducer(state, action) {
     }
 
     case ActionTypes.MOVE_LICK_ON_TIMELINE: {
-      const { fromSectionId, toSectionId, lickId, newBarIndex } = action.payload;
-      if (!fromSectionId || !toSectionId || newBarIndex === null || newBarIndex === undefined) {
+      const { fromSectionId, toSectionId, lickId, newBarIndex } =
+        action.payload;
+      if (
+        !fromSectionId ||
+        !toSectionId ||
+        newBarIndex === null ||
+        newBarIndex === undefined
+      ) {
         return state;
       }
 
@@ -240,14 +297,17 @@ function studioReducer(state, action) {
       targetSection.licks = [...targetSection.licks, lickInstance].sort(
         (a, b) => a.startBar - b.startBar
       );
-      sourceSection.licks = [...sourceSection.licks].sort((a, b) => a.startBar - b.startBar);
+      sourceSection.licks = [...sourceSection.licks].sort(
+        (a, b) => a.startBar - b.startBar
+      );
 
       return { ...state, song: { ...state.song, sections: newSections } };
     }
 
     case ActionTypes.RESIZE_LICK_ON_TIMELINE: {
       const { sectionId, lickId, newStartBar, newDuration } = action.payload;
-      if (!sectionId || newStartBar === null || newDuration === null) return state;
+      if (!sectionId || newStartBar === null || newDuration === null)
+        return state;
       const newSections = state.song.sections.map((section) => ({
         ...section,
         licks: Array.isArray(section.licks) ? [...section.licks] : [],
@@ -260,11 +320,16 @@ function studioReducer(state, action) {
 
       const barsLength = section.bars.length || 8;
       const clampedStart = Math.max(0, Math.min(newStartBar, barsLength - 1));
-      const clampedDuration = Math.max(1, Math.min(newDuration, barsLength - clampedStart));
+      const clampedDuration = Math.max(
+        1,
+        Math.min(newDuration, barsLength - clampedStart)
+      );
 
       lick.startBar = clampedStart;
       lick.duration = clampedDuration;
-      section.licks = [...section.licks].sort((a, b) => a.startBar - b.startBar);
+      section.licks = [...section.licks].sort(
+        (a, b) => a.startBar - b.startBar
+      );
 
       return { ...state, song: { ...state.song, sections: newSections } };
     }
@@ -305,14 +370,50 @@ function studioReducer(state, action) {
       return {
         ...state,
         song: {
-          key: project.key || 'C',
+          key: project.key || "C",
           bpm: project.bpm || 120,
-          style: project.style || 'Swing',
+          style: project.style || "Swing",
           sections: project.sections || [],
         },
         bandSettings: project.bandSettings || state.bandSettings,
       };
     }
+
+    case ActionTypes.SET_COLLABORATORS:
+      return { ...state, collaborators: action.payload || [] };
+
+    case ActionTypes.ADD_COLLABORATOR: {
+      const collaborator = action.payload;
+      const exists = state.collaborators.some(
+        (c) => c.userId === collaborator.userId
+      );
+      if (exists) return state;
+      return {
+        ...state,
+        collaborators: [...state.collaborators, collaborator],
+      };
+    }
+
+    case ActionTypes.REMOVE_COLLABORATOR: {
+      const userId = action.payload;
+      return {
+        ...state,
+        collaborators: state.collaborators.filter((c) => c.userId !== userId),
+      };
+    }
+
+    case ActionTypes.UPDATE_COLLABORATOR_CURSOR: {
+      const { userId, cursor } = action.payload;
+      return {
+        ...state,
+        collaborators: state.collaborators.map((c) =>
+          c.userId === userId ? { ...c, cursor } : c
+        ),
+      };
+    }
+
+    case ActionTypes.SET_CONNECTION_STATUS:
+      return { ...state, isConnected: action.payload };
 
     default:
       return state;
@@ -324,52 +425,157 @@ const StudioContext = createContext(null);
 export function StudioProvider({ children }) {
   const [state, dispatch] = useReducer(studioReducer, initialState);
 
+  // Note: broadcast and broadcastCursor will be injected by useProjectCollaboration hook
+  // They are passed via context value, not defined here
   const actions = {
-    setKey: useCallback((key) => dispatch({ type: ActionTypes.SET_KEY, payload: key }), []),
-    setBpm: useCallback((bpm) => dispatch({ type: ActionTypes.SET_BPM, payload: bpm }), []),
-    setStyle: useCallback((style) => dispatch({ type: ActionTypes.SET_STYLE, payload: style }), []),
-    addSection: useCallback((label) => dispatch({ type: ActionTypes.ADD_SECTION, payload: label }), []),
-    deleteSection: useCallback((sectionId) => dispatch({ type: ActionTypes.DELETE_SECTION, payload: sectionId }), []),
-    updateChord: useCallback((chord, sectionId = null, barIndex = null) => {
-      dispatch({ type: ActionTypes.UPDATE_CHORD, payload: { chord, sectionId, barIndex } });
+    setKey: useCallback((key, isRemote = false) => {
+      dispatch({ type: ActionTypes.SET_KEY, payload: key });
     }, []),
-    selectBar: useCallback((sectionId, barIndex) => {
-      dispatch({ type: ActionTypes.SELECT_BAR, payload: { sectionId, barIndex } });
+    setBpm: useCallback((bpm, isRemote = false) => {
+      dispatch({ type: ActionTypes.SET_BPM, payload: bpm });
     }, []),
-    clearSelection: useCallback(() => dispatch({ type: ActionTypes.CLEAR_SELECTION }), []),
-    addLickToTimeline: useCallback((sectionId, barIndex, lickData) => {
-      dispatch({ type: ActionTypes.ADD_LICK_TO_TIMELINE, payload: { sectionId, barIndex, lickData } });
+    setStyle: useCallback((style, isRemote = false) => {
+      dispatch({ type: ActionTypes.SET_STYLE, payload: style });
     }, []),
-    removeLickFromTimeline: useCallback((sectionId, lickInstanceId) => {
-      dispatch({ type: ActionTypes.REMOVE_LICK_FROM_TIMELINE, payload: { sectionId, lickInstanceId } });
+    addSection: useCallback((label, isRemote = false) => {
+      dispatch({ type: ActionTypes.ADD_SECTION, payload: label });
     }, []),
-    moveLickOnTimeline: useCallback((fromSectionId, lickId, toSectionId, newBarIndex) => {
+    deleteSection: useCallback((sectionId, isRemote = false) => {
+      dispatch({ type: ActionTypes.DELETE_SECTION, payload: sectionId });
+    }, []),
+    updateChord: useCallback(
+      (chord, sectionId = null, barIndex = null, isRemote = false) => {
+        dispatch({
+          type: ActionTypes.UPDATE_CHORD,
+          payload: { chord, sectionId, barIndex },
+        });
+      },
+      []
+    ),
+    selectBar: useCallback((sectionId, barIndex, isRemote = false) => {
       dispatch({
-        type: ActionTypes.MOVE_LICK_ON_TIMELINE,
-        payload: { fromSectionId, toSectionId, lickId, newBarIndex },
+        type: ActionTypes.SELECT_BAR,
+        payload: { sectionId, barIndex },
       });
     }, []),
-    resizeLickOnTimeline: useCallback((sectionId, lickId, newStartBar, newDuration) => {
+    clearSelection: useCallback(
+      () => dispatch({ type: ActionTypes.CLEAR_SELECTION }),
+      []
+    ),
+    addLickToTimeline: useCallback(
+      (sectionId, barIndex, lickData, isRemote = false) => {
+        dispatch({
+          type: ActionTypes.ADD_LICK_TO_TIMELINE,
+          payload: { sectionId, barIndex, lickData },
+        });
+      },
+      []
+    ),
+    removeLickFromTimeline: useCallback(
+      (sectionId, lickInstanceId, isRemote = false) => {
+        dispatch({
+          type: ActionTypes.REMOVE_LICK_FROM_TIMELINE,
+          payload: { sectionId, lickInstanceId },
+        });
+      },
+      []
+    ),
+    moveLickOnTimeline: useCallback(
+      (fromSectionId, lickId, toSectionId, newBarIndex, isRemote = false) => {
+        dispatch({
+          type: ActionTypes.MOVE_LICK_ON_TIMELINE,
+          payload: { fromSectionId, toSectionId, lickId, newBarIndex },
+        });
+      },
+      []
+    ),
+    resizeLickOnTimeline: useCallback(
+      (sectionId, lickId, newStartBar, newDuration, isRemote = false) => {
+        dispatch({
+          type: ActionTypes.RESIZE_LICK_ON_TIMELINE,
+          payload: { sectionId, lickId, newStartBar, newDuration },
+        });
+      },
+      []
+    ),
+    setBandVolume: useCallback((instrument, volume, isRemote = false) => {
       dispatch({
-        type: ActionTypes.RESIZE_LICK_ON_TIMELINE,
-        payload: { sectionId, lickId, newStartBar, newDuration },
+        type: ActionTypes.SET_BAND_VOLUME,
+        payload: { instrument, volume },
       });
     }, []),
-    setBandVolume: useCallback((instrument, volume) => {
-      dispatch({ type: ActionTypes.SET_BAND_VOLUME, payload: { instrument, volume } });
-    }, []),
-    toggleMute: useCallback((instrument) => {
+    toggleMute: useCallback((instrument, isRemote = false) => {
       dispatch({ type: ActionTypes.TOGGLE_MUTE, payload: { instrument } });
     }, []),
-    setPlaying: useCallback((isPlaying) => dispatch({ type: ActionTypes.SET_PLAYING, payload: isPlaying }), []),
-    setCurrentBeat: useCallback((beat) => dispatch({ type: ActionTypes.SET_CURRENT_BEAT, payload: beat }), []),
-    loadProject: useCallback((project) => dispatch({ type: ActionTypes.LOAD_PROJECT, payload: project }), []),
+    updateBandSettings: useCallback(
+      (settings, isRemote = false) => {
+        dispatch({
+          type: ActionTypes.SET_STYLE,
+          payload: settings.style || state.bandSettings.style,
+        });
+        // Update volumes and mutes if provided
+        if (settings.volumes) {
+          Object.entries(settings.volumes).forEach(([instrument, volume]) => {
+            dispatch({
+              type: ActionTypes.SET_BAND_VOLUME,
+              payload: { instrument, volume },
+            });
+          });
+        }
+        if (settings.mutes) {
+          Object.entries(settings.mutes).forEach(([instrument, muted]) => {
+            if (muted !== state.bandSettings.mutes[instrument]) {
+              dispatch({
+                type: ActionTypes.TOGGLE_MUTE,
+                payload: { instrument },
+              });
+            }
+          });
+        }
+      },
+      [state.bandSettings]
+    ),
+    setPlaying: useCallback(
+      (isPlaying) =>
+        dispatch({ type: ActionTypes.SET_PLAYING, payload: isPlaying }),
+      []
+    ),
+    setCurrentBeat: useCallback(
+      (beat) => dispatch({ type: ActionTypes.SET_CURRENT_BEAT, payload: beat }),
+      []
+    ),
+    loadProject: useCallback(
+      (project) =>
+        dispatch({ type: ActionTypes.LOAD_PROJECT, payload: project }),
+      []
+    ),
+    // Collaboration actions
+    setCollaborators: useCallback((collaborators) => {
+      dispatch({ type: ActionTypes.SET_COLLABORATORS, payload: collaborators });
+    }, []),
+    addCollaborator: useCallback((collaborator) => {
+      dispatch({ type: ActionTypes.ADD_COLLABORATOR, payload: collaborator });
+    }, []),
+    removeCollaborator: useCallback((userId) => {
+      dispatch({ type: ActionTypes.REMOVE_COLLABORATOR, payload: userId });
+    }, []),
+    updateCollaboratorCursor: useCallback((userId, cursor) => {
+      dispatch({
+        type: ActionTypes.UPDATE_COLLABORATOR_CURSOR,
+        payload: { userId, cursor },
+      });
+    }, []),
+    setConnectionStatus: useCallback((status) => {
+      dispatch({ type: ActionTypes.SET_CONNECTION_STATUS, payload: status });
+    }, []),
   };
 
   const computed = {
     diatonicChords: getDiatonicChords(state.song.key),
     totalBars: state.song.sections.reduce((sum, s) => sum + s.bars.length, 0),
-    currentSection: state.song.sections.find((s) => s.id === state.selectedSectionId),
+    currentSection: state.song.sections.find(
+      (s) => s.id === state.selectedSectionId
+    ),
   };
 
   return (
@@ -382,10 +588,9 @@ export function StudioProvider({ children }) {
 export function useStudio() {
   const context = useContext(StudioContext);
   if (!context) {
-    throw new Error('useStudio must be used within a StudioProvider');
+    throw new Error("useStudio must be used within a StudioProvider");
   }
   return context;
 }
 
-export { getDiatonicChords };
-
+export { getDiatonicChords, StudioContext };
