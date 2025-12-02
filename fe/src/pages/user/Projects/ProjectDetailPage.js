@@ -83,6 +83,22 @@ import { useProjectChords } from "../../../hooks/useProjectChords";
 import { useProjectLicks } from "../../../hooks/useProjectLicks";
 import { useProjectSettings } from "../../../hooks/useProjectSettings";
 import { useProjectHistory } from "../../../hooks/useProjectHistory";
+// New extracted hooks
+import { useProjectData } from "../../../hooks/useProjectData";
+import { useProjectComputed } from "../../../hooks/useProjectComputed";
+import { useProjectCollaborationEvents } from "../../../hooks/useProjectCollaborationEvents";
+import { useProjectTracks } from "../../../hooks/useProjectTracks";
+import { useProjectPlayback } from "../../../hooks/useProjectPlayback";
+import { useProjectModals } from "../../../hooks/useProjectModals";
+import {
+  useProjectUI,
+  COLLAPSED_DECK_HEIGHT,
+  MIN_WORKSPACE_SCALE,
+  MAX_WORKSPACE_SCALE,
+  WORKSPACE_SCALE_STEP,
+} from "../../../hooks/useProjectUI";
+import { useProjectBackingTrack } from "../../../hooks/useProjectBackingTrack";
+import { useProjectMidiEditor } from "../../../hooks/useProjectMidiEditor";
 // Extracted components
 import TimelineView from "../../../components/ProjectTimeline/TimelineView";
 import ProjectSettingsPanel from "../../../components/ProjectSettings/ProjectSettingsPanel";
@@ -152,29 +168,19 @@ const ProjectDetailPage = () => {
   const { broadcast, broadcastCursor, broadcastEditingActivity } =
     useProjectCollaboration(projectId, user);
   const isRemoteUpdateRef = useRef(false);
-  const refreshProjectRef = useRef(null);
+
+  // Initialize modals hook (early, no dependencies)
+  const modalsHook = useProjectModals();
+
+  // Initialize UI hook (early, no dependencies)
+  const uiHook = useProjectUI();
 
   // Phase 4: Collaborator presence state
   const [collaborators, setCollaborators] = useState([]);
   const [activeEditors, setActiveEditors] = useState(new Map()); // Track who is editing what: { itemId: { userId, userName, avatarUrl } }
   const [isConnected, setIsConnected] = useState(false);
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [addTrackModalOpen, setAddTrackModalOpen] = useState(false);
-  const [newTrackName, setNewTrackName] = useState("");
-  const [addTrackError, setAddTrackError] = useState(null);
-  const [addTrackSuccess, setAddTrackSuccess] = useState(null);
 
-  // Project state (not in hooks)
-  const [project, setProject] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [userRole, setUserRole] = useState("viewer");
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [workspaceScale, setWorkspaceScale] = useState(0.9); // Overall UI scale
-
-  // UI State (not in hooks)
-  const [sidePanelOpen, setSidePanelOpen] = useState(true); // Bottom panel visibility
-  const [sidePanelWidth, setSidePanelWidth] = useState(450); // Bottom panel height (resizable)
+  // Band settings state (kept local as it's used by BandConsole)
   const [bandSettings, setBandSettings] = useState(() => {
     const members = DEFAULT_BAND_MEMBERS;
     const legacy = deriveLegacyMixFromMembers(members);
@@ -187,22 +193,20 @@ const ProjectDetailPage = () => {
     };
   });
   const [currentBeat, setCurrentBeat] = useState(0);
-  const [midiEditorOpen, setMidiEditorOpen] = useState(false);
-  const [editingTimelineItem, setEditingTimelineItem] = useState(null);
-  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
-  const [aiNotification, setAiNotification] = useState(null); // { type: 'success'|'error', message: '' }
-  const [trackContextMenu, setTrackContextMenu] = useState({
-    isOpen: false,
-    x: 0,
-    y: 0,
-    trackId: null,
-  });
 
   // Create refs for circular dependencies
   const pushHistoryRef = useRef(null);
 
   // Initialize hooks - must be called unconditionally before event handlers
   // Settings hook (needed first for bpm, key, time signature)
+  // Note: project will be set later by project data hook
+  const [project, setProject] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [userRole, setUserRole] = useState("viewer");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const refreshProjectRef = useRef(null);
+
   const settingsHook = useProjectSettings({
     projectId,
     project,
@@ -275,11 +279,6 @@ const ProjectDetailPage = () => {
     handleKeyChange,
   } = settingsHook || {};
 
-  const resolvedBackingInstrumentId = useMemo(
-    () => selectedInstrumentId || project?.backingInstrumentId || null,
-    [selectedInstrumentId, project?.backingInstrumentId]
-  );
-
   const {
     tracks,
     setTracks,
@@ -334,16 +333,6 @@ const ProjectDetailPage = () => {
     pixelsPerBeat,
     hasUnsavedTimelineChanges,
   } = timelineHook || {};
-
-  const instrumentHighlightId = useMemo(() => {
-    if (!selectedTrackId) return resolvedBackingInstrumentId;
-    const targetTrack = tracks.find((t) => t._id === selectedTrackId);
-    if (!targetTrack) return null;
-    if (targetTrack.isBackingTrack || targetTrack.trackType === "backing") {
-      return resolvedBackingInstrumentId;
-    }
-    return targetTrack.instrument || null;
-  }, [selectedTrackId, tracks, resolvedBackingInstrumentId]);
 
   const {
     chordProgression,
@@ -426,146 +415,79 @@ const ProjectDetailPage = () => {
     updateHistoryStatus,
   } = historyHook || {};
 
-  // Computed values that depend on hooks
-  const normalizedTimeSignature = useMemo(
-    () => normalizeTimeSignaturePayload(project?.timeSignature),
-    [project?.timeSignature]
-  );
-  const beatsPerMeasure = normalizedTimeSignature?.numerator || 4;
-  // Each chord in the STRUCTURE lane spans exactly one bar
-  const chordDurationSeconds = beatsPerMeasure * secondsPerBeat;
-  const projectSwingAmount = useMemo(
-    () => clampSwingAmount(project?.swingAmount ?? 0),
-    [project?.swingAmount]
-  );
-
-  // Rhythm Patterns lookup - depends on rhythmPatterns from hook
-  const rhythmPatternLookup = useMemo(() => {
-    const map = {};
-    (rhythmPatterns || []).forEach((pattern) => {
-      if (!pattern) return;
-      const normalized = normalizeRhythmPattern(pattern);
-      registerPatternLookupKey(map, pattern._id, normalized);
-      registerPatternLookupKey(map, pattern.id, normalized);
-      registerPatternLookupKey(map, pattern.slug, normalized);
-      registerPatternLookupKey(map, pattern.name, normalized);
-    });
-    return map;
-  }, [rhythmPatterns]);
-
-  const lookupRhythmPattern = useCallback(
-    (key) => lookupPatternFromMap(rhythmPatternLookup, key),
-    [rhythmPatternLookup]
-  );
-
-  const getRhythmPatternVisual = useCallback(
-    (item) => {
-      if (!item) return null;
-
-      const patternKeys = [
-        item.rhythmPatternId,
-        item.rhythmPattern,
-        item.rhythm?.patternId,
-        item.rhythm?.id,
-        item.rhythmPatternName,
-        item.rhythm?.name,
-      ].filter(Boolean);
-
-      const tryLookupPattern = () => {
-        for (const key of patternKeys) {
-          const found = lookupRhythmPattern(key);
-          if (found) return found;
-        }
-        return null;
-      };
-
-      const directSources = [
-        item.rhythmPatternSteps,
-        item.rhythmPatternData,
-        item.rhythm?.steps,
-        item.rhythm,
-      ];
-
-      for (const source of directSources) {
-        const steps = normalizeRhythmSteps(source);
-        if (steps.length) {
-          const matchedPattern = tryLookupPattern();
-          const label =
-            item.rhythmPatternName ||
-            item.rhythm?.name ||
-            matchedPattern?.displayName ||
-            null;
-          return { steps, label };
-        }
-      }
-
-      const matchedPattern = tryLookupPattern();
-      if (matchedPattern) {
-        return {
-          steps: matchedPattern.visualSteps,
-          label: matchedPattern.displayName,
-        };
-      }
-
-      if (selectedRhythmPatternId) {
-        const fallback = lookupRhythmPattern(selectedRhythmPatternId);
-        if (fallback) {
-          return {
-            steps: fallback.visualSteps,
-            label: fallback.displayName,
-          };
-        }
-      }
-
-      return {
-        steps: createDefaultPatternSteps(),
-        label: null,
-      };
-    },
-    [lookupRhythmPattern, selectedRhythmPatternId]
-  );
-
-  // Track-related computed values
-  const closeTrackMenu = useCallback(
-    () => setTrackContextMenu({ isOpen: false, x: 0, y: 0, trackId: null }),
-    []
-  );
-  const orderedTracks = useMemo(
+  // Compute orderedTracks separately (needed by both hooks)
+  const orderedTracksComputed = useMemo(
     () => [...tracks].sort((a, b) => (a.trackOrder ?? 0) - (b.trackOrder ?? 0)),
     [tracks]
   );
-  const userTracks = useMemo(
-    () =>
-      orderedTracks.filter(
-        (track) => !track.isBackingTrack && track.trackType !== "backing"
-      ),
-    [orderedTracks]
-  );
-  const hasAnyUserClips = useMemo(
-    () => userTracks.some((track) => (track.items || []).length > 0),
-    [userTracks]
-  );
-  const menuTrack = useMemo(
-    () =>
-      trackContextMenu.trackId
-        ? tracks.find((track) => track._id === trackContextMenu.trackId) || null
-        : null,
-    [trackContextMenu.trackId, tracks]
-  );
-  const menuPosition = useMemo(() => {
-    const padding = 12;
-    const width = 260;
-    const height = 320;
-    let x = trackContextMenu.x;
-    let y = trackContextMenu.y;
 
-    if (typeof window !== "undefined") {
-      x = Math.min(Math.max(padding, x), window.innerWidth - width - padding);
-      y = Math.min(Math.max(padding, y), window.innerHeight - height - padding);
-    }
+  // Initialize tracks hook (needs to be before computed for trackContextMenu)
+  const tracksHook = useProjectTracks({
+    projectId,
+    tracks,
+    setTracks: timelineHook?.setTracks,
+    pushHistory,
+    broadcast,
+    refreshProject: () => refreshProjectRef.current?.(),
+    setBackingTrack: chordsHook?.setBackingTrack,
+    setFocusedClipId: timelineHook?.setFocusedClipId,
+    focusedClipId: timelineHook?.focusedClipId,
+    orderedTracks: orderedTracksComputed,
+  });
 
-    return { x, y };
-  }, [trackContextMenu.x, trackContextMenu.y]);
+  // Initialize computed values hook (needs trackContextMenu from tracks hook)
+  const computedValues = useProjectComputed({
+    project,
+    tracks,
+    chordProgression: chordsHook?.chordProgression || [],
+    projectId,
+    availableLicks: licksHook?.availableLicks || [],
+    selectedInstrumentId,
+    selectedTrackId,
+    selectedRhythmPatternId,
+    rhythmPatterns,
+    trackContextMenu: tracksHook?.trackContextMenu,
+    secondsPerBeat,
+    playbackPosition,
+  });
+
+  const {
+    resolvedBackingInstrumentId,
+    instrumentHighlightId,
+    normalizedTimeSignature,
+    beatsPerMeasure,
+    chordDurationSeconds,
+    projectSwingAmount,
+    getRhythmPatternVisual,
+    orderedTracks,
+    userTracks,
+    hasAnyUserClips,
+    menuTrack,
+    menuPosition,
+    formattedPlayTime,
+    studioSeed,
+  } = computedValues;
+
+  const {
+    trackContextMenu,
+    addTrackModalOpen,
+    newTrackName,
+    addTrackError,
+    addTrackSuccess,
+    setAddTrackModalOpen,
+    setNewTrackName,
+    setAddTrackError,
+    setAddTrackSuccess,
+    openTrackMenu,
+    closeTrackMenu,
+    handleAddTrack,
+    handleConfirmAddTrack,
+    handleUpdateTrack,
+    handleTrackRename,
+    handleTrackColorChange,
+    handleTrackMove,
+    handleTrackDelete,
+  } = tracksHook || {};
 
   // Helper functions
   const updateBandSettings = (updater) => {
@@ -584,485 +506,57 @@ const ProjectDetailPage = () => {
     });
   };
 
-  const startPerformanceDeckResize = (e) => {
-    if (!sidePanelOpen) return;
-    e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = sidePanelWidth;
+  // Extract UI values from hook
+  const {
+    sidePanelOpen,
+    sidePanelWidth,
+    workspaceScale,
+    setSidePanelOpen,
+    setSidePanelWidth,
+    setWorkspaceScale,
+    startPerformanceDeckResize,
+    adjustWorkspaceScale,
+  } = uiHook || {};
 
-    const handleMouseMove = (moveEvent) => {
-      const diff = startY - moveEvent.clientY; // Inverted for bottom panel
-      const newHeight = Math.max(200, Math.min(500, startHeight + diff));
-      setSidePanelWidth(newHeight);
-    };
+  // Extract modal values from hook
+  const {
+    inviteModalOpen,
+    setInviteModalOpen,
+    midiEditorOpen,
+    setMidiEditorOpen,
+    editingTimelineItem,
+    setEditingTimelineItem,
+    isGeneratingAI,
+    setIsGeneratingAI,
+    aiNotification,
+    setAiNotification,
+  } = modalsHook || {};
 
-    const handleMouseUp = () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
+  // Initialize collaboration events hook
+  useProjectCollaborationEvents({
+    project,
+    setProject,
+    collaborators,
+    setCollaborators,
+    setActiveEditors,
+    setIsConnected,
+    setTracks: timelineHook?.setTracks,
+    setChordProgression: chordsHook?.setChordProgression,
+    saveChordProgression: chordsHook?.saveChordProgression,
+    setTempoDraft: settingsHook?.setTempoDraft,
+    setSwingDraft: settingsHook?.setSwingDraft,
+    refreshProjectRef,
+    currentUserId,
+    currentUserProfile,
+    userRole,
+    isRemoteUpdateRef,
+  });
 
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-  };
-
-  const adjustWorkspaceScale = useCallback((delta) => {
-    setWorkspaceScale((prev) => {
-      const next = parseFloat((prev + delta).toFixed(2));
-      return Math.min(MAX_WORKSPACE_SCALE, Math.max(MIN_WORKSPACE_SCALE, next));
-    });
-  }, []);
-
-  // Constants
-  const COLLAPSED_DECK_HEIGHT = 44;
-  const MIN_WORKSPACE_SCALE = 0.75;
-  const MAX_WORKSPACE_SCALE = 1.1;
-  const WORKSPACE_SCALE_STEP = 0.05;
-
-  // Audio engine
+  // Audio engine (still needed for some operations)
   const audioEngine = useAudioEngine();
   const { schedulePlayback, stopPlayback, loadClipAudio } = useAudioScheduler();
 
-  // Listen for remote collaboration updates
-  useEffect(() => {
-    const handleRemoteChordProgression = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      isRemoteUpdateRef.current = true;
-      const { chords } = payload || {};
-      saveChordProgression(chords, true).finally(() => {
-        isRemoteUpdateRef.current = false;
-      });
-    };
-
-    const handleRemoteLickAdd = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      const { trackId, item } = payload || {};
-
-      // Optimistically add the item immediately (Google Docs-like)
-      if (trackId && item) {
-        setTracks((prevTracks) =>
-          prevTracks.map((track) =>
-            track._id === trackId
-              ? {
-                  ...track,
-                  items: [...(track.items || []), normalizeTimelineItem(item)],
-                }
-              : track
-          )
-        );
-      }
-
-      // No delay - updates are already optimistic, refresh only for final sync
-      // Removed delay for instant updates
-    };
-
-    const handleRemoteTimelineUpdate = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      const { itemId, customMidiEvents, isCustomized, updates = {} } =
-        payload || {};
-
-      if (!itemId) return;
-      console.log("[Collaboration] Remote timeline update:", itemId);
-
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => {
-          const hasClip = (track.items || []).some(
-            (item) => item._id === itemId
-          );
-          if (!hasClip) return track;
-
-          return {
-            ...track,
-            items: (track.items || []).map((item) =>
-              item._id === itemId
-                ? normalizeTimelineItem({
-                    ...item,
-                    ...updates,
-                    customMidiEvents:
-                      customMidiEvents !== undefined
-                        ? customMidiEvents
-                        : item.customMidiEvents,
-                    isCustomized:
-                      isCustomized !== undefined
-                        ? isCustomized
-                        : item.isCustomized,
-                  })
-                : item
-            ),
-          };
-        })
-      );
-    };
-
-    const handleRemoteTimelineDelete = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      const { itemId } = payload || {};
-      if (!itemId) return;
-      console.log("[Collaboration] Remote timeline delete:", itemId);
-
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => ({
-          ...track,
-          items: (track.items || []).filter((item) => item._id !== itemId),
-        }))
-      );
-    };
-
-    const handleRemoteTimelineBulkUpdate = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      const { items } = payload || {};
-      if (!Array.isArray(items) || !items.length) return;
-      console.log(
-        "[Collaboration] Remote timeline bulk update:",
-        items.map((item) => item._id)
-      );
-
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => {
-          const updatedItems = (track.items || []).map((item) => {
-            const incoming = items.find((entry) => entry._id === item._id);
-            if (!incoming) return item;
-
-            return normalizeTimelineItem({
-              ...item,
-              ...incoming,
-            });
-          });
-
-          return {
-            ...track,
-            items: updatedItems,
-          };
-        })
-      );
-    };
-
-    const handleRemoteSettingsUpdate = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      const {
-        tempo,
-        swingAmount,
-        timeSignature,
-        key,
-        style,
-        backingInstrumentId,
-      } = payload || {};
-
-      // Apply settings updates optimistically
-      if (project) {
-        const updates = {};
-        if (tempo !== undefined) updates.tempo = tempo;
-        if (swingAmount !== undefined) updates.swingAmount = swingAmount;
-        if (timeSignature !== undefined) updates.timeSignature = timeSignature;
-        if (key !== undefined) updates.key = key;
-        if (style !== undefined) updates.style = style;
-        if (backingInstrumentId !== undefined)
-          updates.backingInstrumentId = backingInstrumentId;
-
-        if (Object.keys(updates).length > 0) {
-          setProject((prev) => (prev ? { ...prev, ...updates } : prev));
-
-          // Update draft values if they exist
-          if (tempo !== undefined) setTempoDraft(String(tempo));
-          if (swingAmount !== undefined) setSwingDraft(String(swingAmount));
-        }
-      }
-
-      // Removed refresh call - optimistic update is sufficient
-    };
-
-    const handleRemoteTrackAdd = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      const { track } = payload || {};
-      if (!track) return;
-      console.log("[Collaboration] Remote track add received:", track?._id);
-
-      const [normalizedTrack] =
-        normalizeTracks([track], TRACK_COLOR_PALETTE) || [];
-      if (!normalizedTrack) return;
-
-      setTracks((prev) => {
-        const exists = prev.some((t) => t._id === normalizedTrack._id);
-        if (exists) {
-          return prev.map((t) =>
-            t._id === normalizedTrack._id ? { ...t, ...normalizedTrack } : t
-          );
-        }
-        return [...prev, normalizedTrack];
-      });
-    };
-
-    const handleRemoteTrackUpdate = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      const { trackId, updates } = payload || {};
-
-      // Optimistically update track in local state
-      if (trackId && updates) {
-        setTracks((prevTracks) =>
-          prevTracks.map((track) =>
-            track._id === trackId ? { ...track, ...updates } : track
-          )
-        );
-      }
-
-      // Removed refresh call - optimistic update is sufficient
-    };
-
-    const handleRemoteTrackDelete = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      const { trackId } = payload || {};
-
-      // Optimistically remove track from local state
-      if (trackId) {
-        setTracks((prev) => prev.filter((t) => t._id !== trackId));
-      }
-
-      // Removed refresh call - optimistic update is sufficient
-    };
-
-    const handleRemoteTimelinePositionUpdate = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      const { itemId, updates } = payload || {};
-
-      if (!itemId || !updates) return;
-
-      // Optimistically update timeline item position immediately (Google Docs-like)
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => {
-          const hasClip = (track.items || []).some(
-            (item) => item._id === itemId
-          );
-          if (!hasClip) return track;
-
-          const currentItem = (track.items || []).find(
-            (item) => item._id === itemId
-          );
-          if (!currentItem) return track;
-
-          // Check if update is needed
-          const needsUpdate =
-            (updates.startTime !== undefined &&
-              currentItem.startTime !== updates.startTime) ||
-            (updates.duration !== undefined &&
-              currentItem.duration !== updates.duration) ||
-            (updates.offset !== undefined &&
-              currentItem.offset !== updates.offset);
-
-          if (!needsUpdate) return track;
-
-          // Apply updates optimistically
-          const updatedItem = {
-            ...currentItem,
-            ...updates,
-          };
-
-          return {
-            ...track,
-            items: (track.items || []).map((item) =>
-              item._id === itemId ? normalizeTimelineItem(updatedItem) : item
-            ),
-          };
-        })
-      );
-
-      // Note: Remote updates don't need to be marked dirty since they're already saved on server
-    };
-
-    const handleRemotePresence = (payload) => {
-      const {
-        type,
-        collaborators: remoteCollaborators,
-        userId: eventUserId,
-      } = payload || {};
-
-      const ensureCollaboratorEntry = (list, userId, profile, roleLabel) => {
-        if (!userId) return;
-        const exists = list.some(
-          (entry) => String(entry.userId) === String(userId)
-        );
-        if (exists) return;
-        list.push({
-          userId,
-          user: profile
-            ? {
-                _id: profile._id || profile.id || userId,
-                displayName: profile.displayName || profile.username || "",
-                username: profile.username,
-                avatarUrl: profile.avatarUrl,
-                email: profile.email,
-              }
-            : undefined,
-          role: roleLabel,
-          status: "accepted",
-        });
-      };
-
-      const normalizeCollaborators = (list = []) => {
-        const next = Array.isArray(list) ? [...list] : [];
-        const ownerProfile = project?.creatorId;
-        const ownerId = ownerProfile?._id || ownerProfile?.id;
-
-        ensureCollaboratorEntry(next, ownerId, ownerProfile, "owner");
-        ensureCollaboratorEntry(
-          next,
-          currentUserId,
-          currentUserProfile,
-          userRole || "collaborator"
-        );
-
-        return next;
-      };
-
-      if (type === "SYNC" || type === "JOIN") {
-        if (remoteCollaborators) {
-          setCollaborators(normalizeCollaborators(remoteCollaborators));
-        }
-      } else if (type === "LEAVE") {
-        if (eventUserId) {
-          setCollaborators((prev) =>
-            prev.filter((c) => c.userId !== eventUserId)
-          );
-        }
-      } else if (remoteCollaborators) {
-        setCollaborators(normalizeCollaborators(remoteCollaborators));
-      }
-    };
-
-    const handleRemoteConnection = (payload) => {
-      const { connected } = payload || {};
-      setIsConnected(connected);
-    };
-
-    const handleRemoteEditingActivity = (payload) => {
-      if (isRemoteUpdateRef.current) return;
-      const { userId, itemId, isEditing } = payload || {};
-
-      if (!userId || !itemId) return;
-
-      setActiveEditors((prev) => {
-        const next = new Map(prev);
-
-        if (isEditing) {
-          // Find user info from collaborators
-          const collaborator = collaborators.find((c) => c.userId === userId);
-          if (collaborator) {
-            next.set(itemId, {
-              userId,
-              userName:
-                collaborator.user?.displayName ||
-                collaborator.user?.username ||
-                "Someone",
-              avatarUrl: collaborator.user?.avatarUrl,
-            });
-          }
-        } else {
-          // Remove editing indicator
-          const current = next.get(itemId);
-          if (current && current.userId === userId) {
-            next.delete(itemId);
-          }
-        }
-
-        return next;
-      });
-    };
-
-    const handleRemoteSnapshot = (snapshot) => {
-      if (!snapshot) {
-        if (typeof refreshProjectRef.current === "function") {
-          refreshProjectRef.current(false);
-        }
-        return;
-      }
-
-      const { project: snapshotProject, tracks: snapshotTracks } = snapshot;
-
-      if (snapshotProject) {
-        setProject((prev) => ({
-          ...(prev || {}),
-          ...snapshotProject,
-        }));
-
-        if (snapshotProject.chordProgression) {
-          setChordProgression(
-            hydrateChordProgression(snapshotProject.chordProgression)
-          );
-        }
-
-        if (snapshotProject.tempo !== undefined) {
-          setTempoDraft(String(snapshotProject.tempo));
-        }
-
-        if (snapshotProject.swingAmount !== undefined) {
-          setSwingDraft(String(snapshotProject.swingAmount));
-        }
-      }
-
-      if (Array.isArray(snapshotTracks)) {
-        const normalizedTracks = normalizeTracks(
-          snapshotTracks,
-          TRACK_COLOR_PALETTE
-        );
-        setTracks(normalizedTracks);
-      } else if (typeof refreshProjectRef.current === "function") {
-        refreshProjectRef.current(false);
-      }
-    };
-
-    const unsubscribers = [
-      collabChannel.on(
-        "project:remote:chordProgression",
-        handleRemoteChordProgression
-      ),
-      collabChannel.on("project:remote:lickAdd", handleRemoteLickAdd),
-      collabChannel.on(
-        "project:remote:timelineUpdate",
-        handleRemoteTimelineUpdate
-      ),
-      collabChannel.on(
-        "project:remote:timelineDelete",
-        handleRemoteTimelineDelete
-      ),
-      collabChannel.on(
-        "project:remote:settingsUpdate",
-        handleRemoteSettingsUpdate
-      ),
-      collabChannel.on("project:remote:trackAdd", handleRemoteTrackAdd),
-      collabChannel.on("project:remote:trackUpdate", handleRemoteTrackUpdate),
-      collabChannel.on("project:remote:trackDelete", handleRemoteTrackDelete),
-      collabChannel.on(
-        "project:remote:timelineBulkUpdate",
-        handleRemoteTimelineBulkUpdate
-      ),
-      collabChannel.on(
-        "project:remote:timelinePositionUpdate",
-        handleRemoteTimelinePositionUpdate
-      ),
-      collabChannel.on("project:remote:presence", handleRemotePresence),
-      collabChannel.on("project:remote:connection", handleRemoteConnection),
-      collabChannel.on(
-        "project:remote:editingActivity",
-        handleRemoteEditingActivity
-      ),
-      collabChannel.on("project:remote:snapshot", handleRemoteSnapshot),
-    ];
-
-    return () => {
-      unsubscribers.forEach((unsubscribe) => unsubscribe && unsubscribe());
-    };
-  }, [
-    collaborators,
-    setTracks,
-    setChordProgression,
-    saveChordProgression,
-    setTempoDraft,
-    setSwingDraft,
-    setProject,
-    refreshProjectRef,
-    normalizeTimelineItem,
-    project?.creatorId?._id,
-    currentUserId,
-    userRole,
-  ]);
+  // Old collaboration events code removed - now in useProjectCollaborationEvents hook (called above)
 
   const fetchProject = useCallback(
     async (showLoading = false) => {
@@ -1173,11 +667,7 @@ const ProjectDetailPage = () => {
   // loadComplexChords is now in useProjectChords hook
   // Pointer up handler is now handled in useProjectTimeline hook's drag useEffect
 
-  // playbackPositionRef for immediate position access
-  const playbackPositionRef = useRef(playbackPosition);
-  useEffect(() => {
-    playbackPositionRef.current = playbackPosition;
-  }, [playbackPosition]);
+  // playbackPositionRef is now in playbackHook
 
   // Warn on page unload if there are unsaved timeline changes
   useEffect(() => {
@@ -1201,51 +691,77 @@ const ProjectDetailPage = () => {
     setSwingDraft(String(projectSwingAmount));
   }, [projectSwingAmount, setSwingDraft]);
 
-  const formattedPlayTime = useMemo(
-    () => formatTransportTime(playbackPosition),
-    [playbackPosition]
-  );
+  // Initialize playback hook
+  const playbackHook = useProjectPlayback({
+    bpm,
+    tracks,
+    isPlaying,
+    setIsPlaying,
+    playbackPosition,
+    setPlaybackPosition,
+    loopEnabled,
+    pixelsPerSecond,
+    calculateTimelineWidth,
+    playheadRef,
+    TRACK_COLUMN_WIDTH,
+    user,
+  });
 
-  // Resolve audio URL for a timeline item (licks & chord audio)
-  const getAudioUrlForItem = useCallback(
-    async (item) => {
-      // Handle lick items - get audio URL from API
-      if (item.type === "lick" && item.lickId) {
-        const audioResponse = await playLickAudio(
-          item.lickId._id || item.lickId,
-          user?._id
-        );
-        return (
-          audioResponse?.data?.audio_url ||
-          audioResponse?.data?.audioUrl ||
-          null
-        );
-      }
+  const {
+    handlePlay,
+    handlePause,
+    handleStop,
+    handleReturnToStart,
+    scheduleAudioPlayback,
+    getAudioUrlForItem,
+    playbackPositionRef,
+  } = playbackHook || {};
 
-      // Handle chord items with generated audio
-      if (
-        item.type === "chord" ||
-        (item.chordName &&
-          (item.audioUrl || item.audio_url || item.lickId?.audioUrl))
-      ) {
-        return (
-          item.audioUrl ||
-          item.audio_url ||
-          item.lickId?.audioUrl ||
-          item.lickId?.audio_url ||
-          null
-        );
-      }
+  // Initialize backing track hook
+  const backingTrackHook = useProjectBackingTrack({
+    projectId,
+    project,
+    backingTrack: chordsHook?.backingTrack,
+    setBackingTrack: chordsHook?.setBackingTrack,
+    tracks,
+    setTracks: timelineHook?.setTracks,
+    setSelectedInstrumentId,
+    broadcast,
+    refreshProject: () => refreshProjectRef.current?.(),
+    setError,
+    chordLibrary: chordsHook?.chordLibrary || [],
+    selectedRhythmPatternId,
+    setIsGeneratingAI: modalsHook?.setIsGeneratingAI,
+    setAiNotification: modalsHook?.setAiNotification,
+    fetchProject,
+  });
 
-      return null;
-    },
-    [user?._id]
-  );
+  const {
+    isGeneratingBackingTrack,
+    ensureBackingTrack,
+    applyBackingInstrumentSelection,
+    handleSelectInstrument,
+    handleAddChordToTimeline,
+    handleGenerateBackingTrack,
+    handleGenerateAIBackingTrack,
+  } = backingTrackHook || {};
 
-  // Schedule audio playback for current tracks
-  const scheduleAudioPlayback = useCallback(async () => {
-    await schedulePlayback(tracks, getAudioUrlForItem);
-  }, [tracks, schedulePlayback, getAudioUrlForItem]);
+  // Initialize MIDI editor hook
+  const midiEditorHook = useProjectMidiEditor({
+    projectId,
+    tracks,
+    setTracks: timelineHook?.setTracks,
+    broadcast,
+    broadcastEditingActivity,
+    refreshProject: () => refreshProjectRef.current?.(),
+    midiEditorOpen: modalsHook?.midiEditorOpen,
+    setMidiEditorOpen: modalsHook?.setMidiEditorOpen,
+    editingTimelineItem: modalsHook?.editingTimelineItem,
+    setEditingTimelineItem: modalsHook?.setEditingTimelineItem,
+  });
+
+  const { handleOpenMidiEditor, handleCloseMidiEditor, handleSaveMidiEdit } =
+    midiEditorHook || {};
 
   useEffect(() => {
     const handleEscape = (event) => {
@@ -1260,337 +776,13 @@ const ProjectDetailPage = () => {
   }, [closeTrackMenu, setFocusedClipId]);
 
   // chordDurationSeconds, chordItems, and chordPalette are now in useProjectChords hook
-
-  const studioSeed = useMemo(() => {
-    if (!project) return null;
-    const base = convertProjectToStudioState({
-      ...project,
-      chordProgression,
-    });
-    if (!base) return null;
-    return {
-      ...base,
-      projectId: project._id || project.id || projectId,
-      projectTitle:
-        base.projectTitle || project.title || project.name || "Untitled",
-      licks: availableLicks, // share current lick list to studio
-    };
-  }, [project, chordProgression, projectId, availableLicks]);
+  // studioSeed is now in computedValues hook
 
   // reorderChordProgression is now in useProjectChords hook
 
   // fetchInstruments and fetchRhythmPatterns are now in useProjectSettings hook
 
-  // Handle adding chord to timeline from backing track panel
-  const handleAddChordToTimeline = async (chordData) => {
-    try {
-      if (!backingTrack) {
-        alert("No backing track found. Please create one first.");
-        return;
-      }
-
-      // Find the chord in the library to get full MIDI data
-      const chord = chordLibrary.find(
-        (c) => c.chordName === chordData.chordName
-      );
-      if (!chord) {
-        alert("Chord not found in library");
-        return;
-      }
-
-      // Calculate start time (place at the end of existing items)
-      const existingItems = backingTrack.items || [];
-      const lastItem =
-        existingItems.length > 0
-          ? existingItems.reduce((max, item) => {
-              const endTime = item.startTime + item.duration;
-              return endTime > max ? endTime : max;
-            }, 0)
-          : 0;
-
-      const bpm = project?.tempo || 120;
-      const secondsPerBeat = 60 / bpm;
-      const durationInSeconds = (chordData.duration || 4) * secondsPerBeat;
-
-      // Parse MIDI notes - they're stored as JSON string
-      let midiNotes = [];
-      if (chord.midiNotes) {
-        if (typeof chord.midiNotes === "string") {
-          try {
-            midiNotes = JSON.parse(chord.midiNotes);
-          } catch (e) {
-            console.error("Failed to parse MIDI notes:", e);
-            midiNotes = [];
-          }
-        } else if (Array.isArray(chord.midiNotes)) {
-          midiNotes = chord.midiNotes;
-        }
-      }
-
-      const timelineData = {
-        trackId: backingTrack._id,
-        startTime: lastItem,
-        duration: durationInSeconds,
-        offset: 0,
-        type: "chord",
-        chordName: chord.chordName,
-        rhythmPatternId: chordData.rhythmPatternId || selectedRhythmPatternId,
-        isCustomized: false,
-        customMidiEvents:
-          midiNotes.length > 0
-            ? midiNotes.map((pitch) => ({
-                pitch: Number(pitch),
-                startTime: 0,
-                duration: durationInSeconds,
-                velocity: 0.8,
-              }))
-            : [],
-      };
-
-      const response = await addLickToTimeline(projectId, timelineData);
-      if (response.success) {
-        // Broadcast to collaborators immediately (before refresh)
-        if (broadcast) {
-          broadcast("LICK_ADD_TO_TIMELINE", {
-            trackId: timelineData.trackId,
-            item: response.data,
-          });
-        }
-
-        await refreshProject();
-        alert("Chord added to timeline!");
-      }
-    } catch (error) {
-      console.error("Error adding chord to timeline:", error);
-      alert(
-        `Failed to add chord: ${error.response?.data?.message || error.message}`
-      );
-    }
-  };
-
-  // Handle opening MIDI editor
-  const handleOpenMidiEditor = (timelineItem) => {
-    setEditingTimelineItem(timelineItem);
-    setMidiEditorOpen(true);
-
-    // Broadcast that we're editing this item
-    if (broadcastEditingActivity && timelineItem?._id) {
-      broadcastEditingActivity(timelineItem._id, true);
-    }
-  };
-
-  // Handle closing MIDI editor
-  const handleCloseMidiEditor = () => {
-    // Broadcast that we're done editing
-    if (broadcastEditingActivity && editingTimelineItem?._id) {
-      broadcastEditingActivity(editingTimelineItem._id, false);
-    }
-
-    setMidiEditorOpen(false);
-    setEditingTimelineItem(null);
-  };
-
-  // Handle saving MIDI edits
-  const handleSaveMidiEdit = async (updatedItem) => {
-    try {
-      // Optimistic update - update local state immediately
-      setTracks((prevTracks) =>
-        prevTracks.map((track) => {
-          const hasClip = (track.items || []).some(
-            (item) => item._id === updatedItem._id
-          );
-          if (!hasClip) return track;
-
-          return {
-            ...track,
-            items: (track.items || []).map((item) =>
-              item._id === updatedItem._id
-                ? {
-                    ...item,
-                    customMidiEvents: updatedItem.customMidiEvents,
-                    isCustomized: updatedItem.isCustomized,
-                  }
-                : item
-            ),
-          };
-        })
-      );
-
-      // Broadcast to collaborators immediately (before API call)
-      if (broadcast) {
-        broadcast("TIMELINE_ITEM_UPDATE", {
-          itemId: updatedItem._id,
-          customMidiEvents: updatedItem.customMidiEvents,
-          isCustomized: updatedItem.isCustomized,
-        });
-      }
-
-      const response = await updateTimelineItem(projectId, updatedItem._id, {
-        customMidiEvents: updatedItem.customMidiEvents,
-        isCustomized: updatedItem.isCustomized,
-      });
-
-      if (response.success) {
-        await refreshProject();
-        handleCloseMidiEditor();
-      }
-    } catch (error) {
-      console.error("Error saving MIDI edits:", error);
-      alert("Failed to save MIDI edits");
-    }
-  };
-
-  // Handle generating full backing track with audio generation
-  const [isGeneratingBackingTrack, setIsGeneratingBackingTrack] =
-    useState(false);
-
-  const handleGenerateBackingTrack = async (data) => {
-    // Validate that instrument is selected (required for audio generation)
-    if (!data.instrumentId) {
-      alert(
-        "Please select an instrument first to generate audio for the backing track"
-      );
-      return;
-    }
-
-    if (!data.rhythmPatternId) {
-      alert(
-        "Please select a rhythm pattern first to generate audio for the backing track"
-      );
-      return;
-    }
-
-    if (!data.chords || data.chords.length === 0) {
-      alert("Please add some chords to the progression first");
-      return;
-    }
-
-    setIsGeneratingBackingTrack(true);
-    setError(null);
-
-    try {
-      // Include project tempo and key for accurate audio generation
-      const generationData = {
-        ...data,
-        tempo: project?.tempo || 120,
-        key: normalizeKeyPayload(project?.key),
-        timeSignature: normalizeTimeSignaturePayload(project?.timeSignature),
-        // Flag to indicate we want audio generation (not just MIDI)
-        generateAudio: true,
-      };
-
-      console.log(
-        "[Generate Backing Track] Starting generation with data:",
-        generationData
-      );
-      console.log(
-        "[Generate Backing Track] Selected instrumentId:",
-        generationData.instrumentId
-      );
-      const response = await generateBackingTrackAPI(projectId, generationData);
-      console.log("[Generate Backing Track] API Response:", response);
-      console.log(
-        "[Generate Backing Track] Backing track from response:",
-        response.data?.track
-      );
-      console.log(
-        "[Generate Backing Track] Backing track instrument:",
-        response.data?.track?.instrument
-      );
-
-      if (response.success) {
-        console.log(
-          "[Generate Backing Track] Success! Response data:",
-          response.data
-        );
-        console.log(
-          "[Generate Backing Track] Items generated:",
-          response.data?.items?.length || 0
-        );
-
-        // Update selectedInstrumentId from response if available
-        if (response.data?.track?.instrument?.instrumentId) {
-          console.log(
-            "[Generate Backing Track] Setting selectedInstrumentId to:",
-            response.data.track.instrument.instrumentId
-          );
-          setSelectedInstrumentId(response.data.track.instrument.instrumentId);
-        }
-
-        // Small delay to ensure server has saved everything
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
-        // Refresh project to get new backing track items with audio
-        console.log("[Generate Backing Track] Refreshing project...");
-        await refreshProject();
-        console.log("[Generate Backing Track] Project refreshed successfully");
-
-        // Show success message
-        alert(
-          `✅ Backing track generated successfully with ${
-            response.data?.items?.length || 0
-          } chord clips!`
-        );
-      } else {
-        console.error(
-          "[Generate Backing Track] API returned success:false",
-          response
-        );
-        throw new Error(response.message || "Failed to generate backing track");
-      }
-    } catch (error) {
-      console.error(
-        "[Generate Backing Track] Error generating backing track:",
-        error
-      );
-      console.error("[Generate Backing Track] Error details:", {
-        message: error.message,
-        response: error.response?.data,
-        stack: error.stack,
-      });
-      const errorMessage =
-        error.response?.data?.message ||
-        error.message ||
-        "Failed to generate backing track audio";
-      setError(errorMessage);
-      alert(`❌ Error: ${errorMessage}`);
-    } finally {
-      setIsGeneratingBackingTrack(false);
-    }
-  };
-
-  // Handle AI Backing Track Generation with Suno
-  const handleGenerateAIBackingTrack = async (params) => {
-    setIsGeneratingAI(true);
-    setAiNotification(null);
-
-    try {
-      const response = await generateAIBackingTrack(projectId, params);
-
-      if (response.success) {
-        // Show success notification
-        setAiNotification({
-          type: "success",
-          message:
-            response.message || "🎵 AI backing track generated successfully!",
-        });
-
-        // Refresh project to get new backing track items
-        await fetchProject();
-
-        // Auto-hide notification after 5 seconds
-        setTimeout(() => setAiNotification(null), 5000);
-      }
-    } catch (error) {
-      console.error("AI generation failed:", error);
-      setAiNotification({
-        type: "error",
-        message: error.message || "Failed to generate AI backing track",
-      });
-    } finally {
-      setIsGeneratingAI(false);
-    }
-  };
+  // Backing track and MIDI editor handlers are now in hooks (extracted above)
 
   // Fetch licks on initial mount and when search term or filters change
   useEffect(() => {
@@ -1604,91 +796,7 @@ const ProjectDetailPage = () => {
     return () => clearTimeout(timeout);
   }, [fetchLicks, lickSearchTerm]);
 
-  // Playback control with playhead movement synced to audioEngine transport
-  useEffect(() => {
-    let animationFrame = null;
-    let lastStateUpdate = 0;
-
-    if (isPlaying) {
-      const width = calculateTimelineWidth();
-      const loopLenSeconds = Math.max(1, width / pixelsPerSecond);
-
-      const animate = () => {
-        // Sync position with audioEngine transport
-        const transportPos = audioEngine.getPosition();
-        const position = loopEnabled
-          ? transportPos % loopLenSeconds
-          : transportPos;
-
-        // 1. Direct DOM update for smooth 60fps animation without re-renders
-        if (playheadRef.current) {
-          const leftPos = TRACK_COLUMN_WIDTH + position * pixelsPerSecond;
-          playheadRef.current.style.left = `${leftPos}px`;
-        }
-
-        // 2. Update ref immediately for logic (pause/resume accuracy)
-        playbackPositionRef.current = position;
-
-        // 3. Throttled state update for timer display (every 100ms is enough for UI)
-        // This prevents the component from re-rendering 60 times a second
-        const now = Date.now();
-        if (now - lastStateUpdate > 100) {
-          setPlaybackPosition(position);
-          lastStateUpdate = now;
-        }
-
-        animationFrame = requestAnimationFrame(animate);
-      };
-      animationFrame = requestAnimationFrame(animate);
-    }
-
-    return () => {
-      if (animationFrame) {
-        cancelAnimationFrame(animationFrame);
-      }
-    };
-  }, [isPlaying, loopEnabled, pixelsPerSecond, tracks]);
-
-  // Initialize Tone.js via audioEngine
-  useEffect(() => {
-    const initTone = async () => {
-      try {
-        await audioEngine.ensureStarted();
-        audioEngine.setBpm(bpm);
-      } catch (error) {
-        console.error("Error initializing Tone.js:", error);
-      }
-    };
-
-    initTone();
-
-    return () => {
-      // Cleanup via audioEngine (keeps singleton alive but stops playback)
-      if (audioEngine.isTransportPlaying()) {
-        audioEngine.stopTransport();
-      }
-      audioEngine.disposeAllPlayers();
-    };
-  }, []);
-
-  // Sync BPM changes with audioEngine
-  useEffect(() => {
-    audioEngine.setBpm(bpm);
-  }, [bpm]);
-
-  // Get audio URL for a timeline item (used by useAudioScheduler)
-  // getAudioUrlForItem and scheduleAudioPlayback are now in useProjectTimeline hook
-
-  //  Auto-reschedule audio when tracks change during playback
-  // This is key for live editing while playing (like professional DAWs)
-  useEffect(() => {
-    if (isPlaying && audioEngine.players.size > 0) {
-      const timeoutId = setTimeout(() => {
-        scheduleAudioPlayback();
-      }, 50);
-      return () => clearTimeout(timeoutId);
-    }
-  }, [tracks, isPlaying, scheduleAudioPlayback, audioEngine]); // Reschedule when tracks or playback state changes
+  // Playback control logic is now in playbackHook (extracted above)
 
   // Auto-save when clips are moved/edited (catches all clip position changes)
   const prevTracksRef = useRef(null);
@@ -1740,134 +848,7 @@ const ProjectDetailPage = () => {
 
   // saveChordProgression is now in useProjectChords hook
 
-  const applyBackingInstrumentSelection = async (instrumentId) => {
-    setSelectedInstrumentId(instrumentId);
-    setProject((prev) => ({
-      ...prev,
-      backingInstrumentId: instrumentId,
-    }));
-
-    // Broadcast to collaborators immediately (before API call)
-    if (broadcast) {
-      broadcast("PROJECT_SETTINGS_UPDATE", {
-        backingInstrumentId: instrumentId,
-      });
-    }
-
-    await updateProject(projectId, { backingInstrumentId: instrumentId });
-
-    refreshProject();
-  };
-
-  // Handle instrument selection for backing track or selected track
-  const handleSelectInstrument = async (instrumentId) => {
-    try {
-      if (selectedTrackId) {
-        const track = tracks.find((t) => t._id === selectedTrackId);
-
-        if (!track) {
-          alert("That track is no longer available. Please select it again.");
-          setSelectedTrackId(null);
-          return;
-        }
-
-        if (!track.isBackingTrack && track.trackType !== "backing") {
-          await handleUpdateTrack(selectedTrackId, {
-            instrument: instrumentId,
-          });
-          return;
-        }
-
-        await applyBackingInstrumentSelection(instrumentId);
-        return;
-      }
-
-      await applyBackingInstrumentSelection(instrumentId);
-    } catch (err) {
-      console.error("Error updating instrument:", err);
-      refreshProject();
-    }
-  };
-
-  // Ensure backing track exists
-  const ensureBackingTrack = async () => {
-    // First check if backingTrack state is set
-    if (backingTrack) return backingTrack._id;
-
-    // Check if a backing track already exists in the tracks array
-    const existingBackingTrack = tracks.find(
-      (track) =>
-        track.isBackingTrack ||
-        track.trackType === "backing" ||
-        track.trackName?.toLowerCase() === "backing track"
-    );
-
-    if (existingBackingTrack) {
-      // Set the state so we don't try to create another one
-      setBackingTrack(existingBackingTrack);
-      return existingBackingTrack._id;
-    }
-
-    // Create backing track if it doesn't exist
-    try {
-      const defaultColor =
-        TRACK_COLOR_PALETTE[tracks.length % TRACK_COLOR_PALETTE.length];
-      const response = await addTrack(projectId, {
-        trackName: "Backing Track",
-        isBackingTrack: true,
-        trackType: "backing",
-        color: defaultColor,
-      });
-      if (response.success) {
-        const [createdTrack] = normalizeTracks(
-          [
-            {
-              ...response.data,
-              isBackingTrack: true,
-              trackType: "backing",
-              color: response.data.color || defaultColor,
-            },
-          ],
-          TRACK_COLOR_PALETTE
-        );
-        if (createdTrack) {
-          pushHistory();
-          setBackingTrack(createdTrack);
-          setTracks((prev) => [...prev, createdTrack]);
-          return createdTrack._id;
-        }
-      }
-    } catch (err) {
-      console.error("Error creating backing track:", err);
-      // If error says backing track already exists, try to find it in tracks
-      if (err.message?.includes("already has a backing track")) {
-        const existingBackingTrack = tracks.find(
-          (track) =>
-            track.isBackingTrack ||
-            track.trackType === "backing" ||
-            track.trackName?.toLowerCase() === "backing track"
-        );
-        if (existingBackingTrack) {
-          setBackingTrack(existingBackingTrack);
-          return existingBackingTrack._id;
-        }
-        // Refresh project to get the latest tracks
-        await refreshProject();
-        // Try to find it again after refresh
-        const refreshedBackingTrack = tracks.find(
-          (track) =>
-            track.isBackingTrack ||
-            track.trackType === "backing" ||
-            track.trackName?.toLowerCase() === "backing track"
-        );
-        if (refreshedBackingTrack) {
-          setBackingTrack(refreshedBackingTrack);
-          return refreshedBackingTrack._id;
-        }
-      }
-    }
-    return null;
-  };
+  // Backing track handlers are now in backingTrackHook (extracted above)
 
   // commitTempoChange, commitSwingChange, handleTimeSignatureChange, and handleKeyChange are now in useProjectSettings hook
 
@@ -1924,243 +905,7 @@ const ProjectDetailPage = () => {
     }
   };
 
-  const handleAddTrack = () => {
-    // Check track limit (max 10 tracks per project)
-    if (tracks.length >= 10) {
-      setAddTrackError(
-        "Maximum of 10 tracks allowed per project. Please remove a track before adding a new one."
-      );
-      setAddTrackModalOpen(true);
-      return;
-    }
-    setNewTrackName(`New Audio Track ${tracks.length + 1}`);
-    setAddTrackError(null);
-    setAddTrackSuccess(null);
-    setAddTrackModalOpen(true);
-  };
-
-  const handleConfirmAddTrack = async () => {
-    if (!newTrackName.trim()) {
-      setAddTrackError("Please enter a track name");
-      return;
-    }
-
-    // Check track limit again
-    if (tracks.length >= 10) {
-      setAddTrackError(
-        "Maximum of 10 tracks allowed per project. Please remove a track before adding a new one."
-      );
-      return;
-    }
-
-    // Default to audio track type
-    const trackTypeValue = "audio";
-    const isBackingTrack = false;
-
-    try {
-      setAddTrackError(null);
-      setAddTrackSuccess(null);
-
-      const defaultColor =
-        TRACK_COLOR_PALETTE[tracks.length % TRACK_COLOR_PALETTE.length];
-      const response = await addTrack(projectId, {
-        trackName: newTrackName.trim(),
-        isBackingTrack,
-        trackType: trackTypeValue,
-        color: defaultColor,
-      });
-
-      if (response.success) {
-        const [normalizedTrack] = normalizeTracks(
-          [
-            {
-              ...response.data,
-              isBackingTrack,
-              trackType: trackTypeValue,
-              color: response.data.color || defaultColor,
-            },
-          ],
-          TRACK_COLOR_PALETTE
-        );
-        if (normalizedTrack) {
-          pushHistory();
-          setTracks((prevTracks) => [...prevTracks, normalizedTrack]);
-
-          if (broadcast) {
-            broadcast("TRACK_ADD", { track: normalizedTrack });
-          }
-
-          setAddTrackSuccess(
-            `Track "${newTrackName.trim()}" added successfully!`
-          );
-          setTimeout(() => {
-            setAddTrackModalOpen(false);
-            setNewTrackName("");
-            setAddTrackSuccess(null);
-          }, 1500);
-        }
-        refreshProject();
-      }
-    } catch (err) {
-      console.error("Error adding track:", err);
-      setAddTrackError(err.message || "Failed to add track");
-    }
-  };
-
-  const handleUpdateTrack = async (trackId, updates) => {
-    try {
-      // Optimistic update - update track in local state immediately
-      pushHistory();
-      setTracks((prevTracks) =>
-        prevTracks.map((track) =>
-          track._id === trackId ? { ...track, ...updates } : track
-        )
-      );
-
-      // Broadcast to collaborators immediately (before API call)
-      if (broadcast) {
-        broadcast("TRACK_UPDATE", { trackId, updates });
-      }
-
-      await updateTrack(projectId, trackId, updates);
-
-      // Silent refresh in background to ensure sync
-      refreshProject();
-    } catch (err) {
-      console.error("Error updating track:", err);
-      // Revert on error by refreshing
-      refreshProject();
-    }
-  };
-
-  const openTrackMenu = useCallback((event, track) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const { clientX = 0, clientY = 0, currentTarget } = event;
-    let x = clientX;
-    let y = clientY;
-
-    if (!x && !y && currentTarget) {
-      const rect = currentTarget.getBoundingClientRect();
-      x = rect.right;
-      y = rect.bottom;
-    }
-
-    setTrackContextMenu({
-      isOpen: true,
-      x,
-      y,
-      trackId: track._id,
-    });
-  }, []);
-
-  const handleTrackRename = (track) => {
-    if (!track) return;
-    closeTrackMenu();
-    const newName = prompt("Rename track:", track.trackName || "Track");
-    if (!newName) return;
-    const trimmed = newName.trim();
-    if (!trimmed || trimmed === track.trackName) return;
-    handleUpdateTrack(track._id, { trackName: trimmed });
-  };
-
-  const handleTrackColorChange = (track, color) => {
-    if (!track || !color) return;
-    handleUpdateTrack(track._id, { color });
-  };
-
-  const handleTrackMove = async (track, direction) => {
-    if (!track || !direction) return;
-    closeTrackMenu();
-    const sorted = [...orderedTracks];
-    const currentIndex = sorted.findIndex((t) => t._id === track._id);
-    const targetIndex =
-      direction === "up" ? currentIndex - 1 : currentIndex + 1;
-    if (targetIndex < 0 || targetIndex >= sorted.length) return;
-    const targetTrack = sorted[targetIndex];
-    const currentOrder =
-      typeof track.trackOrder === "number" ? track.trackOrder : currentIndex;
-    const targetOrder =
-      typeof targetTrack.trackOrder === "number"
-        ? targetTrack.trackOrder
-        : targetIndex;
-
-    pushHistory();
-    setTracks((prev) =>
-      prev.map((t) => {
-        if (t._id === track._id) {
-          return { ...t, trackOrder: targetOrder };
-        }
-        if (t._id === targetTrack._id) {
-          return { ...t, trackOrder: currentOrder };
-        }
-        return t;
-      })
-    );
-
-    // Broadcast to collaborators immediately (before API call)
-    if (broadcast) {
-      broadcast("TRACK_UPDATE", {
-        trackId: track._id,
-        updates: { trackOrder: targetOrder },
-      });
-      broadcast("TRACK_UPDATE", {
-        trackId: targetTrack._id,
-        updates: { trackOrder: currentOrder },
-      });
-    }
-
-    try {
-      await Promise.all([
-        updateTrack(projectId, track._id, { trackOrder: targetOrder }),
-        updateTrack(projectId, targetTrack._id, { trackOrder: currentOrder }),
-      ]);
-
-      refreshProject();
-    } catch (err) {
-      console.error("Error reordering tracks:", err);
-      refreshProject();
-    }
-  };
-
-  const handleTrackDelete = async (track) => {
-    if (!track) return;
-    closeTrackMenu();
-    if (
-      !window.confirm(
-        "Delete this track and all of its clips? This action cannot be undone."
-      )
-    ) {
-      return;
-    }
-
-    try {
-      pushHistory();
-      // Optimistic update - remove track from local state immediately
-      setTracks((prev) => prev.filter((t) => t._id !== track._id));
-      if (track.isBackingTrack) {
-        setBackingTrack(null);
-      }
-      if (
-        focusedClipId &&
-        (track.items || []).some((item) => item._id === focusedClipId)
-      ) {
-        setFocusedClipId(null);
-      }
-
-      // Broadcast to collaborators immediately (before API call)
-      if (broadcast) {
-        broadcast("TRACK_DELETE", { trackId: track._id });
-      }
-
-      await deleteTrack(projectId, track._id);
-
-      refreshProject();
-    } catch (err) {
-      console.error("Error deleting track:", err);
-      refreshProject();
-    }
-  };
+  // Track handlers are now in tracksHook (extracted above)
 
   // handleClipMouseDown, startClipResize, and drag/resize useEffects are now in useProjectTimeline hook
 
@@ -2168,47 +913,7 @@ const ProjectDetailPage = () => {
 
   // getChordDuration, getChordWidth, and getChordStartPosition are now in useProjectChords hook
 
-  // Transport / playback handlers
-  const handlePlay = useCallback(async () => {
-    await audioEngine.ensureStarted();
-    if (!audioEngine.transport) {
-      console.error("Tone.Transport is not available");
-      return;
-    }
-
-    // Set transport position to current playhead
-    audioEngine.setPosition(playbackPositionRef.current);
-    audioEngine.setBpm(bpm);
-
-    setIsPlaying(true);
-
-    // Schedule audio clips
-    await scheduleAudioPlayback();
-
-    // Start transport
-    audioEngine.startTransport();
-  }, [audioEngine, bpm, scheduleAudioPlayback]);
-
-  const handlePause = useCallback(() => {
-    setIsPlaying(false);
-    audioEngine.pauseTransport();
-    audioEngine.stopAllPlayers();
-  }, [audioEngine, setIsPlaying]);
-
-  const handleStop = useCallback(() => {
-    setIsPlaying(false);
-    setPlaybackPosition(0);
-    playbackPositionRef.current = 0;
-    audioEngine.stopTransport();
-    audioEngine.stopAllPlayers();
-  }, [audioEngine, setPlaybackPosition, setIsPlaying]);
-
-  const handleReturnToStart = useCallback(() => {
-    setIsPlaying(false);
-    setPlaybackPosition(0);
-    playbackPositionRef.current = 0;
-    audioEngine.setPosition(0);
-  }, [audioEngine, setPlaybackPosition, setIsPlaying]);
+  // Transport / playback handlers are now in playbackHook (extracted above)
 
   if (loading) {
     return (
@@ -2471,10 +1176,13 @@ const ProjectDetailPage = () => {
                       return;
                     }
                     try {
-                      console.log("(NO $) [DEBUG][ProjectExport] ShareToFeed:", {
-                        projectId,
-                        hasAudioUrl: !!project.audioUrl,
-                      });
+                      console.log(
+                        "(NO $) [DEBUG][ProjectExport] ShareToFeed:",
+                        {
+                          projectId,
+                          hasAudioUrl: !!project.audioUrl,
+                        }
+                      );
 
                       const payload = {
                         postType: "status_update",
