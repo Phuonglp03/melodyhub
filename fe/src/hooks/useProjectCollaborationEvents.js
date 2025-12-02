@@ -1,7 +1,13 @@
 import { useEffect, useRef } from "react";
 import { collabChannel } from "../utils/collabChannel";
-import { normalizeTimelineItem, normalizeTracks } from "../utils/timelineHelpers";
-import { TRACK_COLOR_PALETTE, hydrateChordProgression } from "../utils/projectHelpers";
+import {
+  normalizeTimelineItem,
+  normalizeTracks,
+} from "../utils/timelineHelpers";
+import {
+  TRACK_COLOR_PALETTE,
+  hydrateChordProgression,
+} from "../utils/projectHelpers";
 
 /**
  * Hook for handling remote collaboration events
@@ -11,6 +17,7 @@ import { TRACK_COLOR_PALETTE, hydrateChordProgression } from "../utils/projectHe
  * @param {Array} options.collaborators - Current collaborators list
  * @param {Function} options.setCollaborators - Setter for collaborators
  * @param {Function} options.setActiveEditors - Setter for active editors
+ * @param {boolean} options.isConnected - Current connection state
  * @param {Function} options.setIsConnected - Setter for connection state
  * @param {Function} options.setTracks - Setter for tracks
  * @param {Function} options.setChordProgression - Setter for chord progression
@@ -30,6 +37,7 @@ export const useProjectCollaborationEvents = ({
   collaborators,
   setCollaborators,
   setActiveEditors,
+  isConnected,
   setIsConnected,
   setTracks,
   setChordProgression,
@@ -73,8 +81,12 @@ export const useProjectCollaborationEvents = ({
 
     const handleRemoteTimelineUpdate = (payload) => {
       if (isRemoteUpdateRef.current) return;
-      const { itemId, customMidiEvents, isCustomized, updates = {} } =
-        payload || {};
+      const {
+        itemId,
+        customMidiEvents,
+        isCustomized,
+        updates = {},
+      } = payload || {};
 
       if (!itemId) return;
       console.log("[Collaboration] Remote timeline update:", itemId);
@@ -276,6 +288,7 @@ export const useProjectCollaborationEvents = ({
     };
 
     const handleRemotePresence = (payload) => {
+      console.log("[Collaboration] Received presence event:", payload);
       const {
         type,
         collaborators: remoteCollaborators,
@@ -284,9 +297,11 @@ export const useProjectCollaborationEvents = ({
 
       const ensureCollaboratorEntry = (list, userId, profile, roleLabel) => {
         if (!userId) return;
-        const exists = list.some(
-          (entry) => String(entry.userId) === String(userId)
-        );
+        const exists = list.some((entry) => {
+          const entryId =
+            entry.userId || entry._id || entry.user?._id || entry.user?.id;
+          return entryId && String(entryId) === String(userId);
+        });
         if (exists) return;
         list.push({
           userId,
@@ -305,33 +320,106 @@ export const useProjectCollaborationEvents = ({
       };
 
       const normalizeCollaborators = (list = []) => {
+        // Start with the remote collaborators list
         const next = Array.isArray(list) ? [...list] : [];
+
+        // Normalize each collaborator entry to ensure consistent structure
+        const normalized = next.map((collab) => {
+          const userId =
+            collab.userId || collab._id || collab.user?._id || collab.user?.id;
+          return {
+            userId,
+            user: collab.user
+              ? {
+                  _id: collab.user._id || collab.user.id || userId,
+                  displayName:
+                    collab.user.displayName || collab.user.username || "",
+                  username: collab.user.username,
+                  avatarUrl: collab.user.avatarUrl,
+                  email: collab.user.email,
+                }
+              : undefined,
+            role: collab.role || "collaborator",
+            status: collab.status || "accepted",
+          };
+        });
+
+        // Ensure owner is included if they exist
         const ownerProfile = project?.creatorId;
-        const ownerId = ownerProfile?._id || ownerProfile?.id;
+        const ownerId =
+          ownerProfile?._id || ownerProfile?.id || project?.creatorId;
+        if (ownerId) {
+          ensureCollaboratorEntry(normalized, ownerId, ownerProfile, "owner");
+        }
 
-        ensureCollaboratorEntry(next, ownerId, ownerProfile, "owner");
-        ensureCollaboratorEntry(
-          next,
-          currentUserId,
-          currentUserProfile,
-          userRole || "collaborator"
-        );
+        // Ensure current user is included
+        if (currentUserId) {
+          ensureCollaboratorEntry(
+            normalized,
+            currentUserId,
+            currentUserProfile,
+            userRole || "collaborator"
+          );
+        }
 
-        return next;
+        return normalized;
       };
 
+      // Handle different presence event types
       if (type === "SYNC" || type === "JOIN") {
-        if (remoteCollaborators) {
-          setCollaborators(normalizeCollaborators(remoteCollaborators));
+        if (remoteCollaborators && Array.isArray(remoteCollaborators)) {
+          console.log(
+            "[Collaboration] SYNC/JOIN - Setting collaborators:",
+            remoteCollaborators
+          );
+          const normalized = normalizeCollaborators(remoteCollaborators);
+          console.log("[Collaboration] Normalized collaborators:", normalized);
+          setCollaborators(normalized);
+        } else {
+          console.warn(
+            "[Collaboration] SYNC/JOIN event but no remoteCollaborators array provided",
+            { remoteCollaborators, type }
+          );
         }
       } else if (type === "LEAVE") {
         if (eventUserId) {
-          setCollaborators((prev) =>
-            prev.filter((c) => c.userId !== eventUserId)
-          );
+          console.log("[Collaboration] LEAVE - Removing user:", eventUserId);
+          setCollaborators((prev) => {
+            const filtered = prev.filter((c) => {
+              const collaboratorId =
+                c.userId || c._id || c.user?._id || c.user?.id;
+              return (
+                collaboratorId && String(collaboratorId) !== String(eventUserId)
+              );
+            });
+            console.log("[Collaboration] After LEAVE filter:", filtered);
+            return filtered;
+          });
         }
-      } else if (remoteCollaborators) {
-        setCollaborators(normalizeCollaborators(remoteCollaborators));
+      } else if (remoteCollaborators && Array.isArray(remoteCollaborators)) {
+        // Handle any other presence event with collaborators list
+        // This catches cases where server sends presence without explicit type
+        console.log(
+          "[Collaboration] Presence event (no type or other) - Setting collaborators:",
+          remoteCollaborators
+        );
+        const normalized = normalizeCollaborators(remoteCollaborators);
+        console.log("[Collaboration] Normalized collaborators:", normalized);
+        setCollaborators(normalized);
+      } else if (!type && !remoteCollaborators) {
+        // If payload is empty or malformed, log but don't update
+        console.warn(
+          "[Collaboration] Presence event received but payload is empty or malformed:",
+          payload
+        );
+      } else {
+        // Log unexpected cases for debugging
+        console.warn("[Collaboration] Unexpected presence event format:", {
+          type,
+          remoteCollaborators,
+          eventUserId,
+          payload,
+        });
       }
     };
 
@@ -351,27 +439,121 @@ export const useProjectCollaborationEvents = ({
 
         if (isEditing) {
           // Find user info from collaborators
-          const collaborator = collaborators.find((c) => c.userId === userId);
+          // Handle userId as object with _id or as direct string
+          // Also check if userId matches the string representation
+          const collaborator = collaborators.find((c) => {
+            const collaboratorId =
+              c.userId?._id || c.userId || c._id || c.user?._id || c.user?.id;
+            // Compare both as strings to handle ObjectId vs string mismatches
+            return collaboratorId && String(collaboratorId) === String(userId);
+          });
+
           if (collaborator) {
-            next.set(itemId, {
-              userId,
+            // Extract user info from various possible structures
+            const userInfo = collaborator.user || collaborator.userId || {};
+            const editorInfo = {
+              userId: String(userId), // Ensure userId is a string
               userName:
+                userInfo.displayName ||
+                userInfo.username ||
                 collaborator.user?.displayName ||
                 collaborator.user?.username ||
+                collaborator.userId?.displayName ||
+                collaborator.userId?.username ||
                 "Someone",
-              avatarUrl: collaborator.user?.avatarUrl,
+              avatarUrl:
+                userInfo.avatarUrl ||
+                collaborator.user?.avatarUrl ||
+                collaborator.userId?.avatarUrl,
+            };
+            next.set(itemId, editorInfo);
+            console.log("[Collaboration] Active editor added:", {
+              itemId,
+              userId,
+              userName: editorInfo.userName,
+              collaboratorFound: true,
             });
+          } else {
+            // Collaborator not found in list yet - create a temporary entry
+            // This can happen if editing activity arrives before presence sync
+            // We'll update it when collaborators are synced
+            const editorInfo = {
+              userId: String(userId),
+              userName: "Someone",
+              avatarUrl: undefined,
+            };
+            next.set(itemId, editorInfo);
+            console.log(
+              "[Collaboration] Active editor added (temp - collaborator not in list yet):",
+              {
+                itemId,
+                userId,
+                collaboratorsCount: collaborators.length,
+                collaboratorIds: collaborators.map((c) => ({
+                  id:
+                    c.userId?._id ||
+                    c.userId ||
+                    c._id ||
+                    c.user?._id ||
+                    c.user?.id,
+                  type: typeof (
+                    c.userId?._id ||
+                    c.userId ||
+                    c._id ||
+                    c.user?._id ||
+                    c.user?.id
+                  ),
+                })),
+              }
+            );
           }
         } else {
-          // Remove editing indicator
+          // Remove editing indicator - compare as strings
           const current = next.get(itemId);
-          if (current && current.userId === userId) {
+          if (current && String(current.userId) === String(userId)) {
             next.delete(itemId);
+            console.log("[Collaboration] Active editor removed:", {
+              itemId,
+              userId,
+            });
           }
         }
 
         return next;
       });
+    };
+
+    const handleRemoteCursor = (payload) => {
+      const { userId, sectionId, barIndex, x, y } = payload || {};
+      if (!userId) return;
+
+      // Update collaborator's cursor position
+      setCollaborators((prev) =>
+        prev.map((collab) => {
+          const collaboratorId =
+            collab.userId || collab._id || collab.user?._id || collab.user?.id;
+          if (collaboratorId && String(collaboratorId) === String(userId)) {
+            // If barIndex is null, clear the cursor
+            if (barIndex === null || barIndex === undefined) {
+              return {
+                ...collab,
+                cursor: undefined,
+              };
+            }
+            return {
+              ...collab,
+              cursor: {
+                sectionId,
+                barIndex,
+                position:
+                  x !== undefined && y !== undefined ? { x, y } : undefined,
+                lastUpdate: Date.now(),
+              },
+            };
+          }
+          return collab;
+        })
+      );
     };
 
     const handleRemoteSnapshot = (snapshot) => {
@@ -451,6 +633,7 @@ export const useProjectCollaborationEvents = ({
         "project:remote:editingActivity",
         handleRemoteEditingActivity
       ),
+      collabChannel.on("project:remote:cursor", handleRemoteCursor),
       collabChannel.on("project:remote:snapshot", handleRemoteSnapshot),
     ];
 
@@ -475,5 +658,92 @@ export const useProjectCollaborationEvents = ({
     setIsConnected,
     isRemoteUpdateRef,
   ]);
-};
 
+  // Cleanup stale cursors (remove cursors that haven't updated in 2 seconds)
+  // This must be a separate useEffect at the top level, not inside the event handler useEffect
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCollaborators((prev) =>
+        prev.map((collab) => {
+          if (collab.cursor?.lastUpdate) {
+            const age = Date.now() - collab.cursor.lastUpdate;
+            if (age > 2000) {
+              // Remove cursor if older than 2 seconds
+              return {
+                ...collab,
+                cursor: undefined,
+              };
+            }
+          }
+          return collab;
+        })
+      );
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [setCollaborators]);
+
+  // Update activeEditors when collaborators list changes
+  // This ensures we have proper user info for editors that were added before collaborators synced
+  useEffect(() => {
+    if (collaborators.length === 0) return;
+
+    setActiveEditors((prev) => {
+      const next = new Map(prev);
+      let updated = false;
+
+      // Update any editors that have temporary "Someone" names
+      next.forEach((editorInfo, itemId) => {
+        const collaborator = collaborators.find((c) => {
+          const collaboratorId =
+            c.userId?._id || c.userId || c._id || c.user?._id || c.user?.id;
+          return (
+            collaboratorId &&
+            String(collaboratorId) === String(editorInfo.userId)
+          );
+        });
+
+        if (collaborator && editorInfo.userName === "Someone") {
+          const userInfo = collaborator.user || collaborator.userId || {};
+          next.set(itemId, {
+            ...editorInfo,
+            userName:
+              userInfo.displayName ||
+              userInfo.username ||
+              collaborator.user?.displayName ||
+              collaborator.user?.username ||
+              collaborator.userId?.displayName ||
+              collaborator.userId?.username ||
+              "Someone",
+            avatarUrl:
+              userInfo.avatarUrl ||
+              collaborator.user?.avatarUrl ||
+              collaborator.userId?.avatarUrl,
+          });
+          updated = true;
+        }
+      });
+
+      return updated ? next : prev;
+    });
+  }, [collaborators, setActiveEditors]);
+
+  // Request presence if we're connected but have no collaborators
+  // This handles cases where the server doesn't automatically send presence on join
+  useEffect(() => {
+    if (!isConnected || !currentUserId) return;
+
+    // If we have no collaborators after being connected for 1 second, request presence
+    const timeout = setTimeout(() => {
+      if (collaborators.length === 0) {
+        console.log(
+          "[Collaboration] No collaborators after connection, requesting presence"
+        );
+        // Emit through collabChannel to request presence
+        collabChannel.emit("project:presence:request", {});
+      }
+    }, 1000);
+
+    return () => clearTimeout(timeout);
+  }, [isConnected, currentUserId, collaborators.length]);
+};

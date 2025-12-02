@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   FaPlus,
@@ -20,6 +20,8 @@ import {
   getNotifications,
   markNotificationAsRead,
 } from "../../../services/user/notificationService";
+import { createPost as createPostApi } from "../../../services/user/post";
+import { FaPlay, FaPause, FaShareAlt } from "react-icons/fa";
 import { useSelector } from "react-redux";
 
 const ProjectListPage = () => {
@@ -32,6 +34,9 @@ const ProjectListPage = () => {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [processingInvitation, setProcessingInvitation] = useState(null);
+  const [playingProjectId, setPlayingProjectId] = useState(null);
+  const [sharingProjectId, setSharingProjectId] = useState(null);
+  const audioRef = useRef(null);
 
   const user = useSelector((state) => state.auth.user);
 
@@ -99,6 +104,70 @@ const ProjectListPage = () => {
       month: "short",
       day: "numeric",
     });
+  };
+
+  const handlePlayPreview = async (project, e) => {
+    if (e) e.stopPropagation();
+    if (!project?.audioUrl) return;
+
+    try {
+      // Stop any existing audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+
+      // Toggle off if clicking the same project
+      if (playingProjectId === project._id) {
+        setPlayingProjectId(null);
+        return;
+      }
+
+      const audio = new Audio(project.audioUrl);
+      audioRef.current = audio;
+      setPlayingProjectId(project._id);
+
+      audio.onended = () => {
+        setPlayingProjectId(null);
+        audioRef.current = null;
+      };
+
+      await audio.play();
+    } catch (err) {
+      console.error("(NO $) [DEBUG][ProjectList] Preview play failed:", err);
+      setPlayingProjectId(null);
+    }
+  };
+
+  const handleShareProject = async (project, e) => {
+    if (e) e.stopPropagation();
+    if (!project?._id || !project?.audioUrl) return;
+
+    try {
+      setSharingProjectId(project._id);
+
+      const origin =
+        typeof window !== "undefined" && window.location
+          ? window.location.origin
+          : "";
+      const projectUrl = origin
+        ? `${origin}/projects/${project._id}`
+        : `/projects/${project._id}`;
+      const title = project?.title || "My exported project";
+      const textContent = `🎵 ${title}\n${projectUrl}`;
+
+      await createPostApi({
+        postType: "status_update",
+        textContent,
+      });
+      // Optional: toast via alert for now
+      alert("Shared project to your feed.");
+    } catch (error) {
+      console.error("(NO $) [DEBUG][ProjectList] Share project failed:", error);
+      alert(error?.message || "Failed to share project.");
+    } finally {
+      setSharingProjectId(null);
+    }
   };
 
   const handleAcceptInvitation = async (projectId, e) => {
@@ -369,6 +438,7 @@ const ProjectListPage = () => {
             const isOwner =
               project.creatorId?._id === user?.id ||
               project.creatorId?._id === user?._id;
+            const canPreview = project.status === "active" && project.audioUrl;
             return (
               <div
                 key={project._id}
@@ -447,8 +517,47 @@ const ProjectListPage = () => {
                       {project.status}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-500">
-                    Updated: {formatDate(project.updatedAt)}
+
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-gray-500">
+                      Updated: {formatDate(project.updatedAt)}
+                    </div>
+                    {canPreview && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => handlePlayPreview(project, e)}
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-orange-500 text-white hover:bg-orange-400 text-xs shadow-md"
+                          title={
+                            playingProjectId === project._id
+                              ? "Pause preview"
+                              : "Play export"
+                          }
+                        >
+                          {playingProjectId === project._id ? (
+                            <FaPause size={10} />
+                          ) : (
+                            <FaPlay size={10} />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleShareProject(project, e)}
+                          disabled={sharingProjectId === project._id}
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-medium ${
+                            sharingProjectId === project._id
+                              ? "bg-gray-700 text-gray-400 cursor-not-allowed"
+                              : "bg-purple-600 text-white hover:bg-purple-500"
+                          }`}
+                          title="Share project to your feed"
+                        >
+                          <FaShareAlt size={10} />
+                          {sharingProjectId === project._id
+                            ? "Sharing..."
+                            : "Share"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

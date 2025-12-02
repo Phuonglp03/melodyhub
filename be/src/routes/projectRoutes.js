@@ -26,9 +26,11 @@ import {
   getProjectCollabState,
   getProjectCollabDebug,
   exportProjectAudio,
+  uploadProjectAudioFile,
 } from "../controllers/projectController.js";
 import { generateAIBackingTrack } from "../controllers/sunoAIController.js";
 import middlewareController from "../middleware/auth.js";
+import { handleAudioUpload } from "../middleware/file.js";
 const { verifyToken } = middlewareController;
 
 const router = express.Router();
@@ -104,6 +106,11 @@ router.get("/:projectId/collab/debug", getProjectCollabDebug);
 router.get("/:projectId", getProjectById);
 
 // Save exported audio metadata for a project
+router.post(
+  "/:projectId/export-audio/upload",
+  handleAudioUpload,
+  uploadProjectAudioFile
+);
 router.post("/:projectId/export-audio", exportProjectAudio);
 
 router.put(
@@ -115,9 +122,7 @@ router.put(
     body("timeSignature")
       .optional()
       .matches(/^\d+\/\d+$/),
-    body("status")
-      .optional()
-      .isIn(["draft", "active", "inactive"]),
+    body("status").optional().isIn(["draft", "active", "inactive"]),
   ],
   validate,
   updateProject

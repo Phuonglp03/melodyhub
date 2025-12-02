@@ -305,7 +305,14 @@ export const socketServer = (httpServer) => {
 
     // ========== PROJECT COLLABORATION EVENTS ==========
     socket.on("project:join", async ({ projectId, userId }) => {
+      console.log(`[Socket.IO] project:join event received:`, {
+        projectId,
+        userId,
+        socketId: socket.id,
+      });
+
       if (!projectId || !userId) {
+        console.log(`[Socket.IO] project:join - Missing projectId or userId`);
         return socket.emit("project:error", {
           message: "Missing projectId or userId",
         });
@@ -354,24 +361,53 @@ export const socketServer = (httpServer) => {
         };
 
         if (COLLAB_V2_ENABLED) {
-          await addCollaboratorPresence(
-            projectId,
-            userId,
-            presencePayload,
-            socket.id
-          );
-          const activeCollaborators = await listCollaborators(projectId);
+          try {
+            await addCollaboratorPresence(
+              projectId,
+              userId,
+              presencePayload,
+              socket.id
+            );
+            console.log(
+              `[Socket.IO] Added presence for user ${userId} in project ${projectId}`
+            );
+          } catch (err) {
+            console.error(
+              `[Socket.IO] Failed to add presence for user ${userId}:`,
+              err.message
+            );
+            // Continue even if Redis fails - we'll still emit presence events
+          }
 
+          const activeCollaborators = await listCollaborators(projectId);
+          console.log(
+            `[Socket.IO] Retrieved ${activeCollaborators.length} active collaborators for project ${projectId}`
+          );
+
+          // Notify other users about the new join
           socket.to(`project:${projectId}`).emit("project:presence", {
             type: "JOIN",
             userId,
             user: presencePayload,
           });
 
+          // Send current collaborators list to the joining user
           socket.emit("project:presence", {
             type: "SYNC",
             collaborators: activeCollaborators,
           });
+
+          console.log(
+            `[Socket.IO] User ${userId} joined project ${projectId} - sent SYNC with ${activeCollaborators.length} collaborators:`,
+            activeCollaborators.map((c) => ({
+              userId: c.userId,
+              username: c.user?.username,
+            }))
+          );
+        } else {
+          console.log(
+            `[Socket.IO] User ${userId} joined project ${projectId} - COLLAB_V2_ENABLED is false`
+          );
         }
 
         console.log(`[Socket.IO] User ${userId} joined project ${projectId}`);
@@ -405,7 +441,9 @@ export const socketServer = (httpServer) => {
           senderId: userId,
           timestamp: Date.now(),
         };
-        socket.to(`project:${projectId}`).emit("project:update", broadcastPayload);
+        socket
+          .to(`project:${projectId}`)
+          .emit("project:update", broadcastPayload);
         recordCollabMetric("project_action_broadcast", {
           projectId,
           userId,
@@ -436,10 +474,13 @@ export const socketServer = (httpServer) => {
           senderId: userId,
           timestamp: operationResult.op.timestamp,
           version: operationResult.version,
-          collabOpId: payload.collabOpId || operationResult.op.collabOpId || null,
+          collabOpId:
+            payload.collabOpId || operationResult.op.collabOpId || null,
         };
 
-        socket.to(`project:${projectId}`).emit("project:update", broadcastPayload);
+        socket
+          .to(`project:${projectId}`)
+          .emit("project:update", broadcastPayload);
         socket.emit("project:ack", {
           type: payload.type,
           version: operationResult.version,
@@ -473,9 +514,13 @@ export const socketServer = (httpServer) => {
         if (COLLAB_V2_ENABLED) {
           await updateCursorPosition(projectId, userId, data);
         }
+        // Broadcast cursor update with x, y coordinates
         socket.to(`project:${projectId}`).emit("project:cursor_update", {
           userId,
-          cursor: data,
+          sectionId: data.sectionId,
+          barIndex: data.barIndex,
+          x: data.x,
+          y: data.y,
         });
       };
       run().catch((err) =>
@@ -534,6 +579,61 @@ export const socketServer = (httpServer) => {
         console.error("[Socket.IO] project:heartbeat error:", err)
       );
     });
+
+    socket.on(
+      "project:presence:request",
+      async ({ projectId: requestedProjectId }) => {
+        const { projectId, userId } = socket.data;
+        const targetProjectId = requestedProjectId || projectId;
+
+        if (!targetProjectId || !COLLAB_V2_ENABLED) {
+          console.log(
+            "[Socket.IO] project:presence:request - missing projectId or V2 disabled"
+          );
+          return;
+        }
+
+        try {
+          // Verify user has access to this project
+          const project = await Project.findById(targetProjectId);
+          if (!project) {
+            return socket.emit("project:error", {
+              message: "Project not found",
+            });
+          }
+
+          const isOwner =
+            String(project.creatorId) === String(userId || socket.data.userId);
+          const collaborator = await ProjectCollaborator.findOne({
+            projectId: targetProjectId,
+            userId: userId || socket.data.userId,
+            role: { $in: ["admin", "contributor", "viewer"] },
+            status: "accepted",
+          });
+          const hasAccess = isOwner || !!collaborator;
+
+          if (!hasAccess) {
+            return socket.emit("project:error", { message: "Access denied" });
+          }
+
+          // Get current list of collaborators
+          const activeCollaborators = await listCollaborators(targetProjectId);
+
+          console.log(
+            `[Socket.IO] project:presence:request - sending ${activeCollaborators.length} collaborators for project ${targetProjectId}`
+          );
+
+          // Send current presence state
+          socket.emit("project:presence", {
+            type: "SYNC",
+            collaborators: activeCollaborators,
+          });
+        } catch (err) {
+          console.error("[Socket.IO] project:presence:request error:", err);
+          socket.emit("project:error", { message: "Failed to get presence" });
+        }
+      }
+    );
 
     socket.on("project:resync", async ({ projectId, fromVersion }, reply) => {
       if (!projectId) {

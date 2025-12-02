@@ -8,6 +8,7 @@ import Lick from "../models/Lick.js";
 import Instrument from "../models/Instrument.js";
 import PlayingPattern from "../models/PlayingPattern.js";
 import Notification from "../models/Notification.js";
+import { uploadFromBuffer } from "../utils/cloudinaryUploader.js";
 import {
   getAllInstruments,
   getInstrumentById,
@@ -607,6 +608,71 @@ export const patchProject = async (req, res) => {
   }
 };
 
+// Upload rendered project audio file to Cloudinary
+export const uploadProjectAudioFile = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.userId;
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Audio file is required",
+      });
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
+
+    if (project.creatorId.toString() !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "Only the project owner can upload exports",
+      });
+    }
+
+    if (project.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        message: "Project must be active before uploading audio",
+      });
+    }
+
+    const folder = `projects/${projectId}/exports`;
+    const uploadResult = await uploadFromBuffer(
+      req.file.buffer,
+      folder,
+      "video"
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Project audio uploaded successfully",
+      data: {
+        publicId: uploadResult.public_id,
+        cloudinaryUrl: uploadResult.secure_url,
+        url: uploadResult.secure_url || uploadResult.url,
+        duration: uploadResult.duration,
+        bytes: uploadResult.bytes,
+        format: uploadResult.format,
+        folder,
+      },
+    });
+  } catch (error) {
+    console.error("Error uploading project audio:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to upload project audio",
+      error: error.message,
+    });
+  }
+};
+
 // Save exported project audio metadata (audioUrl, duration, waveformData)
 export const exportProjectAudio = async (req, res) => {
   try {
@@ -810,7 +876,8 @@ export const getProjectCollabState = async (req, res) => {
       snapshotPayload &&
       Array.isArray(snapshotPayload.tracks) &&
       snapshotPayload.tracks.some(
-        (track) => !Array.isArray(track?.items) || track.items.length === undefined
+        (track) =>
+          !Array.isArray(track?.items) || track.items.length === undefined
       );
 
     if (!snapshotPayload || snapshotMissingItems) {

@@ -14,6 +14,7 @@ export default function InviteCollaboratorModal({
   currentUserId,
   userRole, // "owner", "admin", "contributor", "viewer"
   projectOwner,
+  collaborators: externalCollaborators, // Optional: pass collaborators from parent
   onCollaboratorAdded,
   onCollaboratorRemoved,
 }) {
@@ -24,12 +25,39 @@ export default function InviteCollaboratorModal({
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
-  // Load collaborators when modal opens
+  // Load collaborators when modal opens - always refresh to get latest data
   useEffect(() => {
     if (isOpen && projectId) {
-      loadCollaborators();
+      // Reset state when modal opens
+      setError(null);
+      setSuccess(null);
+      setSearchInput("");
+      // If external collaborators are provided, use them as source of truth
+      if (externalCollaborators && Array.isArray(externalCollaborators)) {
+        setCollaborators(externalCollaborators);
+      } else {
+        // No external collaborators provided, fetch from API
+        loadCollaborators();
+      }
+    } else if (!isOpen) {
+      // Clear state when modal closes
+      setCollaborators([]);
+      setError(null);
+      setSuccess(null);
+      setSearchInput("");
     }
   }, [isOpen, projectId]);
+
+  // Update collaborators when externalCollaborators changes while modal is open
+  useEffect(() => {
+    if (
+      isOpen &&
+      externalCollaborators &&
+      Array.isArray(externalCollaborators)
+    ) {
+      setCollaborators(externalCollaborators);
+    }
+  }, [externalCollaborators, isOpen]);
 
   const loadCollaborators = async () => {
     try {
@@ -117,32 +145,82 @@ export default function InviteCollaboratorModal({
 
   const allCollaborators = useMemo(() => {
     const list = Array.isArray(collaborators) ? [...collaborators] : [];
-    const ownerId =
-      projectOwner?._id || projectOwner?.id || projectOwner?.userId;
-    if (projectOwner && ownerId) {
-      const exists = list.some(
-        (collab) =>
-          String(collab.userId?._id || collab.userId || collab._id) ===
-          String(ownerId)
-      );
+
+    // Handle projectOwner - it might be a full object or just an ID
+    let ownerId = null;
+    let ownerUser = null;
+
+    if (projectOwner) {
+      // If projectOwner is an object with _id, id, or userId
+      if (typeof projectOwner === "object") {
+        ownerId = projectOwner._id || projectOwner.id || projectOwner.userId;
+        ownerUser = projectOwner;
+      } else {
+        // If projectOwner is just an ID string
+        ownerId = projectOwner;
+      }
+    }
+
+    // Only add owner if we have an ID and owner is not already in the list
+    if (ownerId) {
+      const exists = list.some((collab) => {
+        // Check multiple possible ID locations to ensure we find the owner
+        const collabUserId =
+          collab.userId?._id ||
+          collab.userId ||
+          collab._id ||
+          collab.user?._id ||
+          collab.user?.id;
+        return collabUserId && String(collabUserId) === String(ownerId);
+      });
+
       if (!exists) {
+        // If we have a full user object, use it; otherwise create a minimal one
+        const ownerData = ownerUser || {
+          _id: ownerId,
+          username: "Owner",
+          displayName: "Owner",
+        };
+
+        // Match the structure of collaborators from API: userId can be object or ID
         list.unshift({
           _id: ownerId,
-          userId: ownerId,
-          user: projectOwner,
+          userId: ownerUser || ownerId, // Keep as object if available, otherwise ID
+          user: ownerData,
           role: "owner",
           status: "accepted",
           isOwner: true,
         });
       }
     }
+
     return list;
   }, [collaborators, projectOwner]);
 
-  // Filter out current user from collaborators list
-  const otherCollaborators = allCollaborators.filter((collab) => {
-    const userId = collab.userId?._id || collab.userId || collab._id;
-    return userId && String(userId) !== String(currentUserId);
+  // Display all collaborators (including current user with "(you)" label)
+  // Helper function to check if a collaborator is the current user
+  const isCurrentUser = (collab) => {
+    const userId =
+      collab.userId?._id ||
+      collab.userId ||
+      collab._id ||
+      collab.user?._id ||
+      collab.user?.id;
+    return userId && currentUserId && String(userId) === String(currentUserId);
+  };
+
+  // Debug logging to diagnose collaborator display issues
+  console.log("[DEBUG] Collaborator display (NO $):", {
+    allCollaboratorsCount: allCollaborators.length,
+    currentUserId,
+    allCollaborators: allCollaborators.map((c) => ({
+      userId: c.userId?._id || c.userId || c._id,
+      hasUser: !!c.user,
+      userDisplayName: c.user?.displayName || c.user?.username,
+      role: c.role,
+      status: c.status,
+      isCurrentUser: isCurrentUser(c),
+    })),
   });
 
   if (!isOpen) return null;
@@ -211,26 +289,30 @@ export default function InviteCollaboratorModal({
           {/* Collaborators List */}
           <div>
             <h3 className="text-sm font-medium text-gray-300 mb-2">
-              Current Collaborators ({otherCollaborators.length})
+              Current Collaborators ({allCollaborators.length})
             </h3>
             {loading ? (
               <div className="text-center py-4 text-gray-400 text-sm">
                 Loading...
               </div>
-            ) : otherCollaborators.length === 0 ? (
+            ) : allCollaborators.length === 0 ? (
               <div className="text-center py-4 text-gray-500 text-sm">
-                No other collaborators yet
+                No collaborators yet
               </div>
             ) : (
               <div className="space-y-2 max-h-64 overflow-y-auto">
-                {otherCollaborators.map((collab) => {
-                  // Backend returns userId as populated object or just the ID
-                  const user =
-                    collab.userId && typeof collab.userId === "object"
-                      ? collab.userId
-                      : collab.user || {};
+                {allCollaborators.map((collab) => {
+                  // Always use collab.user for user display data
+                  // collab.userId is the ID (string or object with _id)
+                  // collab.user is the user object with displayName, username, etc.
+                  const user = collab.user || {};
                   const userId =
-                    collab.userId?._id || collab.userId || collab._id;
+                    collab.userId?._id ||
+                    collab.userId ||
+                    collab._id ||
+                    collab.user?._id ||
+                    collab.user?.id;
+                  const isYou = isCurrentUser(collab);
 
                   return (
                     <div
@@ -258,6 +340,9 @@ export default function InviteCollaboratorModal({
                             {user.displayName ||
                               user.username ||
                               "Unknown User"}
+                            {isYou && (
+                              <span className="text-gray-400 ml-1">(you)</span>
+                            )}
                           </div>
                           {user.email && (
                             <div className="text-gray-400 text-xs">
@@ -283,19 +368,22 @@ export default function InviteCollaboratorModal({
                           </div>
                         </div>
                       </div>
-                      {/* Remove button - only for owners and admins */}
-                      {(userRole === "owner" || userRole === "admin") && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRemove(userId);
-                          }}
-                          className="p-2 text-gray-500 hover:text-red-400 rounded-lg transition-colors"
-                          title="Remove collaborator"
-                        >
-                          <FaUserMinus size={16} />
-                        </button>
-                      )}
+                      {/* Remove button - only for owners and admins, but not for the project owner or current user */}
+                      {(userRole === "owner" || userRole === "admin") &&
+                        collab.role !== "owner" &&
+                        !collab.isOwner &&
+                        !isYou && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemove(userId);
+                            }}
+                            className="p-2 text-gray-500 hover:text-red-400 rounded-lg transition-colors"
+                            title="Remove collaborator"
+                          >
+                            <FaUserMinus size={16} />
+                          </button>
+                        )}
                     </div>
                   );
                 })}

@@ -1,7 +1,7 @@
 // src/services/studioExportService.js
 import * as Tone from "tone";
 import { scheduleProject, calculateDuration } from "../utils/audioScheduler";
-import { uploadAudio } from "./cloudinaryService";
+import api from "./api";
 
 // Helper: Convert AudioBuffer to WAV Blob
 const audioBufferToWav = (buffer) => {
@@ -79,6 +79,19 @@ const generateWaveformFromBuffer = (buffer) => {
     // Return default waveform if generation fails
     return Array.from({ length: 100 }, () => 0.5);
   }
+};
+
+const uploadProjectAudioToServer = async (projectId, file) => {
+  const formData = new FormData();
+  formData.append("audio", file);
+  formData.append("fileName", file.name);
+
+  const response = await api.post(
+    `/projects/${projectId}/export-audio/upload`,
+    formData
+  );
+
+  return response.data;
 };
 
 /**
@@ -170,37 +183,46 @@ export const saveProjectWithAudio = async (projectState, projectId) => {
       type: "audio/wav",
     });
 
-    console.log("[Export] Uploading to Cloudinary...", {
+    console.log("(NO $) [DEBUG][ProjectExport] Uploading via API...", {
       fileName: file.name,
       fileSize: file.size,
       fileType: file.type,
-    });
-    // Upload directly to Cloudinary using the cloudinaryService
-    // Note: uploadAudio already sets resource_type to "video" and default folder
-    // We just need to override the folder for project-specific organization
-    const uploadResult = await uploadAudio(file, {
-      folder: `projects/${projectId}`,
+      projectId,
     });
 
-    if (!uploadResult.success) {
-      console.error("[Export] Upload failed:", uploadResult);
+    const uploadResponse = await uploadProjectAudioToServer(projectId, file);
+
+    if (!uploadResponse?.success) {
+      console.error("[Export] Upload failed:", uploadResponse);
       throw new Error(
-        uploadResult.error || "Failed to upload audio to Cloudinary"
+        uploadResponse?.message || "Failed to upload audio to server"
       );
     }
 
-    const audioUrl = uploadResult.data?.secure_url || uploadResult.data?.url;
+    const uploadData = uploadResponse.data || {};
+    const audioUrl =
+      uploadData.cloudinaryUrl || uploadData.secure_url || uploadData.url;
 
     if (!audioUrl) {
-      throw new Error("Upload succeeded but no URL returned from Cloudinary");
+      throw new Error("Upload succeeded but no URL returned from server");
     }
+
+    const uploadedDuration =
+      typeof uploadData.duration === "number" && uploadData.duration > 0
+        ? uploadData.duration
+        : duration;
 
     console.log("[Export] Generating waveform data...");
     // Generate waveform data from audio buffer
     const waveformData = generateWaveformFromBuffer(buffer);
 
     console.log("[Export] Complete!", audioUrl);
-    return { success: true, audioUrl, waveformData, duration };
+    return {
+      success: true,
+      audioUrl,
+      waveformData,
+      duration: uploadedDuration,
+    };
   } catch (error) {
     console.error("[Export] Failed:", error);
     throw error;

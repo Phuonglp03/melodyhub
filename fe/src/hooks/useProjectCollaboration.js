@@ -256,29 +256,71 @@ export const useProjectCollaboration = (projectId, user) => {
   );
 
   useEffect(() => {
-    if (!projectId || !resolvedUserId) return;
+    console.log("[Collaboration] useEffect triggered:", {
+      projectId,
+      resolvedUserId,
+      hasProjectId: !!projectId,
+      hasResolvedUserId: !!resolvedUserId,
+    });
+
+    if (!projectId || !resolvedUserId) {
+      console.log(
+        "[Collaboration] Skipping - missing projectId or resolvedUserId"
+      );
+      return;
+    }
 
     const socket = getSocket();
     if (!socket) {
+      console.warn("[Collaboration] Socket not available");
       if (COLLAB_DEBUG) {
         console.warn("[Collaboration] Socket not available");
       }
       return;
     }
 
+    console.log("[Collaboration] Socket obtained:", {
+      socketId: socket.id,
+      connected: socket.connected,
+    });
+
     socketRef.current = socket;
     hasJoinedRef.current = false;
 
     const joinProject = () => {
-      if (!socket || !projectId || !resolvedUserId) return;
+      if (!socket || !projectId || !resolvedUserId) {
+        console.log("[Collaboration] Cannot join - missing:", {
+          socket: !!socket,
+          projectId,
+          resolvedUserId,
+        });
+        return;
+      }
 
       if (socket.connected) {
+        console.log("[Collaboration] Emitting project:join:", {
+          projectId,
+          userId: resolvedUserId,
+          socketId: socket.id,
+        });
+
         if (COLLAB_DEBUG) {
           console.log("[Collaboration] Joining project:", projectId);
         }
         socket.emit("project:join", { projectId, userId: resolvedUserId });
         hasJoinedRef.current = true;
         startHeartbeat();
+
+        // Request initial presence after joining
+        // Some servers may not automatically send presence on join
+        setTimeout(() => {
+          if (socket.connected && projectId) {
+            console.log("[Collaboration] Requesting presence after join");
+            socket.emit("project:presence:request", { projectId });
+          }
+        }, 500);
+      } else {
+        console.log("[Collaboration] Cannot join - socket not connected");
       }
     };
 
@@ -337,6 +379,18 @@ export const useProjectCollaboration = (projectId, user) => {
 
     socket.on("project:presence", (data) => {
       markActivity();
+      console.log("[Collaboration] Socket received project:presence:", {
+        type: data?.type,
+        userId: data?.userId,
+        collaboratorsCount: data?.collaborators?.length,
+        collaborators: data?.collaborators?.map((c) => ({
+          userId: c.userId,
+          username: c.user?.username,
+          displayName: c.user?.displayName,
+        })),
+        fullData: data,
+      });
+
       if (COLLAB_DEBUG) {
         recordDebugEvent("recv:project:presence", {
           type: data?.type,
@@ -415,6 +469,12 @@ export const useProjectCollaboration = (projectId, user) => {
           );
         }
         socket.emit("project:join", { projectId, userId: resolvedUserId });
+        // Request presence after reconnecting
+        setTimeout(() => {
+          if (socket.connected && projectId) {
+            socket.emit("project:presence:request", { projectId });
+          }
+        }, 500);
       } else if (!hasJoinedRef.current) {
         joinProject();
       }
@@ -447,6 +507,19 @@ export const useProjectCollaboration = (projectId, user) => {
       }
     }
 
+    // Listen for presence requests from other parts of the app
+    const handlePresenceRequest = () => {
+      if (socket.connected && projectId) {
+        console.log("[Collaboration] Requesting presence via socket");
+        socket.emit("project:presence:request", { projectId });
+      }
+    };
+
+    const presenceRequestUnsub = collabChannel.on(
+      "project:presence:request",
+      handlePresenceRequest
+    );
+
     cleanupActivityWatcher();
     activityIntervalRef.current = setInterval(() => {
       if (!socketRef.current?.connected) return;
@@ -476,6 +549,7 @@ export const useProjectCollaboration = (projectId, user) => {
       });
       throttleTimersRef.current = {};
       throttlePayloadRef.current = {};
+      if (presenceRequestUnsub) presenceRequestUnsub();
       socket.off("project:update");
       socket.off("project:presence");
       socket.off("project:cursor_update");
@@ -570,7 +644,7 @@ export const useProjectCollaboration = (projectId, user) => {
     [sendAction]
   );
 
-  const broadcastCursor = useCallback((sectionId, barIndex) => {
+  const broadcastCursor = useCallback((sectionId, barIndex, x, y) => {
     if (!socketRef.current?.connected) {
       if (COLLAB_DEBUG) {
         console.warn(
@@ -583,6 +657,8 @@ export const useProjectCollaboration = (projectId, user) => {
     socketRef.current.emit("project:cursor", {
       sectionId,
       barIndex,
+      x,
+      y,
     });
   }, []);
 

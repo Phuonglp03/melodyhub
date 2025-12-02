@@ -1,7 +1,6 @@
 // fe/src/components/ProjectExportButton.js
 // Export button for ProjectDetailPage with range selection
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { FaDownload } from "react-icons/fa";
 import { saveProjectWithAudio } from "../services/studioExportService";
 import { saveProjectExport } from "../services/user/projectService";
@@ -23,7 +22,6 @@ export default function ProjectExportButton({
   className = "",
   onExportComplete,
 }) {
-  const navigate = useNavigate();
   const [isExporting, setIsExporting] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [rangeMode, setRangeMode] = useState("full"); // "full" | "range"
@@ -159,7 +157,7 @@ export default function ProjectExportButton({
       }
 
       setShowMenu(false);
-      navigate("/projects");
+      // Don't navigate away - user wants to see the waveform player
     } catch (error) {
       console.error("[Export] Failed:", error);
       alert("Failed to export project. Please try again.");

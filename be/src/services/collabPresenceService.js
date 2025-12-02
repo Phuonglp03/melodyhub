@@ -1,8 +1,7 @@
 import { getRedisClient } from "../config/redisClient.js";
 
 const PRESENCE_KEY = (projectId) => `collab:project:${projectId}:presence`;
-const PRESENCE_TTL_SEC =
-  Number(process.env.COLLAB_PRESENCE_TTL_SECONDS) || 45;
+const PRESENCE_TTL_SEC = Number(process.env.COLLAB_PRESENCE_TTL_SECONDS) || 45;
 
 const serialize = (value) => JSON.stringify(value);
 const deserialize = (value) => {
@@ -21,29 +20,47 @@ export const addCollaboratorPresence = async (
   socketId
 ) => {
   if (!projectId || !userId) return;
-  const client = await getRedisClient();
-  const key = PRESENCE_KEY(projectId);
-  const existingRaw = await client.hGet(key, userId);
-  const existing = deserialize(existingRaw) || {
-    userId,
-    sockets: [],
-    cursor: null,
-    lastHeartbeat: Date.now(),
-  };
+  try {
+    const client = await getRedisClient();
+    const key = PRESENCE_KEY(projectId);
+    const existingRaw = await client.hGet(key, userId);
+    const existing = deserialize(existingRaw) || {
+      userId,
+      sockets: [],
+      cursor: null,
+      lastHeartbeat: Date.now(),
+    };
 
-  const sockets = new Set(existing.sockets || []);
-  sockets.add(socketId);
+    const sockets = new Set(existing.sockets || []);
+    sockets.add(socketId);
 
-  const record = {
-    ...existing,
-    user: payload,
-    sockets: Array.from(sockets),
-    lastHeartbeat: Date.now(),
-  };
+    const record = {
+      ...existing,
+      user: payload,
+      sockets: Array.from(sockets),
+      lastHeartbeat: Date.now(),
+    };
 
-  await client.hSet(key, userId, serialize(record));
-  await client.expire(key, PRESENCE_TTL_SEC);
-  return record;
+    await client.hSet(key, userId, serialize(record));
+    await client.expire(key, PRESENCE_TTL_SEC);
+    console.log(
+      `[CollabPresence] Added presence for user ${userId} in project ${projectId}, socket ${socketId}`
+    );
+    return record;
+  } catch (err) {
+    console.error(
+      `[CollabPresence] addCollaboratorPresence error for project ${projectId}, user ${userId}:`,
+      err.message
+    );
+    // Return a minimal record even if Redis fails
+    return {
+      userId,
+      user: payload,
+      sockets: [socketId],
+      cursor: null,
+      lastHeartbeat: Date.now(),
+    };
+  }
 };
 
 export const removeCollaboratorPresence = async (
@@ -83,21 +100,40 @@ export const removeCollaboratorPresence = async (
 
 export const listCollaborators = async (projectId) => {
   if (!projectId) return [];
-  const client = await getRedisClient();
-  const key = PRESENCE_KEY(projectId);
-  const rawEntries = await client.hGetAll(key);
-  if (!rawEntries || !Object.keys(rawEntries).length) {
+  try {
+    const client = await getRedisClient();
+    const key = PRESENCE_KEY(projectId);
+    const rawEntries = await client.hGetAll(key);
+    if (!rawEntries || !Object.keys(rawEntries).length) {
+      console.log(
+        `[CollabPresence] listCollaborators - No entries found for project ${projectId}`
+      );
+      return [];
+    }
+    const collaborators = Object.values(rawEntries)
+      .map(deserialize)
+      .filter(Boolean)
+      .map((entry) => ({
+        userId: entry.userId,
+        user: entry.user,
+        cursor: entry.cursor,
+        lastHeartbeat: entry.lastHeartbeat,
+      }));
+    console.log(
+      `[CollabPresence] listCollaborators - Found ${collaborators.length} collaborators for project ${projectId}:`,
+      collaborators.map((c) => ({
+        userId: c.userId,
+        username: c.user?.username,
+      }))
+    );
+    return collaborators;
+  } catch (err) {
+    console.error(
+      `[CollabPresence] listCollaborators error for project ${projectId}:`,
+      err.message
+    );
     return [];
   }
-  return Object.values(rawEntries)
-    .map(deserialize)
-    .filter(Boolean)
-    .map((entry) => ({
-      userId: entry.userId,
-      user: entry.user,
-      cursor: entry.cursor,
-      lastHeartbeat: entry.lastHeartbeat,
-    }));
 };
 
 export const updateCursorPosition = async (projectId, userId, cursor) => {
@@ -182,4 +218,3 @@ if (typeof global !== "undefined") {
     }, CLEANUP_INTERVAL_MS);
   }
 }
-

@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import TimelineTrack from "./TimelineTrack";
 import ChordBlock from "../ChordBlock";
+import CollaboratorCursor from "../Collaboration/CollaboratorCursor";
 
 /**
  * TimelineView - Main timeline container component
@@ -84,12 +85,138 @@ const TimelineView = ({
     (track) => !track.isBackingTrack && track.trackType !== "backing"
   );
 
+  // Track mouse position for cursor broadcasting
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const [isMouseOverTimeline, setIsMouseOverTimeline] = useState(false);
+  const cursorTimeoutRef = useRef(null);
+
+  // Broadcast cursor position when mouse moves
+  useEffect(() => {
+    if (!broadcastCursor || !isMouseOverTimeline) return;
+
+    const handleMouseMove = (e) => {
+      if (!timelineRef?.current) return;
+
+      const rect = timelineRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      setMousePosition({ x, y });
+
+      // Calculate bar index from x position
+      const TRACK_COLUMN_WIDTH = 256;
+      const timelineX = x - TRACK_COLUMN_WIDTH;
+      if (timelineX > 0 && pixelsPerBeat) {
+        const barIndex = Math.floor(
+          timelineX / (pixelsPerBeat * beatsPerMeasure)
+        );
+
+        // Throttle cursor broadcasts (every 100ms)
+        if (cursorTimeoutRef.current) {
+          clearTimeout(cursorTimeoutRef.current);
+        }
+        cursorTimeoutRef.current = setTimeout(() => {
+          if (broadcastCursor) {
+            // Get absolute position for cursor display
+            const absoluteX = e.clientX;
+            const absoluteY = e.clientY;
+            broadcastCursor(null, barIndex, absoluteX, absoluteY);
+          }
+        }, 100);
+      }
+    };
+
+    const handleMouseEnter = () => {
+      setIsMouseOverTimeline(true);
+    };
+
+    const handleMouseLeave = () => {
+      setIsMouseOverTimeline(false);
+      // Clear cursor when mouse leaves
+      if (broadcastCursor) {
+        broadcastCursor(null, null);
+      }
+    };
+
+    const timelineElement = timelineRef?.current;
+    if (timelineElement) {
+      timelineElement.addEventListener("mousemove", handleMouseMove);
+      timelineElement.addEventListener("mouseenter", handleMouseEnter);
+      timelineElement.addEventListener("mouseleave", handleMouseLeave);
+    }
+
+    return () => {
+      if (timelineElement) {
+        timelineElement.removeEventListener("mousemove", handleMouseMove);
+        timelineElement.removeEventListener("mouseenter", handleMouseEnter);
+        timelineElement.removeEventListener("mouseleave", handleMouseLeave);
+      }
+      if (cursorTimeoutRef.current) {
+        clearTimeout(cursorTimeoutRef.current);
+      }
+    };
+  }, [
+    broadcastCursor,
+    isMouseOverTimeline,
+    pixelsPerBeat,
+    beatsPerMeasure,
+    timelineRef,
+  ]);
+
+  // Get other collaborators (excluding current user) with cursor positions
+  const collaboratorCursors = React.useMemo(() => {
+    return collaborators
+      .filter((collab) => {
+        const collaboratorId =
+          collab.userId || collab._id || collab.user?._id || collab.user?.id;
+        const hasCursor =
+          collab.cursor?.position || collab.cursor?.barIndex !== undefined;
+        return (
+          collaboratorId &&
+          String(collaboratorId) !== String(currentUserId) &&
+          hasCursor
+        );
+      })
+      .map((collab) => {
+        const cursorPos = collab.cursor?.position;
+        if (!cursorPos || !timelineRef?.current) return null;
+
+        const rect = timelineRef.current.getBoundingClientRect();
+        // Convert absolute position to relative position within timeline
+        const relativeX = cursorPos.x - rect.left;
+        const relativeY = cursorPos.y - rect.top;
+
+        // Only show cursor if it's within timeline bounds
+        if (
+          relativeX >= 0 &&
+          relativeX <= rect.width &&
+          relativeY >= 0 &&
+          relativeY <= rect.height
+        ) {
+          return {
+            collaborator: collab,
+            position: { x: relativeX, y: relativeY },
+          };
+        }
+        return null;
+      })
+      .filter(Boolean);
+  }, [collaborators, currentUserId, timelineRef]);
+
   return (
     <div
       ref={timelineRef}
       className="flex-1 overflow-auto relative min-w-0"
       onClick={onTimelineClick}
     >
+      {/* Render collaborator cursors */}
+      {collaboratorCursors.map(({ collaborator, position }) => (
+        <CollaboratorCursor
+          key={collaborator.userId || collaborator._id}
+          collaborator={collaborator}
+          position={position}
+        />
+      ))}
       {/* Time Ruler with Beat Markers */}
       <div className="sticky top-0 z-20 flex">
         <div className="w-64 bg-gray-950 border-r border-gray-800 h-6 flex items-center px-4 text-xs font-semibold uppercase tracking-wide text-gray-400 sticky left-0 z-20">

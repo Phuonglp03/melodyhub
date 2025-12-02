@@ -6,26 +6,7 @@ import React, {
   useCallback,
 } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import {
-  FaMusic,
-  FaTrash,
-  FaPlus,
-  FaSearch,
-  FaTimes,
-  FaEllipsisV,
-  FaPalette,
-  FaPen,
-  FaArrowUp,
-  FaArrowDown,
-  FaUndo,
-  FaRedo,
-  FaPlay,
-  FaPause,
-  FaChevronDown,
-  FaChevronUp,
-  FaUserPlus,
-} from "react-icons/fa";
-import { RiPulseFill } from "react-icons/ri";
+import { FaPlus } from "react-icons/fa";
 import {
   getCommunityLicks,
   playLickAudio,
@@ -50,7 +31,6 @@ import {
   generateBackingTrack as generateBackingTrackAPI,
   generateAIBackingTrack,
 } from "../../../services/user/projectService";
-import { createPost as createPostApi } from "../../../services/user/post";
 import BackingTrackPanel from "../../../components/BackingTrackPanel";
 import MidiEditor from "../../../components/MidiEditor";
 import AIGenerationLoadingModal from "../../../components/AIGenerationLoadingModal";
@@ -71,7 +51,7 @@ import { DndProvider } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import ProjectBandEngine from "../../../components/ProjectBandEngine";
 import ProjectLickLibrary from "../../../components/ProjectLickLibrary";
-import ProjectExportButton from "../../../components/ProjectExportButton";
+import ProjectPlayer from "../../../components/ProjectPlayer";
 import ChordBlock from "../../../components/ChordBlock";
 import BandConsole from "../../../components/BandConsole";
 import InviteCollaboratorModal from "../../../components/InviteCollaboratorModal";
@@ -99,13 +79,16 @@ import {
 } from "../../../hooks/useProjectUI";
 import { useProjectBackingTrack } from "../../../hooks/useProjectBackingTrack";
 import { useProjectMidiEditor } from "../../../hooks/useProjectMidiEditor";
+import useProjectKeyboardShortcuts from "../../../hooks/useProjectKeyboardShortcuts";
+import useTimelineAutosave from "../../../hooks/useTimelineAutosave";
 // Extracted components
 import TimelineView from "../../../components/ProjectTimeline/TimelineView";
-import ProjectSettingsPanel from "../../../components/ProjectSettings/ProjectSettingsPanel";
-import CollaborationPanel from "../../../components/Collaboration/CollaborationPanel";
 import ChordProgressionEditor from "../../../components/ChordProgression/ChordProgressionEditor";
 import ChordLibrary from "../../../components/ChordProgression/ChordLibrary";
-import ProjectPlaybackControls from "../../../components/AudioControls/ProjectPlaybackControls";
+import TrackContextMenu from "../../../components/ProjectDetail/TrackContextMenu";
+import AddTrackModal from "../../../components/ProjectDetail/AddTrackModal";
+import PerformanceDeckPanel from "../../../components/ProjectDetail/PerformanceDeckPanel";
+import ProjectTopToolbar from "../../../components/ProjectDetail/ProjectTopToolbar";
 // Extracted utilities
 import {
   formatLabelValue,
@@ -489,6 +472,21 @@ const ProjectDetailPage = () => {
     handleTrackDelete,
   } = tracksHook || {};
 
+  useProjectKeyboardShortcuts({
+    closeTrackMenu,
+    setFocusedClipId,
+    focusedClipId,
+    resolveChordIndex: getChordIndexFromId,
+    handleDeleteTimelineItem,
+    handleRemoveChord,
+  });
+
+  useTimelineAutosave({
+    tracks,
+    markTimelineItemDirty,
+    scheduleTimelineAutosave,
+  });
+
   // Helper functions
   const updateBandSettings = (updater) => {
     setBandSettings((prev) => {
@@ -505,6 +503,35 @@ const ProjectDetailPage = () => {
       };
     });
   };
+
+  const handleCloseAddTrackModal = useCallback(() => {
+    setAddTrackModalOpen(false);
+    setNewTrackName("");
+    setAddTrackError(null);
+    setAddTrackSuccess(null);
+  }, [
+    setAddTrackModalOpen,
+    setNewTrackName,
+    setAddTrackError,
+    setAddTrackSuccess,
+  ]);
+
+  const handleProjectStyleChange = useCallback(
+    (newStyle) => {
+      if (!project) return;
+
+      setProject((prev) => (prev ? { ...prev, style: newStyle } : prev));
+
+      if (broadcast) {
+        broadcast("PROJECT_SETTINGS_UPDATE", {
+          style: newStyle,
+        });
+      }
+
+      updateProject(projectId, { style: newStyle });
+    },
+    [project, setProject, broadcast, projectId]
+  );
 
   // Extract UI values from hook
   const {
@@ -539,6 +566,7 @@ const ProjectDetailPage = () => {
     collaborators,
     setCollaborators,
     setActiveEditors,
+    isConnected,
     setIsConnected,
     setTracks: timelineHook?.setTracks,
     setChordProgression: chordsHook?.setChordProgression,
@@ -763,18 +791,6 @@ const ProjectDetailPage = () => {
   const { handleOpenMidiEditor, handleCloseMidiEditor, handleSaveMidiEdit } =
     midiEditorHook || {};
 
-  useEffect(() => {
-    const handleEscape = (event) => {
-      if (event.key === "Escape") {
-        closeTrackMenu();
-        setFocusedClipId(null);
-      }
-    };
-
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [closeTrackMenu, setFocusedClipId]);
-
   // chordDurationSeconds, chordItems, and chordPalette are now in useProjectChords hook
   // studioSeed is now in computedValues hook
 
@@ -797,49 +813,6 @@ const ProjectDetailPage = () => {
   }, [fetchLicks, lickSearchTerm]);
 
   // Playback control logic is now in playbackHook (extracted above)
-
-  // Auto-save when clips are moved/edited (catches all clip position changes)
-  const prevTracksRef = useRef(null);
-  useEffect(() => {
-    // Skip on initial load
-    if (!prevTracksRef.current) {
-      prevTracksRef.current = tracks;
-      return;
-    }
-
-    // Check if any clip positions have changed
-    let hasChanges = false;
-    const changedItemIds = new Set();
-
-    tracks.forEach((track) => {
-      const prevTrack = prevTracksRef.current.find((t) => t._id === track._id);
-      if (!prevTrack) return;
-
-      (track.items || []).forEach((item) => {
-        const prevItem = (prevTrack.items || []).find(
-          (i) => i._id === item._id
-        );
-        if (!prevItem) {
-          changedItemIds.add(item._id);
-          hasChanges = true;
-        } else if (
-          item.startTime !== prevItem.startTime ||
-          item.duration !== prevItem.duration ||
-          item.offset !== prevItem.offset
-        ) {
-          changedItemIds.add(item._id);
-          hasChanges = true;
-        }
-      });
-    });
-
-    if (hasChanges) {
-      changedItemIds.forEach((itemId) => markTimelineItemDirty(itemId));
-      scheduleTimelineAutosave();
-    }
-
-    prevTracksRef.current = tracks;
-  }, [tracks, markTimelineItemDirty, scheduleTimelineAutosave]);
 
   // handlePlay, handlePause, handleStop, handleReturnToStart, handlePlayToggle are now in useProjectTimeline hook
 
@@ -866,23 +839,6 @@ const ProjectDetailPage = () => {
   // handleDrop is now in useProjectTimeline hook
 
   // handleDeleteTimelineItem is now in useProjectTimeline hook
-
-  useEffect(() => {
-    const handleKeyDelete = (event) => {
-      if (event.key !== "Delete" || !focusedClipId) return;
-      event.preventDefault();
-      const chordIndex = getChordIndexFromId(focusedClipId);
-      if (chordIndex !== null) {
-        handleRemoveChord(focusedClipId);
-      } else {
-        handleDeleteTimelineItem(focusedClipId, { skipConfirm: true });
-      }
-      setFocusedClipId(null);
-    };
-
-    window.addEventListener("keydown", handleKeyDelete);
-    return () => window.removeEventListener("keydown", handleKeyDelete);
-  }, [focusedClipId, handleDeleteTimelineItem, handleRemoveChord]);
 
   const handleDeleteProject = async () => {
     if (!project?._id || isDeleting) return;
@@ -956,15 +912,6 @@ const ProjectDetailPage = () => {
   const canMoveMenuDown =
     menuTrackIndex > -1 && menuTrackIndex < orderedTracks.length - 1;
   const timelineWidth = calculateTimelineWidth();
-  const toolbarButtonClasses = (isActive, disabled) =>
-    [
-      "w-8 h-8 rounded-full flex items-center justify-center text-xs transition-colors",
-      disabled
-        ? "bg-gray-800 text-gray-500 cursor-not-allowed"
-        : isActive
-        ? "bg-white text-gray-900"
-        : "bg-gray-800 text-gray-200 hover:bg-gray-700",
-    ].join(" ");
   const workspaceScalePercentage = Math.round(workspaceScale * 100);
 
   // Extract project key and style for components
@@ -1000,247 +947,95 @@ const ProjectDetailPage = () => {
             height: `${(1 / workspaceScale) * 100}%`,
           }}
         >
-          {/* Top Bar - Compact Controls */}
-          <div className="bg-gray-950 border-b border-gray-800/60 px-4 py-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={() => navigate("/projects")}
-                  className="h-9 px-3 rounded-full bg-gray-900 text-white text-xs font-medium flex items-center gap-2 hover:bg-gray-800 transition-colors"
-                >
-                  <FaTimes size={12} className="rotate-45" />
-                  Back
-                </button>
-                <div className="flex items-center gap-1 bg-gray-900/70 border border-gray-800 rounded-full px-2 py-1">
-                  <button
-                    type="button"
-                    className={toolbarButtonClasses(
-                      false,
-                      !historyStatus.canUndo
-                    )}
-                    onClick={handleUndo}
-                    disabled={!historyStatus.canUndo}
-                    title="Undo"
-                  >
-                    <FaUndo size={12} />
-                  </button>
-                  <button
-                    type="button"
-                    className={toolbarButtonClasses(
-                      false,
-                      !historyStatus.canRedo
-                    )}
-                    onClick={handleRedo}
-                    disabled={!historyStatus.canRedo}
-                    title="Redo"
-                  >
-                    <FaRedo size={12} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={flushTimelineSaves}
-                    disabled={isSavingTimeline || !hasUnsavedTimelineChanges}
-                    className={toolbarButtonClasses(
-                      hasUnsavedTimelineChanges,
-                      isSavingTimeline || !hasUnsavedTimelineChanges
-                    )}
-                    title="Save timeline changes"
-                  >
-                    Save
-                  </button>
-                  <span className="text-[10px] uppercase tracking-wide text-gray-400 px-1">
-                    {isSavingTimeline
-                      ? "Saving..."
-                      : hasUnsavedTimelineChanges
-                      ? "Unsaved"
-                      : "Synced"}
-                  </span>
-                  <button
-                    type="button"
-                    className={toolbarButtonClasses(metronomeEnabled, false)}
-                    onClick={() => setMetronomeEnabled((prev) => !prev)}
-                    title="Metronome"
-                  >
-                    <RiPulseFill size={12} />
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1 bg-gray-900/60 border border-gray-800 rounded-full px-2 py-1 text-[11px] text-gray-300">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setZoomLevel(Math.max(0.25, zoomLevel - 0.25))
+          <ProjectTopToolbar
+            onBack={() => navigate("/projects")}
+            canUndo={historyStatus.canUndo}
+            canRedo={historyStatus.canRedo}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            onSaveTimeline={flushTimelineSaves}
+            isSavingTimeline={isSavingTimeline}
+            hasUnsavedTimelineChanges={hasUnsavedTimelineChanges}
+            metronomeEnabled={metronomeEnabled}
+            onToggleMetronome={() => setMetronomeEnabled((prev) => !prev)}
+            zoomLevelDisplay={Math.round(zoomLevel * 100)}
+            onZoomOut={() =>
+              setZoomLevel((prev) => Math.max(0.25, prev - 0.25))
+            }
+            onZoomIn={() => setZoomLevel((prev) => Math.min(4, prev + 0.25))}
+            workspaceScalePercentage={workspaceScalePercentage}
+            onWorkspaceScaleDecrease={() =>
+              adjustWorkspaceScale(-WORKSPACE_SCALE_STEP)
+            }
+            onWorkspaceScaleIncrease={() =>
+              adjustWorkspaceScale(WORKSPACE_SCALE_STEP)
+            }
+            canDecreaseWorkspaceScale={
+              workspaceScale > MIN_WORKSPACE_SCALE + 0.001
+            }
+            canIncreaseWorkspaceScale={
+              workspaceScale < MAX_WORKSPACE_SCALE - 0.001
+            }
+            playbackControlsProps={{
+              isPlaying,
+              loopEnabled,
+              metronomeEnabled,
+              formattedPlayTime,
+              onPlay: handlePlay,
+              onPause: handlePause,
+              onStop: handleStop,
+              onReturnToStart: handleReturnToStart,
+              onLoopToggle: () => setLoopEnabled((prev) => !prev),
+              onMetronomeToggle: () => setMetronomeEnabled((prev) => !prev),
+              className: "shadow-inner",
+            }}
+            settingsPanelProps={{
+              tempoDraft,
+              setTempoDraft,
+              onTempoCommit: commitTempoChange,
+              projectKey: settingsProjectKeyName,
+              onKeyChange: handleKeyChange,
+              projectTimeSignature: projectTimeSignatureName,
+              onTimeSignatureChange: handleTimeSignatureChange,
+            }}
+            exportButtonProps={{
+              variant: "compact",
+              className: "shadow-lg",
+              projectId,
+              projectName: project?.name || project?.title || "Untitled",
+              chordProgression,
+              bpm: project?.bpm || 120,
+              projectKey,
+              style: projectStyle,
+              bandSettings,
+              status: project?.status,
+              timeSignature: normalizedTimeSignature,
+              onExportComplete: (exportData) => {
+                setProject((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        audioUrl: exportData.audioUrl,
+                        audioDuration: exportData.audioDuration,
+                        waveformData: exportData.waveformData,
                       }
-                      className="px-2 py-0.5 rounded-full bg-gray-950 hover:bg-gray-800 text-white"
-                      title="Zoom out"
-                    >
-                      −
-                    </button>
-                    <span className="min-w-[44px] text-center font-mono">
-                      {Math.round(zoomLevel * 100)}%
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setZoomLevel(Math.min(4, zoomLevel + 0.25))
-                      }
-                      className="px-2 py-0.5 rounded-full bg-gray-950 hover:bg-gray-800 text-white"
-                      title="Zoom in"
-                    >
-                      +
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-1 bg-gray-900/60 border border-gray-800 rounded-full px-2 py-1 text-[11px] text-gray-300">
-                    <span className="uppercase text-gray-500">Display</span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        adjustWorkspaceScale(-WORKSPACE_SCALE_STEP)
-                      }
-                      disabled={workspaceScale <= MIN_WORKSPACE_SCALE + 0.001}
-                      className="px-2 py-0.5 rounded-full bg-gray-950 hover:bg-gray-800 text-white disabled:opacity-40"
-                      title="Scale entire workspace down"
-                    >
-                      −
-                    </button>
-                    <span className="min-w-[44px] text-center font-mono">
-                      {workspaceScalePercentage}%
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => adjustWorkspaceScale(WORKSPACE_SCALE_STEP)}
-                      disabled={workspaceScale >= MAX_WORKSPACE_SCALE - 0.001}
-                      className="px-2 py-0.5 rounded-full bg-gray-950 hover:bg-gray-800 text-white disabled:opacity-40"
-                      title="Scale entire workspace up"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 ml-auto flex-wrap justify-end">
-                <ProjectPlaybackControls
-                  isPlaying={isPlaying}
-                  loopEnabled={loopEnabled}
-                  metronomeEnabled={metronomeEnabled}
-                  formattedPlayTime={formattedPlayTime}
-                  onPlay={handlePlay}
-                  onPause={handlePause}
-                  onStop={handleStop}
-                  onReturnToStart={handleReturnToStart}
-                  onLoopToggle={() => setLoopEnabled((prev) => !prev)}
-                  onMetronomeToggle={() => setMetronomeEnabled((prev) => !prev)}
-                  className="shadow-inner"
-                />
-                <ProjectSettingsPanel
-                  tempoDraft={tempoDraft}
-                  setTempoDraft={setTempoDraft}
-                  onTempoCommit={commitTempoChange}
-                  projectKey={settingsProjectKeyName}
-                  onKeyChange={handleKeyChange}
-                  projectTimeSignature={projectTimeSignatureName}
-                  onTimeSignatureChange={handleTimeSignatureChange}
-                />
-                <ProjectExportButton
-                  variant="compact"
-                  className="shadow-lg"
-                  projectId={projectId}
-                  projectName={project?.name || project?.title || "Untitled"}
-                  chordProgression={chordProgression}
-                  bpm={project?.bpm || 120}
-                  projectKey={projectKey}
-                  style={projectStyle}
-                  bandSettings={bandSettings}
-                  status={project?.status}
-                  timeSignature={normalizedTimeSignature}
-                  onExportComplete={(exportData) => {
-                    setProject((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            audioUrl: exportData.audioUrl,
-                            audioDuration: exportData.audioDuration,
-                            waveformData: exportData.waveformData,
-                          }
-                        : prev
-                    );
-                  }}
-                />
-                <button
-                  type="button"
-                  disabled={!project?.audioUrl}
-                  onClick={async () => {
-                    if (!project?.audioUrl) {
-                      alert("Please export project audio before sharing.");
-                      return;
-                    }
-                    try {
-                      console.log(
-                        "(NO $) [DEBUG][ProjectExport] ShareToFeed:",
-                        {
-                          projectId,
-                          hasAudioUrl: !!project.audioUrl,
-                        }
-                      );
-
-                      const payload = {
-                        postType: "status_update",
-                        textContent: `🎵 New project export: ${
-                          project.title || "Untitled Project"
-                        }`,
-                        media: [
-                          {
-                            url: project.audioUrl,
-                            type: "audio",
-                          },
-                        ],
-                      };
-                      const res = await createPostApi(payload);
-                      if (res?.success) {
-                        alert("Shared to feed!");
-                      } else {
-                        alert("Failed to share. Please try again.");
-                      }
-                    } catch (err) {
-                      console.error("Error sharing project export:", err);
-                      alert(
-                        err?.response?.data?.message ||
-                          err?.message ||
-                          "Failed to share project export"
-                      );
-                    }
-                  }}
-                  className="h-9 px-3 rounded-full bg-gray-900 text-white text-xs font-medium flex items-center gap-2 hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  title={
-                    project?.audioUrl
-                      ? "Share this exported audio to your feed"
-                      : "Export audio first to share"
-                  }
-                >
-                  Share to Feed
-                </button>
-                <CollaborationPanel
-                  collaborators={collaborators}
-                  currentUserId={user?._id}
-                  activeEditors={activeEditors}
-                  isConnected={isConnected}
-                  onInvite={() => setInviteModalOpen(true)}
-                />
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center justify-between text-[11px] text-gray-400 mt-2">
-              <span>
-                {project.title} • {formatDate(project.createdAt)}
-              </span>
-              <span className="flex items-center gap-2">
-                <span>Zoom {Math.round(zoomLevel * 100)}%</span>
-                <span>Display {workspaceScalePercentage}%</span>
-                <span>{projectTimeSignatureName}</span>
-                <span>{settingsProjectKeyName || "Key"}</span>
-              </span>
-            </div>
-          </div>
+                    : prev
+                );
+              },
+            }}
+            collaborationProps={{
+              collaborators,
+              currentUserId,
+              activeEditors,
+              isConnected,
+              onInvite: () => setInviteModalOpen(true),
+            }}
+            projectTitle={project?.title || project?.name || "Untitled Project"}
+            projectCreatedAt={project?.createdAt}
+            projectTimeSignatureName={projectTimeSignatureName}
+            projectKeyLabel={settingsProjectKeyName}
+            formatDate={formatDate}
+          />
 
           {/* Main Content Area */}
           <div className="flex flex-1 flex-col overflow-hidden">
@@ -1304,7 +1099,7 @@ const ProjectDetailPage = () => {
                       draggedLick={draggedLick}
                       setDraggedLick={setDraggedLick}
                       activeEditors={activeEditors}
-                      currentUserId={user?._id}
+                      currentUserId={currentUserId}
                       handleDrop={handleDrop}
                       handleClipMouseDown={handleClipMouseDown}
                       handleClipResizeStart={startClipResize}
@@ -1354,181 +1149,43 @@ const ProjectDetailPage = () => {
                     </div>
                   </div>
 
-                  {/* Embedded Bottom Panel */}
-                  <div
-                    className="absolute left-0 right-0 transition-all duration-300 ease-in-out"
-                    style={{
-                      height: sidePanelOpen
-                        ? sidePanelWidth
-                        : COLLAPSED_DECK_HEIGHT,
-                      bottom: 0,
-                    }}
-                  >
-                    <div className="h-full flex flex-col shadow-2xl shadow-black/50">
-                      <div className="flex items-center justify-between h-11 px-4 bg-gray-950 border-t border-gray-800">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-white">
-                          <FaPalette size={12} className="text-orange-400" />
-                          Performance Deck
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {sidePanelOpen && (
-                            <button
-                              onMouseDown={startPerformanceDeckResize}
-                              className="text-gray-500 hover:text-white px-2 py-1 rounded-md border border-gray-700 text-[11px]"
-                              title="Drag to resize"
-                            >
-                              Resize
-                            </button>
-                          )}
-                          <button
-                            onClick={() => setSidePanelOpen((prev) => !prev)}
-                            className="text-gray-400 hover:text-white p-1 rounded-md border border-gray-700"
-                            title={
-                              sidePanelOpen ? "Collapse panel" : "Expand panel"
-                            }
-                          >
-                            {sidePanelOpen ? (
-                              <FaChevronDown size={12} />
-                            ) : (
-                              <FaChevronUp size={12} />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div
-                        className={`bg-gray-950 border-t border-gray-800 flex-1 flex flex-col transition-opacity duration-200 ${
-                          sidePanelOpen
-                            ? "opacity-100"
-                            : "opacity-0 pointer-events-none"
-                        }`}
-                      >
-                        {sidePanelOpen && (
-                          <BandConsole
-                            selectedChordIndex={selectedChordIndex}
-                            onChordSelect={handleChordSelect}
-                            onAddChord={handleAddChordFromDeck}
-                            projectKey={projectKey}
-                            bandSettings={bandSettings}
-                            onSettingsChange={updateBandSettings}
-                            style={projectStyle}
-                            onStyleChange={(newStyle) => {
-                              if (project) {
-                                setProject({ ...project, style: newStyle });
-
-                                // Broadcast to collaborators immediately (before API call)
-                                if (broadcast) {
-                                  broadcast("PROJECT_SETTINGS_UPDATE", {
-                                    style: newStyle,
-                                  });
-                                }
-
-                                updateProject(projectId, { style: newStyle });
-                              }
-                            }}
-                            instruments={instruments}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  <PerformanceDeckPanel
+                    sidePanelOpen={sidePanelOpen}
+                    sidePanelWidth={sidePanelWidth}
+                    collapsedHeight={COLLAPSED_DECK_HEIGHT}
+                    onTogglePanel={() => setSidePanelOpen((prev) => !prev)}
+                    onStartResize={startPerformanceDeckResize}
+                    selectedChordIndex={selectedChordIndex}
+                    onChordSelect={handleChordSelect}
+                    onAddChord={handleAddChordFromDeck}
+                    projectKey={projectKey}
+                    bandSettings={bandSettings}
+                    onSettingsChange={updateBandSettings}
+                    projectStyle={projectStyle}
+                    onStyleChange={handleProjectStyleChange}
+                    instruments={instruments}
+                    BandConsoleComponent={BandConsole}
+                  />
                 </div>
               </div>
             </div>
           </div>
 
-          {trackContextMenu.isOpen && menuTrack && (
-            <div className="fixed inset-0 z-40" onClick={closeTrackMenu}>
-              <div
-                className="absolute z-50 w-64 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-4 space-y-3"
-                style={{
-                  top: `${menuPosition.y}px`,
-                  left: `${menuPosition.x}px`,
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div>
-                  <p className="text-sm font-semibold text-white truncate">
-                    {formatTrackTitle(menuTrack.trackName || "Track")}
-                  </p>
-                  {menuTrack.isBackingTrack && (
-                    <p className="text-xs text-orange-400 mt-1">
-                      Backing track
-                    </p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleTrackRename(menuTrack)}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-gray-200 hover:bg-gray-800 transition-colors"
-                >
-                  <FaPen size={12} />
-                  Rename track
-                </button>
-                <div>
-                  <div className="text-xs uppercase text-gray-400 mb-2 flex items-center gap-2">
-                    <FaPalette size={12} />
-                    Color
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {TRACK_COLOR_PALETTE.map((color) => {
-                      const isActive = menuTrack.color === color;
-                      return (
-                        <button
-                          type="button"
-                          key={color}
-                          onClick={() =>
-                            handleTrackColorChange(menuTrack, color)
-                          }
-                          className={`w-6 h-6 rounded-full border ${
-                            isActive
-                              ? "ring-2 ring-white border-white"
-                              : "border-transparent"
-                          }`}
-                          style={{ backgroundColor: color }}
-                          title="Set track color"
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  disabled={!canMoveMenuUp}
-                  onClick={() => handleTrackMove(menuTrack, "up")}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors ${
-                    canMoveMenuUp
-                      ? "text-gray-200 hover:bg-gray-800"
-                      : "text-gray-600 cursor-not-allowed"
-                  }`}
-                >
-                  <FaArrowUp size={12} />
-                  Move up
-                </button>
-                <button
-                  type="button"
-                  disabled={!canMoveMenuDown}
-                  onClick={() => handleTrackMove(menuTrack, "down")}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm transition-colors ${
-                    canMoveMenuDown
-                      ? "text-gray-200 hover:bg-gray-800"
-                      : "text-gray-600 cursor-not-allowed"
-                  }`}
-                >
-                  <FaArrowDown size={12} />
-                  Move down
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleTrackDelete(menuTrack)}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm text-red-400 hover:text-red-200 hover:bg-red-900/20 transition-colors"
-                >
-                  <FaTrash size={12} />
-                  Delete track
-                </button>
-              </div>
-            </div>
-          )}
+          <TrackContextMenu
+            isOpen={trackContextMenu.isOpen}
+            menuTrack={menuTrack}
+            position={menuPosition}
+            trackColorPalette={TRACK_COLOR_PALETTE}
+            canMoveUp={canMoveMenuUp}
+            canMoveDown={canMoveMenuDown}
+            onClose={closeTrackMenu}
+            onRename={handleTrackRename}
+            onColorChange={handleTrackColorChange}
+            onMoveUp={(track) => handleTrackMove(track, "up")}
+            onMoveDown={(track) => handleTrackMove(track, "down")}
+            onDelete={handleTrackDelete}
+            formatTrackTitle={formatTrackTitle}
+          />
 
           {/* MIDI Editor Modal */}
           {midiEditorOpen && editingTimelineItem && (
@@ -1552,9 +1209,10 @@ const ProjectDetailPage = () => {
             isOpen={inviteModalOpen}
             onClose={() => setInviteModalOpen(false)}
             projectId={projectId}
-            currentUserId={user?._id}
+            currentUserId={currentUserId}
             userRole={userRole}
             projectOwner={project?.creatorId}
+            collaborators={collaborators}
             onCollaboratorAdded={(newCollaborator) => {
               // Refresh project to get updated collaborator list
               if (refreshProjectRef.current) {
@@ -1604,90 +1262,15 @@ const ProjectDetailPage = () => {
             </div>
           )}
 
-          {/* Add Track Modal */}
-          {addTrackModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-              <div className="bg-gray-900 border border-gray-800 rounded-lg w-full max-w-md mx-4 shadow-2xl">
-                {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b border-gray-800">
-                  <h2 className="text-lg font-semibold text-white">
-                    Add New Track
-                  </h2>
-                  <button
-                    onClick={() => {
-                      setAddTrackModalOpen(false);
-                      setNewTrackName("");
-                      setAddTrackError(null);
-                      setAddTrackSuccess(null);
-                    }}
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    <FaTimes size={20} />
-                  </button>
-                </div>
-
-                {/* Content */}
-                <div className="p-4 space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      Track Name
-                    </label>
-                    <input
-                      type="text"
-                      value={newTrackName}
-                      onChange={(e) => setNewTrackName(e.target.value)}
-                      onKeyPress={(e) => {
-                        if (e.key === "Enter" && newTrackName.trim()) {
-                          handleConfirmAddTrack();
-                        }
-                      }}
-                      placeholder="Enter track name"
-                      className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
-                      autoFocus
-                    />
-                    <p className="mt-2 text-xs text-gray-500">
-                      Track type: Audio (default)
-                    </p>
-                  </div>
-
-                  {/* Messages */}
-                  {addTrackError && (
-                    <div className="p-3 bg-red-900/20 border border-red-700/50 rounded-lg text-red-400 text-sm">
-                      {addTrackError}
-                    </div>
-                  )}
-                  {addTrackSuccess && (
-                    <div className="p-3 bg-green-900/20 border border-green-700/50 rounded-lg text-green-400 text-sm">
-                      {addTrackSuccess}
-                    </div>
-                  )}
-                </div>
-
-                {/* Footer */}
-                <div className="p-4 border-t border-gray-800 flex justify-end gap-2">
-                  <button
-                    onClick={() => {
-                      setAddTrackModalOpen(false);
-                      setNewTrackName("");
-                      setAddTrackError(null);
-                      setAddTrackSuccess(null);
-                    }}
-                    className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleConfirmAddTrack}
-                    disabled={!newTrackName.trim() || !!addTrackSuccess}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg transition-colors flex items-center gap-2"
-                  >
-                    <FaPlus size={14} />
-                    {addTrackSuccess ? "Added!" : "Add Track"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <AddTrackModal
+            isOpen={addTrackModalOpen}
+            newTrackName={newTrackName}
+            onNameChange={setNewTrackName}
+            onClose={handleCloseAddTrackModal}
+            onConfirm={handleConfirmAddTrack}
+            errorMessage={addTrackError}
+            successMessage={addTrackSuccess}
+          />
         </div>
       </div>
     </DndProvider>
