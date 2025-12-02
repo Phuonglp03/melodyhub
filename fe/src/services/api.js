@@ -57,9 +57,17 @@ api.interceptors.response.use(
       originalRequest.url?.includes(endpoint)
     );
 
+    // Check if 403 is due to permission denied (not token expired)
+    const isPermissionDenied = 
+      error.response?.status === 403 && 
+      (error.response?.data?.message?.includes('Không có quyền') || 
+       error.response?.data?.message?.includes('permission') ||
+       error.response?.data?.message?.includes('Yêu cầu quyền'));
+
     // If 401 (Unauthorized) or 403 (Forbidden - token expired) and haven't retried yet
+    // Don't refresh token if it's a permission denied error
     const shouldRefreshToken =
-      (error.response?.status === 401 || error.response?.status === 403) &&
+      (error.response?.status === 401 || (error.response?.status === 403 && !isPermissionDenied)) &&
       !originalRequest._retry &&
       !isAuthEndpoint; // Don't retry for auth endpoints
 
@@ -102,6 +110,13 @@ api.interceptors.response.use(
 
         return Promise.reject(refreshError);
       }
+    }
+
+    // Handle permission denied errors - don't logout, just reject
+    if (isPermissionDenied) {
+      const message = error?.response?.data?.message || "Không có quyền truy cập";
+      console.warn("[API] Permission denied:", message);
+      return Promise.reject(new Error(message));
     }
 
     // Handle other errors
