@@ -90,6 +90,49 @@ export const reportPost = async (req, res) => {
       console.warn('[ReportPost] Lỗi khi gửi thông báo report post cho admin:', notifErr?.message);
     }
 
+    // Emit socket event để admin panel cập nhật real-time
+    try {
+      const io = getSocketIo();
+      
+      // Populate report với đầy đủ thông tin giống như getAllReports
+      const populatedReport = await ContentReport.findById(report._id)
+        .populate('reporterId', 'username displayName avatarUrl')
+        .populate('resolvedBy', 'username displayName')
+        .lean();
+      
+      // Nếu là post report, populate post info
+      if (populatedReport.targetContentType === 'post') {
+        const postData = await Post.findById(populatedReport.targetContentId)
+          .populate('userId', 'username displayName')
+          .populate('attachedLicks')
+          .lean();
+        
+        if (postData) {
+          populatedReport.post = {
+            _id: postData._id,
+            textContent: postData.textContent,
+            postType: postData.postType,
+            author: postData.userId,
+            createdAt: postData.createdAt,
+            attachedLicks: postData.attachedLicks || [],
+            media: postData.media || [],
+            linkPreview: postData.linkPreview || null,
+            archived: postData.archived,
+            archivedByReports: postData.archivedByReports || false,
+          };
+        }
+      }
+      
+      // Emit đến tất cả admin (có thể filter ở frontend hoặc tạo admin room)
+      console.log('[ReportPost] Emitting new:report event for reportId:', report._id);
+      io.emit('new:report', {
+        report: populatedReport,
+      });
+      console.log('[ReportPost] Socket event emitted successfully');
+    } catch (socketErr) {
+      console.error('[ReportPost] Không thể emit socket event:', socketErr?.message);
+    }
+
     // Check current pending reports count
     const pendingReportsCount = await ContentReport.countDocuments({
       targetContentType: 'post',
@@ -240,8 +283,8 @@ export const checkPostReport = async (req, res) => {
  */
 export const getAllReports = async (req, res) => {
   try {
-    // Get all reports, populate reporter and resolvedBy info
-    const reports = await ContentReport.find({})
+    // Get only post reports, populate reporter and resolvedBy info
+    const reports = await ContentReport.find({ targetContentType: 'post' })
       .populate('reporterId', 'username displayName avatarUrl')
       .populate('resolvedBy', 'username displayName')
       .sort({ createdAt: -1 });
