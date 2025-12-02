@@ -133,6 +133,14 @@ const NotificationsPage = () => {
         return '💬';
       case 'follow':
         return '👤';
+      case 'lick_pending_review':
+        return '🎸';
+      case 'lick_approved':
+        return '✅';
+      case 'lick_rejected':
+        return '❌';
+      case 'post_reported':
+        return '🚩';
       default:
         return '🔔';
     }

@@ -59,6 +59,14 @@ const NotificationToast = ({ notification, onClose, duration = 10000 }) => {
         return '💬';
       case 'follow':
         return '👤';
+      case 'lick_pending_review':
+        return '🎸'; // gợi ý: lick cần duyệt
+      case 'lick_approved':
+        return '✅'; // lick đã được duyệt
+      case 'lick_rejected':
+        return '❌'; // lick bị từ chối
+      case 'post_reported':
+        return '🚩'; // bài viết bị report
       default:
         return '🔔';
     }
