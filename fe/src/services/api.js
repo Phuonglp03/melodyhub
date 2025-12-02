@@ -6,7 +6,6 @@ const API_BASE_URL = "http://localhost:9999/api"; //'';
 const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true, // Important for sending cookies (refreshToken)
-  timeout: 30000, // 30 second timeout to prevent hanging requests
 });
 
 // Request interceptor: Add token to headers
