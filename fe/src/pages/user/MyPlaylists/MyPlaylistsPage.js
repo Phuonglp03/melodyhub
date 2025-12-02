@@ -35,9 +35,19 @@ const MyPlaylistsPage = () => {
 
       const res = await getMyPlaylists(params);
 
-      if (res.success) {
+      // Handle different response structures
+      if (res?.success) {
+        setPlaylists(res.data || []);
+        setPagination(res.pagination || null);
+      } else if (Array.isArray(res?.data)) {
         setPlaylists(res.data);
-        setPagination(res.pagination);
+        setPagination(res.pagination || null);
+      } else if (Array.isArray(res)) {
+        setPlaylists(res);
+        setPagination(null);
+      } else {
+        setPlaylists([]);
+        setPagination(null);
       }
     } catch (err) {
       console.error("Error fetching playlists:", err);
@@ -58,6 +68,9 @@ const MyPlaylistsPage = () => {
       } else {
         setError(msg || "Failed to load playlists");
       }
+      // Reset to empty array on error
+      setPlaylists([]);
+      setPagination(null);
     } finally {
       setLoading(false);
     }

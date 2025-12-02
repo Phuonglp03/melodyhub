@@ -1,32 +1,37 @@
-import React, { useEffect, useCallback, useMemo, useState } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
-import { DndProvider } from 'react-dnd';
-import { HTML5Backend } from 'react-dnd-html5-backend';
-import { StudioProvider, useStudio } from '../../../store/StudioContext';
-import StudioHeader from './StudioHeader';
-import Timeline from './Timeline';
-import MinimalChordDeck from './MinimalChordDeck';
-import RightLickLibrary from './RightLickLibrary';
-import LiveBackingEngine from './LiveBackingEngine';
-import { convertProjectToStudioState } from './studioTransformers';
-import { getProjectById } from '../../../services/user/projectService';
-import api from '../../../services/api';
+import React, { useEffect, useCallback, useMemo, useState } from "react";
+import { useParams, useLocation } from "react-router-dom";
+import { DndProvider } from "react-dnd";
+import { HTML5Backend } from "react-dnd-html5-backend";
+import { useSelector } from "react-redux";
+import { StudioProvider, useStudio } from "../../../store/StudioContext";
+import { useProjectCollaboration } from "../../../hooks/useProjectCollaboration";
+import StudioHeader from "./StudioHeader";
+import Timeline from "./Timeline";
+import MinimalChordDeck from "./MinimalChordDeck";
+import RightLickLibrary from "./RightLickLibrary";
+import LiveBackingEngine from "./LiveBackingEngine";
+import { convertProjectToStudioState } from "./studioTransformers";
+import { getProjectById } from "../../../services/user/projectService";
+import api from "../../../services/api";
 
 const hasChords = (sections = []) =>
   sections.some((section) =>
-    section?.bars?.some((chord) => chord && chord.trim() !== '')
+    section?.bars?.some((chord) => chord && chord.trim() !== "")
   );
 
 function StudioContent() {
   const { projectId } = useParams();
   const location = useLocation();
   const { state, actions } = useStudio();
-  const [projectName, setProjectName] = useState('');
+  const [projectName, setProjectName] = useState("");
   const [loading, setLoading] = useState(true);
   const [seedApplied, setSeedApplied] = useState(false);
   const [seedLicks, setSeedLicks] = useState([]);
   const studioSeed = location.state?.studioSeed;
-  const seedHasContent = useMemo(() => hasChords(studioSeed?.sections || []), [studioSeed]);
+  const seedHasContent = useMemo(
+    () => hasChords(studioSeed?.sections || []),
+    [studioSeed]
+  );
 
   useEffect(() => {
     if (studioSeed && !seedApplied) {
@@ -56,16 +61,23 @@ function StudioContent() {
       setLoading(true);
       const response = await getProjectById(projectId);
       if (!response?.success) {
-        throw new Error(response?.message || 'Failed to load project');
+        throw new Error(response?.message || "Failed to load project");
       }
 
-      const project = response.data?.project || response.project || response.data || {};
-      setProjectName(project.name || project.title || studioSeed?.projectTitle || 'Untitled');
+      const project =
+        response.data?.project || response.project || response.data || {};
+      setProjectName(
+        project.name || project.title || studioSeed?.projectTitle || "Untitled"
+      );
 
       const studioData = convertProjectToStudioState(project);
       if (studioData) {
         const merged = { ...studioData };
-        if (!hasChords(studioData.sections) && seedHasContent && studioSeed?.sections) {
+        if (
+          !hasChords(studioData.sections) &&
+          seedHasContent &&
+          studioSeed?.sections
+        ) {
           merged.sections = studioSeed.sections;
           merged.key = studioSeed.key || merged.key;
           merged.bpm = studioSeed.bpm || merged.bpm;
@@ -74,7 +86,7 @@ function StudioContent() {
         actions.loadProject(merged);
       }
     } catch (error) {
-      console.error('Failed to load project:', error);
+      console.error("Failed to load project:", error);
     } finally {
       setLoading(false);
     }
@@ -92,10 +104,10 @@ function StudioContent() {
         sections: song.sections,
         bandSettings,
       });
-      alert('Project saved!');
+      alert("Project saved!");
     } catch (error) {
-      console.error('Failed to save project:', error);
-      alert('Failed to save project');
+      console.error("Failed to save project:", error);
+      alert("Failed to save project");
     }
   }, [projectId, state]);
 
@@ -103,23 +115,23 @@ function StudioContent() {
   useEffect(() => {
     const handleKeyDown = (e) => {
       // Space to toggle play
-      if (e.code === 'Space' && !e.target.matches('input, textarea')) {
+      if (e.code === "Space" && !e.target.matches("input, textarea")) {
         e.preventDefault();
         actions.setPlaying(!state.isPlaying);
       }
       // Escape to clear selection
-      if (e.code === 'Escape') {
+      if (e.code === "Escape") {
         actions.clearSelection();
       }
       // Ctrl+S to save
-      if (e.ctrlKey && e.code === 'KeyS') {
+      if (e.ctrlKey && e.code === "KeyS") {
         e.preventDefault();
         handleSave();
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [state.isPlaying, actions, handleSave]);
 
   if (loading) {
@@ -134,7 +146,7 @@ function StudioContent() {
     <div className="flex flex-col h-screen bg-black text-white overflow-hidden">
       {/* Audio Engine (no UI) */}
       <LiveBackingEngine />
-      
+
       {/* Header */}
       <StudioHeader onSave={handleSave} projectName={projectName} />
 
@@ -162,4 +174,3 @@ export default function StudioPage() {
     </StudioProvider>
   );
 }
-

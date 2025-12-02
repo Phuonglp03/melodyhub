@@ -237,3 +237,103 @@ export const generateAIBackingTrack = async (projectId, data) => {
     throw error;
   }
 };
+
+// Save exported project audio metadata (audioUrl, duration, waveformData)
+export const saveProjectExport = async (projectId, data) => {
+  try {
+    // (NO $) [DEBUG][ProjectExport] Saving export metadata to backend
+    console.log("(NO $) [DEBUG][ProjectExport] saveProjectExport:", {
+      projectId,
+      hasAudioUrl: !!data?.audioUrl,
+      hasWaveform: Array.isArray(data?.waveformData),
+      audioDuration: data?.audioDuration,
+    });
+
+    const res = await api.post(`/projects/${projectId}/export-audio`, data);
+    return res.data;
+  } catch (error) {
+    console.error("Error saving project export:", error?.response || error);
+    throw error;
+  }
+};
+
+// Invite collaborator to project (backend expects email)
+export const inviteCollaborator = async (
+  projectId,
+  email,
+  role = "contributor"
+) => {
+  try {
+    const res = await api.post(`/projects/${projectId}/invite`, {
+      email: email.trim().toLowerCase(),
+      role,
+    });
+    return res.data;
+  } catch (error) {
+    // Log full error for debugging
+    console.error("Error inviting collaborator - Full error:", error);
+    console.error("Error response:", error?.response?.data);
+
+    // Extract error message from response
+    // Check for validation errors first
+    let message = "Failed to invite collaborator";
+
+    if (error?.response?.data) {
+      const errorData = error?.response?.data;
+
+      // Handle validation errors
+      if (errorData.errors && Array.isArray(errorData.errors)) {
+        message = errorData.errors.map((e) => e.msg || e.message).join(", ");
+      }
+      // Handle regular error messages
+      else if (errorData.message) {
+        message = errorData.message;
+      }
+      // Handle error field
+      else if (errorData.error) {
+        message = errorData.error;
+      }
+    } else if (error?.message) {
+      message = error.message;
+    }
+
+    throw new Error(message);
+  }
+};
+
+// Remove collaborator from project
+export const removeCollaborator = async (projectId, userId) => {
+  try {
+    const res = await api.delete(
+      `/projects/${projectId}/collaborators/${userId}`
+    );
+    return res.data;
+  } catch (error) {
+    const message =
+      error?.response?.data?.message ||
+      error?.message ||
+      "Failed to remove collaborator";
+    console.error("Error removing collaborator:", error?.response || error);
+    throw new Error(message);
+  }
+};
+
+// Get project collaborators (from project data - collaborators are included in getProjectById)
+export const getProjectCollaborators = async (projectId) => {
+  try {
+    // Collaborators are included in project data from getProjectById
+    const res = await api.get(`/projects/${projectId}`);
+    if (res.data.success && res.data.data) {
+      // Extract collaborators from project response
+      const collaborators = res.data.data.collaborators || [];
+      return {
+        success: true,
+        data: { collaborators },
+      };
+    }
+    return { success: false, data: { collaborators: [] } };
+  } catch (error) {
+    console.error("Error fetching collaborators:", error);
+    throw error;
+  }
+};

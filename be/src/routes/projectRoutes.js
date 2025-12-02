@@ -19,9 +19,18 @@ import {
   getRhythmPatterns,
   applyRhythmPattern,
   generateBackingTrack,
+  inviteCollaborator,
+  acceptInvitation,
+  declineInvitation,
+  removeCollaborator,
+  getProjectCollabState,
+  getProjectCollabDebug,
+  exportProjectAudio,
+  uploadProjectAudioFile,
 } from "../controllers/projectController.js";
 import { generateAIBackingTrack } from "../controllers/sunoAIController.js";
 import middlewareController from "../middleware/auth.js";
+import { handleAudioUpload } from "../middleware/file.js";
 const { verifyToken } = middlewareController;
 
 const router = express.Router();
@@ -70,7 +79,39 @@ router.get("/instruments", getInstruments);
 // Get rhythm patterns - MUST be before /:projectId route
 router.get("/rhythm-patterns", getRhythmPatterns);
 
+// Phase 5: Invite collaborator - MUST be before /:projectId route
+router.post(
+  "/:projectId/invite",
+  [
+    body("email").trim().isEmail().withMessage("Valid email is required"),
+    body("role")
+      .optional()
+      .isIn(["viewer", "contributor", "admin"])
+      .withMessage("Role must be viewer, contributor, or admin"),
+  ],
+  validate,
+  inviteCollaborator
+);
+
+// Accept/Decline invitation routes - MUST be before /:projectId route
+router.post("/:projectId/invite/accept", acceptInvitation);
+router.post("/:projectId/invite/decline", declineInvitation);
+
+// Remove collaborator route - MUST be before /:projectId route
+router.delete("/:projectId/collaborators/:userId", removeCollaborator);
+
+router.get("/:projectId/collab/state", getProjectCollabState);
+router.get("/:projectId/collab/debug", getProjectCollabDebug);
+
 router.get("/:projectId", getProjectById);
+
+// Save exported audio metadata for a project
+router.post(
+  "/:projectId/export-audio/upload",
+  handleAudioUpload,
+  uploadProjectAudioFile
+);
+router.post("/:projectId/export-audio", exportProjectAudio);
 
 router.put(
   "/:projectId",
@@ -81,9 +122,7 @@ router.put(
     body("timeSignature")
       .optional()
       .matches(/^\d+\/\d+$/),
-    body("status")
-      .optional()
-      .isIn(["draft", "active", "completed", "inactive"]),
+    body("status").optional().isIn(["draft", "active", "inactive"]),
   ],
   validate,
   updateProject

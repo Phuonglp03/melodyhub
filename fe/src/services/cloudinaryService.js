@@ -7,25 +7,23 @@ export const uploadToCloudinary = async (
   options = {}
 ) => {
   try {
+    const { resource_type: resourceType = "image", ...formOptions } = options;
+    const endpoint = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CONFIG.cloud_name}/${resourceType}/upload`;
+
     const formData = new FormData();
     formData.append("file", file);
     formData.append("upload_preset", preset);
-    // Note: cloud_name is in the URL, not FormData
 
-    // Add additional options
-    Object.entries(options).forEach(([key, value]) => {
+    Object.entries(formOptions).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
         formData.append(key, String(value));
       }
     });
 
-    const response = await fetch(
-      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CONFIG.cloud_name}/upload`,
-      {
-        method: "POST",
-        body: formData,
-      }
-    );
+    const response = await fetch(endpoint, {
+      method: "POST",
+      body: formData,
+    });
 
     const data = await response.json();
 
@@ -40,7 +38,8 @@ export const uploadToCloudinary = async (
         statusText: response.statusText,
         error: data,
         preset,
-        options,
+        resourceType,
+        options: formOptions,
       });
       throw new Error(`Upload failed: ${errorMessage}`);
     }
