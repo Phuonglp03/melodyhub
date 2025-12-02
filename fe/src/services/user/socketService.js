@@ -247,6 +247,39 @@ export const offNotificationNew = (callback) => {
   getSocket()?.off("notification:new", callback);
 };
 
+// ---- Reports realtime ----
+export const onNewReport = (callback) => {
+  console.log("[Report] listen new:report");
+  const socket = getSocket();
+  if (socket) {
+    const wrappedCallback = (payload) => {
+      console.log("[Report] Received new:report event:", payload);
+      callback(payload);
+    };
+    socket.on("new:report", wrappedCallback);
+    // Store wrapped callback for cleanup
+    if (!socket._newReportCallbacks) {
+      socket._newReportCallbacks = [];
+    }
+    socket._newReportCallbacks.push({ original: callback, wrapped: wrappedCallback });
+  }
+};
+export const offNewReport = (callback) => {
+  console.log("[Report] off new:report");
+  const socket = getSocket();
+  if (socket && socket._newReportCallbacks) {
+    const found = socket._newReportCallbacks.find(cb => cb.original === callback);
+    if (found) {
+      socket.off("new:report", found.wrapped);
+      socket._newReportCallbacks = socket._newReportCallbacks.filter(cb => cb !== found);
+    } else {
+      socket.off("new:report", callback);
+    }
+  } else if (socket) {
+    socket.off("new:report", callback);
+  }
+};
+
 // Hủy tất cả lắng nghe (dùng khi unmount)
 export const offSocketEvents = () => {
   const s = getSocket();
