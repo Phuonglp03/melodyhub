@@ -25,7 +25,9 @@ export const login = async (email, password) => {
           username: user.username,
           displayName: user.displayName,
           roleId: user.roleId,
-          verifiedEmail: user.verifiedEmail
+          verifiedEmail: user.verifiedEmail,
+          permissions: user.permissions || [], // ⭐ THÊM permissions
+          avatarUrl: user.avatarUrl
         }
       };
       
@@ -98,7 +100,9 @@ export const register = async (userData) => {
           username: user.username,
           displayName: user.displayName,
           roleId: user.roleId,
-          verifiedEmail: user.verifiedEmail
+          verifiedEmail: user.verifiedEmail,
+          permissions: user.permissions || [], // ⭐ THÊM permissions
+          avatarUrl: user.avatarUrl
         }
       };
       
@@ -155,7 +159,9 @@ export const verifyEmail = async (email, otp) => {
           username: user.username,
           displayName: user.displayName,
           roleId: user.roleId,
-          verifiedEmail: user.verifiedEmail
+          verifiedEmail: user.verifiedEmail,
+          permissions: user.permissions || [], // ⭐ THÊM permissions
+          avatarUrl: user.avatarUrl
         }
       };
       
@@ -234,7 +240,8 @@ export const loginWithGoogle = async (googleToken) => {
           displayName: user.displayName,
           avatarUrl: user.avatarUrl,
           roleId: user.roleId,
-          verifiedEmail: user.verifiedEmail
+          verifiedEmail: user.verifiedEmail,
+          permissions: user.permissions || [], // ⭐ THÊM permissions
         }
       };
       

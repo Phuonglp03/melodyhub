@@ -57,6 +57,7 @@ import chordRoutes from "./routes/chordRoutes.js";
 
 import userManageRoute from "./routes/admin/userManageRoute.js";
 import createAdminRoute from "./routes/admin/createAdminRoute.js";
+import adminProfileRoute from "./routes/admin/adminProfileRoute.js";
 import liveroomRoutes from "./routes/user/liveroomRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import dmRoutes from "./routes/dmRoutes.js";
@@ -117,6 +118,7 @@ app.use("/api/locations", locationRoutes);
 
 app.use("/api/admin", userManageRoute);
 app.use("/api/admin", createAdminRoute);
+app.use("/api/admin", adminProfileRoute);
 // 404 handler - must be after all routes
 app.use((req, res, next) => {
   res.status(404).json({

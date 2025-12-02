@@ -8,6 +8,7 @@ import AdminLayout from "../layouts/adminLayout";
 import "bootstrap-icons/font/bootstrap-icons.css";
 import ProtectedRoute from "../components/common/ProtectedRoute";
 import AdminProtectedRoute from "../components/common/AdminProtectedRoute";
+import PermissionProtectedRoute from "../components/common/PermissionProtectedRoute";
 // import LiveStreamCreate from "../pages/user/LiveRoomCreate";
 // import LiveStreamLive from "../pages/user/LiveRoomLive";
 import LiveListPage from "../pages/user/LiveListPage";
@@ -80,6 +81,9 @@ const AdminLickApprovement = lazy(() =>
 );
 const AdminReportSettings = lazy(() =>
   import("../pages/admin/AdminSite/ReportSettings")
+);
+const AdminProfile = lazy(() =>
+  import("../pages/admin/AdminSite/AdminProfile")
 );
 
 // Loading component for Suspense fallback
@@ -169,18 +173,55 @@ const AppRoutes = () => {
           >
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
-            <Route path="create-admin" element={<AdminCreateAdmin />} />
-            <Route path="user-management" element={<AdminUserManagement />} />
+            <Route path="profile" element={<AdminProfile />} />
+            <Route 
+              path="create-admin" 
+              element={
+                <PermissionProtectedRoute permission="create_admin">
+                  <AdminCreateAdmin />
+                </PermissionProtectedRoute>
+              } 
+            />
+            <Route 
+              path="user-management" 
+              element={
+                <PermissionProtectedRoute permission="manage_users">
+                  <AdminUserManagement />
+                </PermissionProtectedRoute>
+              } 
+            />
             <Route
               path="reports-management"
-              element={<AdminReportsManagement />}
+              element={
+                <PermissionProtectedRoute permission="handle_support">
+                  <AdminReportsManagement />
+                </PermissionProtectedRoute>
+              }
             />
             <Route
               path="liveroom-management"
-              element={<AdminLiveroomManagement />}
+              element={
+                <PermissionProtectedRoute permission="manage_liverooms">
+                  <AdminLiveroomManagement />
+                </PermissionProtectedRoute>
+              }
             />
-            <Route path="lick-approvement" element={<AdminLickApprovement />} />
-            <Route path="report-settings" element={<AdminReportSettings />} />
+            <Route 
+              path="lick-approvement" 
+              element={
+                <PermissionProtectedRoute permission="manage_content">
+                  <AdminLickApprovement />
+                </PermissionProtectedRoute>
+              } 
+            />
+            <Route 
+              path="report-settings" 
+              element={
+                <PermissionProtectedRoute permission="handle_support">
+                  <AdminReportSettings />
+                </PermissionProtectedRoute>
+              } 
+            />
           </Route>
 
           {/* Protected routes */}
