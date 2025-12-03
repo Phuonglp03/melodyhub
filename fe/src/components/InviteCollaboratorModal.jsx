@@ -6,6 +6,7 @@ import {
   removeCollaborator,
   getProjectCollaborators,
 } from "../services/user/projectService";
+import { collabChannel } from "../utils/collabChannel";
 
 export default function InviteCollaboratorModal({
   isOpen,
@@ -102,6 +103,16 @@ export default function InviteCollaboratorModal({
         setSearchInput("");
         // Reload collaborators list
         await loadCollaborators();
+        // Request updated presence/collaborators over collaboration channel
+        console.log(
+          "[DEBUG] Invite collaborator success (NO $): requesting presence sync",
+          {
+            projectId,
+            invitedEmail: searchInput.trim().toLowerCase(),
+            hasCollabChannel: !!collabChannel,
+          }
+        );
+        collabChannel.emit("project:presence:request", { projectId });
         // Notify parent component
         if (onCollaboratorAdded) {
           onCollaboratorAdded(response.data);
@@ -144,27 +155,56 @@ export default function InviteCollaboratorModal({
   };
 
   const allCollaborators = useMemo(() => {
-    const list = Array.isArray(collaborators) ? [...collaborators] : [];
-
     // Handle projectOwner - it might be a full object or just an ID
     let ownerId = null;
     let ownerUser = null;
 
     if (projectOwner) {
-      // If projectOwner is an object with _id, id, or userId
       if (typeof projectOwner === "object") {
         ownerId = projectOwner._id || projectOwner.id || projectOwner.userId;
         ownerUser = projectOwner;
       } else {
-        // If projectOwner is just an ID string
         ownerId = projectOwner;
       }
     }
 
-    // Only add owner if we have an ID and owner is not already in the list
+    // Normalize collaborators so that:
+    // - user object is always present (prefer collab.user, then populated collab.userId)
+    // - project owner is forced to role "owner" and status "accepted" (cannot be pending)
+    const list = Array.isArray(collaborators)
+      ? collaborators.map((collab) => {
+          const resolvedUserId =
+            collab.userId?._id ||
+            collab.userId ||
+            collab._id ||
+            collab.user?._id ||
+            collab.user?.id;
+
+          const isOwnerCollab =
+            ownerId &&
+            resolvedUserId &&
+            String(resolvedUserId) === String(ownerId);
+
+          const resolvedUser =
+            collab.user ||
+            (collab.userId && typeof collab.userId === "object"
+              ? collab.userId
+              : null) ||
+            ownerUser;
+
+          return {
+            ...collab,
+            user: resolvedUser || collab.user || collab.userId || collab.user,
+            isOwner: collab.isOwner || isOwnerCollab,
+            role: isOwnerCollab ? "owner" : collab.role,
+            status: isOwnerCollab ? "accepted" : collab.status,
+          };
+        })
+      : [];
+
+    // Only add synthetic owner entry if we have an ownerId and they are not already present
     if (ownerId) {
       const exists = list.some((collab) => {
-        // Check multiple possible ID locations to ensure we find the owner
         const collabUserId =
           collab.userId?._id ||
           collab.userId ||
@@ -175,17 +215,15 @@ export default function InviteCollaboratorModal({
       });
 
       if (!exists) {
-        // If we have a full user object, use it; otherwise create a minimal one
         const ownerData = ownerUser || {
           _id: ownerId,
           username: "Owner",
           displayName: "Owner",
         };
 
-        // Match the structure of collaborators from API: userId can be object or ID
         list.unshift({
           _id: ownerId,
-          userId: ownerUser || ownerId, // Keep as object if available, otherwise ID
+          userId: ownerUser || ownerId,
           user: ownerData,
           role: "owner",
           status: "accepted",
