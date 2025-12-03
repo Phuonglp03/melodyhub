@@ -92,8 +92,10 @@ export const useProjectPlayback = ({
       return;
     }
 
-    // Set transport position to current playhead
-    audioEngine.setPosition(playbackPositionRef.current);
+    // Set transport position to current playhead (use current state value, not ref)
+    // This ensures we use the position the user dragged to, not a stale ref value
+    audioEngine.setPosition(playbackPosition);
+    playbackPositionRef.current = playbackPosition; // Ensure ref is in sync
     audioEngine.setBpm(bpm);
 
     setIsPlaying(true);
@@ -103,7 +105,7 @@ export const useProjectPlayback = ({
 
     // Start transport
     audioEngine.startTransport();
-  }, [audioEngine, bpm, scheduleAudioPlayback, setIsPlaying]);
+  }, [audioEngine, bpm, scheduleAudioPlayback, setIsPlaying, playbackPosition]);
 
   const handlePause = useCallback(() => {
     setIsPlaying(false);

@@ -1079,6 +1079,8 @@ const ProjectDetailPage = () => {
                       timelineWidth={timelineWidth}
                       playbackPosition={playbackPosition}
                       isPlaying={isPlaying}
+                      setPlaybackPosition={setPlaybackPosition}
+                      audioEngine={audioEngine}
                       chordDurationSeconds={chordDurationSeconds}
                       selectedChordIndex={selectedChordIndex}
                       collaborators={collaborators}

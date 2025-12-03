@@ -16,6 +16,8 @@ import CollaboratorCursor from "../Collaboration/CollaboratorCursor";
  * - timelineWidth: number - Total timeline width
  * - playbackPosition: number - Current playback position
  * - isPlaying: boolean - Whether playback is active
+ * - setPlaybackPosition: Function - Setter for playback position
+ * - audioEngine: Object - Audio engine instance for seeking during playback
  * - chordDurationSeconds: number - Duration of each chord in seconds
  * - selectedChordIndex: number | null - Currently selected chord index
  * - collaborators: Array - Array of collaborators
@@ -35,6 +37,8 @@ const TimelineView = ({
   timelineWidth,
   playbackPosition,
   isPlaying,
+  setPlaybackPosition,
+  audioEngine,
   chordDurationSeconds,
   selectedChordIndex,
   collaborators = [],
@@ -90,12 +94,82 @@ const TimelineView = ({
   const [isMouseOverTimeline, setIsMouseOverTimeline] = useState(false);
   const cursorTimeoutRef = useRef(null);
 
-  // Broadcast cursor position when mouse moves
+  // Playhead drag state
+  const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
+  const playheadDragStartRef = useRef(null);
+
+  // Handle playhead drag
   useEffect(() => {
-    if (!broadcastCursor || !isMouseOverTimeline) return;
+    if (!isDraggingPlayhead || !timelineRef?.current || !playheadRef?.current) return;
 
     const handleMouseMove = (e) => {
-      if (!timelineRef?.current) return;
+      if (!timelineRef.current || !playheadDragStartRef.current) return;
+
+      const timelineRect = timelineRef.current.getBoundingClientRect();
+      const scrollLeft = timelineRef.current.scrollLeft || 0;
+      
+      // Calculate mouse X position relative to timeline (accounting for track column)
+      const mouseX = e.clientX - timelineRect.left + scrollLeft;
+      const timelineX = mouseX - TRACK_COLUMN_WIDTH;
+      
+      // Convert pixel position to time in seconds
+      const newPosition = Math.max(0, timelineX / pixelsPerSecond);
+      
+      // Update playback position
+      if (setPlaybackPosition) {
+        setPlaybackPosition(newPosition);
+      }
+      
+      // If playing, also update audio engine position
+      if (isPlaying && audioEngine) {
+        audioEngine.setPosition(newPosition);
+      }
+      
+      // Update playhead visual position directly for smooth dragging
+      if (playheadRef.current) {
+        playheadRef.current.style.left = `${TRACK_COLUMN_WIDTH + newPosition * pixelsPerSecond}px`;
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingPlayhead(false);
+      playheadDragStartRef.current = null;
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDraggingPlayhead, timelineRef, playheadRef, pixelsPerSecond, TRACK_COLUMN_WIDTH, setPlaybackPosition, isPlaying, audioEngine]);
+
+  // Handle playhead mouse down
+  const handlePlayheadMouseDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!timelineRef?.current) return;
+    
+    const timelineRect = timelineRef.current.getBoundingClientRect();
+    const scrollLeft = timelineRef.current.scrollLeft || 0;
+    const mouseX = e.clientX - timelineRect.left + scrollLeft;
+    
+    playheadDragStartRef.current = {
+      startX: mouseX,
+      startPosition: playbackPosition,
+    };
+    
+    setIsDraggingPlayhead(true);
+  };
+
+  // Broadcast cursor position when mouse moves
+  useEffect(() => {
+    if (!broadcastCursor || !isMouseOverTimeline || isDraggingPlayhead) return;
+
+    const handleMouseMove = (e) => {
+      if (!timelineRef?.current || isDraggingPlayhead) return;
 
       const rect = timelineRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -158,6 +232,7 @@ const TimelineView = ({
   }, [
     broadcastCursor,
     isMouseOverTimeline,
+    isDraggingPlayhead,
     pixelsPerBeat,
     beatsPerMeasure,
     timelineRef,
@@ -288,14 +363,15 @@ const TimelineView = ({
       {(playbackPosition > 0 || isPlaying) && (
         <div
           ref={playheadRef}
-          className="absolute top-0 bottom-0 w-[2px] bg-orange-400 z-30 pointer-events-none shadow-[0_0_14px_rgba(251,191,36,0.6)]"
+          className="absolute top-0 bottom-0 w-[2px] bg-orange-400 z-30 cursor-ew-resize shadow-[0_0_14px_rgba(251,191,36,0.6)]"
           style={{
             left: `${
               TRACK_COLUMN_WIDTH + playbackPosition * pixelsPerSecond
             }px`,
           }}
+          onMouseDown={handlePlayheadMouseDown}
         >
-          <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-3 h-3 bg-orange-400 rounded-full border border-white" />
+          <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-3 h-3 bg-orange-400 rounded-full border border-white cursor-ew-resize" />
         </div>
       )}
 
@@ -331,7 +407,13 @@ const TimelineView = ({
                     chordName,
                     isSelected,
                   });
-                  trackProps.setSelectedChordIndex?.(idx);
+                  console.log("(NO $) [DEBUG][ChordEdit] Calling setSelectedChordIndex with:", idx);
+                  if (setSelectedChordIndex) {
+                    setSelectedChordIndex(idx);
+                    console.log("(NO $) [DEBUG][ChordEdit] setSelectedChordIndex called successfully");
+                  } else {
+                    console.warn("(NO $) [DEBUG][ChordEdit] setSelectedChordIndex is not available");
+                  }
                   if (broadcastCursor) {
                     broadcastCursor(null, idx);
                   }

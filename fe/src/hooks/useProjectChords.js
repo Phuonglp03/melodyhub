@@ -30,6 +30,11 @@ export const useProjectChords = ({
   const [backingTrack, setBackingTrack] = useState(null);
   const [selectedChordIndex, setSelectedChordIndex] = useState(null);
 
+  // Debug: Log when selectedChordIndex changes
+  useEffect(() => {
+    console.log("(NO $) [DEBUG][ChordEdit] selectedChordIndex changed:", selectedChordIndex);
+  }, [selectedChordIndex]);
+
   // Chord library state
   const [chordLibrary, setChordLibrary] = useState([]);
   const [loadingChords, setLoadingChords] = useState(false);
@@ -78,7 +83,7 @@ export const useProjectChords = ({
         if (pushHistory) pushHistory();
         const normalized = (chords || [])
           .map((entry) => normalizeChordEntry(entry))
-          .filter((entry) => entry && entry.chordName);
+          .filter((entry) => entry !== null); // Allow empty chordName for clearing chords
 
         // Optimistic update - update chord progression in local state immediately
         setChordProgression(normalized);
@@ -145,6 +150,12 @@ export const useProjectChords = ({
         selectedChordIndex,
         chordProgressionLength: chordProgression.length,
         chordType: typeof chord,
+        chordValue: chord,
+        chordStringified: JSON.stringify(chord),
+        isString: typeof chord === "string",
+        isObject: typeof chord === "object",
+        isNull: chord === null,
+        isUndefined: chord === undefined,
       });
 
       if (selectedChordIndex === null) {
@@ -164,23 +175,93 @@ export const useProjectChords = ({
         // Update existing chord
         console.log("(NO $) [DEBUG][ChordEdit] Updating chord at index:", selectedChordIndex);
         if (ensureBackingTrack) await ensureBackingTrack();
+        
+        // Debug: Check what chord is being passed
+        console.log("(NO $) [DEBUG][ChordEdit] Chord value received:", {
+          chord,
+          chordType: typeof chord,
+          chordValue: chord,
+          isString: typeof chord === "string",
+          isObject: typeof chord === "object",
+          isNull: chord === null,
+          isUndefined: chord === undefined,
+        });
+        
         const entry = cloneChordEntry(chord);
         console.log("(NO $) [DEBUG][ChordEdit] Cloned entry for update:", entry);
+        
+        // If cloneChordEntry returns null, try to handle it
+        if (!entry) {
+          console.log("(NO $) [DEBUG][ChordEdit] cloneChordEntry returned null");
+          
+          // If chord is an empty string, create an empty chord entry for clearing
+          if (chord === "" || (typeof chord === "string" && chord.trim() === "")) {
+            console.log("(NO $) [DEBUG][ChordEdit] Chord is empty string, creating empty entry for clearing");
+            const emptyEntry = {
+              chordId: null,
+              chordName: "",
+              midiNotes: [],
+              variation: null,
+              rhythm: null,
+              instrumentStyle: null,
+            };
+            const updated = [...chordProgression];
+            updated[selectedChordIndex] = emptyEntry;
+            console.log("(NO $) [DEBUG][ChordEdit] Updated progression with empty entry:", {
+              index: selectedChordIndex,
+              before: chordProgression[selectedChordIndex],
+              after: emptyEntry,
+            });
+            await saveChordProgression(updated);
+            setSelectedChordIndex(selectedChordIndex);
+            return;
+          }
+          
+          // Try normalizeChordEntry directly as fallback
+          console.log("(NO $) [DEBUG][ChordEdit] Trying normalizeChordEntry directly");
+          const { normalizeChordEntry } = require("../utils/projectHelpers");
+          const normalized = normalizeChordEntry(chord);
+          console.log("(NO $) [DEBUG][ChordEdit] normalizeChordEntry result:", normalized);
+          if (normalized) {
+            const entry = { ...normalized };
+            const updated = [...chordProgression];
+            updated[selectedChordIndex] = entry;
+            console.log("(NO $) [DEBUG][ChordEdit] Updated progression with normalized entry:", {
+              index: selectedChordIndex,
+              before: chordProgression[selectedChordIndex],
+              after: entry,
+            });
+            await saveChordProgression(updated);
+            setSelectedChordIndex(selectedChordIndex);
+            return;
+          }
+          
+          console.warn("(NO $) [DEBUG][ChordEdit] All attempts failed, cannot update chord");
+          return;
+        }
+        
         if (entry) {
           const updated = [...chordProgression];
+          const beforeChord = chordProgression[selectedChordIndex];
           updated[selectedChordIndex] = entry;
           console.log("(NO $) [DEBUG][ChordEdit] Updated progression:", {
-            before: chordProgression[selectedChordIndex],
+            index: selectedChordIndex,
+            before: beforeChord,
             after: entry,
             fullLength: updated.length,
+            chordProgressionBefore: chordProgression,
+            chordProgressionAfter: updated,
           });
-          saveChordProgression(updated);
-          // Auto-advance to next chord
-          if (selectedChordIndex < updated.length - 1) {
-            setSelectedChordIndex(selectedChordIndex + 1);
-          } else {
-            setSelectedChordIndex(null);
-          }
+          
+          // Save the updated progression
+          await saveChordProgression(updated);
+          
+          console.log("(NO $) [DEBUG][ChordEdit] Chord progression saved, checking if update was applied...");
+          
+          // Keep the same chord selected so user can see the change
+          // Don't auto-advance - let user manually select next chord if they want
+          // This makes it clearer that the edit worked
+          setSelectedChordIndex(selectedChordIndex);
         } else {
           console.warn("(NO $) [DEBUG][ChordEdit] Failed to clone chord entry for update");
         }

@@ -355,22 +355,40 @@ export const normalizeChordLibraryItem = (chord) => ({
 });
 
 export const normalizeChordEntry = (entry) => {
-  if (!entry) return null;
+  console.log("(NO $) [DEBUG][normalizeChordEntry] Input:", {
+    entry,
+    type: typeof entry,
+    isNull: entry === null,
+    isUndefined: entry === undefined,
+    isEmptyString: entry === "",
+    isFalsy: !entry,
+  });
+  
+  // Handle null/undefined - return null
+  if (entry === null || entry === undefined) {
+    console.log("(NO $) [DEBUG][normalizeChordEntry] Entry is null/undefined, returning null");
+    return null;
+  }
+  
+  // Handle empty string - allow clearing chords (return empty chord entry)
   if (typeof entry === "string") {
-    return {
+    const result = {
       chordId: null,
-      chordName: entry,
+      chordName: entry || "", // Allow empty string for clearing
       midiNotes: [],
       variation: null,
       rhythm: null,
       instrumentStyle: null,
     };
+    console.log("(NO $) [DEBUG][normalizeChordEntry] String input, returning:", result);
+    return result;
   }
 
   const chordName = entry.chordName || entry.name || entry.label || "";
-  if (!chordName) {
-    return null;
-  }
+  console.log("(NO $) [DEBUG][normalizeChordEntry] Object input, extracted chordName:", chordName);
+  // Allow empty chordName for clearing - don't return null
+  // An empty chordName is valid (represents a cleared/empty chord)
+  // Always return a valid entry object, even if chordName is empty
 
   return {
     chordId: entry.chordId || entry._id || entry.id || null,
