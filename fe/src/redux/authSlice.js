@@ -56,12 +56,14 @@ export const login = createAsyncThunk(
       
       return thunkAPI.rejectWithValue(response.message || 'Đăng nhập thất bại');
     } catch (error) {
+      console.log('[authSlice] Login error caught:', error);
       const message =
         (error.response &&
           error.response.data &&
           error.response.data.message) ||
         error.message ||
         error.toString();
+      console.log('[authSlice] Extracted error message:', message);
       return thunkAPI.rejectWithValue(message);
     }
   }

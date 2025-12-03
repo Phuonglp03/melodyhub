@@ -46,8 +46,10 @@ export const login = async (email, password) => {
     
   } catch (error) {
     console.error('Login error:', error);
+    console.log('Login error.response:', error.response);
+    console.log('Login error.message:', error.message);
     
-    // Nếu lỗi từ server
+    // Nếu lỗi từ server (có response)
     if (error.response?.data) {
       // Nếu lỗi chưa xác thực email
       if (error.response.status === 403 && error.response.data.requiresVerification) {
@@ -58,10 +60,23 @@ export const login = async (email, password) => {
           message: error.response.data.message
         };
       }
+      
+      // Nếu tài khoản bị khóa
+      if (error.response.status === 403 && 
+          error.response.data.message?.includes('Tài khoản của bạn đã bị khóa')) {
+        return {
+          success: false,
+          isAccountLocked: true,
+          message: error.response.data.message || 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.'
+        };
+      }
+      
+      // Trả về error message từ server (401, 403, etc.)
       throw new Error(error.response.data.message || 'Đăng nhập thất bại');
     }
     
-    // Nếu lỗi mạng hoặc lỗi khác
+    // Nếu lỗi đã được xử lý bởi api.js interceptor (error.message đã có message từ server)
+    // Hoặc lỗi mạng hoặc lỗi khác
     throw new Error(error.message || 'Lỗi kết nối máy chủ');
   }
 };
@@ -261,6 +276,17 @@ export const loginWithGoogle = async (googleToken) => {
     };
   } catch (error) {
     console.error('Lỗi đăng nhập bằng Google:', error);
+    
+    // Nếu tài khoản bị khóa
+    if (error.response?.status === 403 && 
+        error.response?.data?.message?.includes('Tài khoản của bạn đã bị khóa')) {
+      return {
+        success: false,
+        isAccountLocked: true,
+        message: error.response.data.message || 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.'
+      };
+    }
+    
     return {
       success: false,
       message: error.response?.data?.message || 'Đã xảy ra lỗi khi đăng nhập bằng Google'

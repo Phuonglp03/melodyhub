@@ -3,7 +3,7 @@ import User from '../models/User.js';
 import { verifyToken as verifyJWT } from '../utils/jwt.js';
 
 // Middleware xác thực token
-export const verifyToken = (req, res, next) => {
+export const verifyToken = async (req, res, next) => {
   // Lấy token từ header Authorization (case-insensitive)
   const authHeader = req.headers.authorization || req.headers.Authorization;
   
@@ -46,8 +46,19 @@ export const verifyToken = (req, res, next) => {
       return res.status(403).json({ message: 'Token không hợp lệ hoặc đã hết hạn' });
     }
 
+    // Kiểm tra xem user có bị khóa không
+    const userId = decoded.userId || decoded.id;
+    const user = await User.findById(userId).select('isActive email');
+    console.log('[verifyToken] Checking user isActive:', user?.email, 'isActive:', user?.isActive);
+    if (!user || !user.isActive) {
+      console.log('[verifyToken] User account is locked or not found:', user?.email);
+      return res.status(403).json({ 
+        message: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.' 
+      });
+    }
+
     // Lưu thông tin user vào request để sử dụng ở các middleware khác
-    req.userId = decoded.userId || decoded.id;
+    req.userId = userId;
     req.userRole = decoded.roleId || decoded.role;
     
     next();
