@@ -51,6 +51,7 @@ const AppHeader = () => {
   const { conversations, loading, refresh } = useDMConversations();
   const [isMobile, setIsMobile] = useState(getIsMobile);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [modal, contextHolder] = Modal.useModal();
 
   // Tính toán vị trí cửa sổ chat
   const getNewWindowPosition = useCallback((isMinimized = false, windowsArray = null, targetIndex = null) => {
@@ -289,7 +290,7 @@ const AppHeader = () => {
       const banStatus = await livestreamService.checkLivestreamBanStatus();
       if (banStatus.banned) {
         setIsModalVisible(false);
-        Modal.error({ 
+        modal.error({ 
           title: 'Tài khoản bị cấm Livestream',
           content: `Bạn đã bị cấm phát livestream do: ${banStatus.reason || 'Vi phạm quy định cộng đồng'}. Vui lòng liên hệ hỗ trợ nếu bạn cho rằng đây là nhầm lẫn.`,
           okText: 'Đóng'
@@ -305,13 +306,13 @@ const AppHeader = () => {
       console.error('Lỗi khi tạo phòng:', err);
       // Kiểm tra nếu lỗi là do bị ban
       if (err.response?.data?.banned) {
-        Modal.error({ 
+        modal.error({ 
           title: 'Tài khoản bị cấm Livestream',
           content: `Bạn đã bị cấm phát livestream do: ${err.response.data.reason || 'Vi phạm quy định cộng đồng'}. Vui lòng liên hệ hỗ trợ nếu bạn cho rằng đây là nhầm lẫn.`,
           okText: 'Đóng'
         });
       } else {
-        Modal.error({ title: 'Lỗi', content: 'Không thể tạo phòng, vui lòng thử lại.' });
+        modal.error({ title: 'Lỗi', content: 'Không thể tạo phòng, vui lòng thử lại.' });
       }
     } finally {
       setIsCreating(false);
