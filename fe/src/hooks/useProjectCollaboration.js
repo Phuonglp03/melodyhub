@@ -1,6 +1,6 @@
 // src/hooks/useProjectCollaboration.js
 // Phase 2: Frontend Middleware - The Sync Bridge
-// For ProjectDetailPage only (Studio collaboration removed)
+// For ProjectDetailPage only
 import { useEffect, useRef, useCallback } from "react";
 import { getSocket } from "../services/user/socketService";
 import { fetchCollabState } from "../services/user/collabService";

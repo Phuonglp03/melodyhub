@@ -326,6 +326,11 @@ const TimelineView = ({
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
+                  console.log("(NO $) [DEBUG][ChordEdit] Chord clicked in timeline:", {
+                    index: idx,
+                    chordName,
+                    isSelected,
+                  });
                   trackProps.setSelectedChordIndex?.(idx);
                   if (broadcastCursor) {
                     broadcastCursor(null, idx);

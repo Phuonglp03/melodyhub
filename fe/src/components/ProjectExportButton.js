@@ -2,7 +2,7 @@
 // Export button for ProjectDetailPage with range selection
 import React, { useState } from "react";
 import { FaDownload } from "react-icons/fa";
-import { exportFullProjectAudio } from "../services/studioExportService";
+import { exportFullProjectAudio } from "../services/projectExportService";
 import { saveProjectExport } from "../services/user/projectService";
 
 export default function ProjectExportButton({
@@ -104,7 +104,25 @@ export default function ProjectExportButton({
               );
             } catch (error) {
               console.error("[FullMixExport] Failed:", error);
-              alert("Failed to export full project mix. Please try again.");
+
+              // Provide more helpful error messages
+              let errorMessage = "Failed to export full project mix.";
+
+              if (error?.message) {
+                // Check if it's about missing backing tracks
+                if (
+                  error.message.includes("backing track") ||
+                  error.message.includes("no items")
+                ) {
+                  errorMessage = error.message;
+                } else if (error.message.includes("No audio clips")) {
+                  errorMessage = error.message;
+                } else {
+                  errorMessage = `${errorMessage}\n\n${error.message}`;
+                }
+              }
+
+              alert(errorMessage);
             } finally {
               setIsExporting(false);
             }
@@ -118,7 +136,7 @@ export default function ProjectExportButton({
             .join(" ")}
           title={
             projectId && status === "active"
-              ? "Export full studio mix (all tracks)"
+              ? "Export full project mix (all tracks)"
               : "Project must be ACTIVE to export full mix"
           }
         >

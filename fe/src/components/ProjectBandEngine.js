@@ -1,5 +1,5 @@
 // fe/src/components/ProjectBandEngine.js
-// Real-time band playback for ProjectDetailPage (inspired by Studio's LiveBackingEngine)
+// Real-time band playback for ProjectDetailPage
 import { useEffect, useRef, useMemo } from "react";
 import * as Tone from "tone";
 

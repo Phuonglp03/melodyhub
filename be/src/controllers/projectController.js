@@ -950,6 +950,17 @@ export const getProjectTimelineForExport = async (req, res) => {
 
     const trackIds = tracks.map((t) => t._id);
 
+    console.log("(IS $) [FullMixExport] Found tracks:", {
+      count: tracks.length,
+      tracks: tracks.map((t) => ({
+        _id: String(t._id),
+        trackName: t.trackName,
+        trackType: t.trackType,
+        isBackingTrack: t.isBackingTrack,
+      })),
+      trackIds: trackIds.map((id) => String(id)),
+    });
+
     const items = await ProjectTimelineItem.find({
       trackId: { $in: trackIds },
     })
@@ -957,9 +968,39 @@ export const getProjectTimelineForExport = async (req, res) => {
       .sort({ startTime: 1, _id: 1 })
       .lean();
 
+    console.log("(IS $) [FullMixExport] Found items:", {
+      count: items.length,
+      itemsByTrack: items.reduce((acc, item) => {
+        const trackId = String(item.trackId);
+        if (!acc[trackId]) acc[trackId] = [];
+        acc[trackId].push({
+          itemId: String(item._id),
+          type: item.type,
+          hasAudioUrl: !!item.audioUrl,
+          hasLickId: !!item.lickId,
+        });
+        return acc;
+      }, {}),
+    });
+
     // Group items by trackId for easier consumption on the frontend
     const itemsByTrackId = {};
     let maxEndTime = 0;
+
+    // Debug: Log track IDs and item track IDs for matching
+    console.log(
+      "(IS $) [FullMixExport] Track IDs:",
+      trackIds.map((id) => String(id))
+    );
+    console.log(
+      "(IS $) [FullMixExport] Item track IDs:",
+      items.map((item) => ({
+        itemId: item._id,
+        trackId: String(item.trackId),
+        type: item.type,
+        hasAudioUrl: !!item.audioUrl,
+      }))
+    );
 
     for (const item of items) {
       const key = String(item.trackId);
@@ -988,7 +1029,7 @@ export const getProjectTimelineForExport = async (req, res) => {
         lickId: item.lickId
           ? {
               _id: item.lickId._id,
-              audioUrl: item.lickId.audioUrl,
+              audioUrl: item.lickId.audioUrl || null,
               waveformData: item.lickId.waveformData,
               duration:
                 typeof item.lickId.duration === "number"
@@ -1011,10 +1052,40 @@ export const getProjectTimelineForExport = async (req, res) => {
       });
     }
 
+    // Debug: Check items with licks that don't have audio
+    const itemsWithLicksNoAudio = items.filter(
+      (item) =>
+        item.lickId &&
+        (!item.lickId.audioUrl || item.lickId.audioUrl.trim() === "")
+    );
+
+    if (itemsWithLicksNoAudio.length > 0) {
+      console.warn(
+        "(IS $) [FullMixExport] Found items with licks missing audioUrl:",
+        {
+          count: itemsWithLicksNoAudio.length,
+          itemIds: itemsWithLicksNoAudio.map((i) => i._id),
+          lickIds: itemsWithLicksNoAudio
+            .map((i) => i.lickId?._id)
+            .filter(Boolean),
+        }
+      );
+    }
+
     console.log("(IS $) [FullMixExport] Loaded timeline for project:", {
       projectId: project._id.toString(),
       trackCount: tracks.length,
       itemCount: items.length,
+      itemsWithLicks: items.filter((i) => i.lickId).length,
+      itemsWithLicksNoAudio: itemsWithLicksNoAudio.length,
+      itemsByTrackIdKeys: Object.keys(itemsByTrackId),
+      itemsByTrackIdCounts: Object.entries(itemsByTrackId).map(
+        ([key, items]) => ({
+          trackId: key,
+          count: items.length,
+          types: items.map((i) => i.type),
+        })
+      ),
       durationSeconds: maxEndTime,
     });
 

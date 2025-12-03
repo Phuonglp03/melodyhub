@@ -1,5 +1,5 @@
 // fe/src/components/ProjectLickLibrary.js
-// Lick library sidebar for ProjectDetailPage (inspired by Studio's RightLickLibrary)
+// Lick library sidebar for ProjectDetailPage
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   FaSearch,

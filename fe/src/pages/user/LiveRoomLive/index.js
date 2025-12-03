@@ -304,7 +304,7 @@ const LiveStreamLive = () => {
     return `${h}:${m}:${sec}`;
   };
 
-  if (loading) return <div style={{height:'100vh', background:'#000', color:'#fff', display:'flex', justifyContent:'center', alignItems:'center'}}>Loading Studio...</div>;
+  if (loading) return <div style={{height:'100vh', background:'#000', color:'#fff', display:'flex', justifyContent:'center', alignItems:'center'}}>Loading...</div>;
   if (error) return <div style={{height:'100vh', background:'#000', color:'red', display:'flex', justifyContent:'center', alignItems:'center'}}>{error}</div>;
 
   return (

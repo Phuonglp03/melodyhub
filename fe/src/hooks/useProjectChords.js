@@ -140,21 +140,40 @@ export const useProjectChords = ({
   // Handle chord selection (add or update)
   const handleChordSelect = useCallback(
     async (chord, ensureBackingTrack) => {
+      console.log("(NO $) [DEBUG][ChordEdit] handleChordSelect called:", {
+        chord,
+        selectedChordIndex,
+        chordProgressionLength: chordProgression.length,
+        chordType: typeof chord,
+      });
+
       if (selectedChordIndex === null) {
         // Add new chord if none selected
+        console.log("(NO $) [DEBUG][ChordEdit] Adding new chord");
         if (ensureBackingTrack) await ensureBackingTrack();
         const entry = cloneChordEntry(chord);
-        if (!entry) return;
+        console.log("(NO $) [DEBUG][ChordEdit] Cloned entry:", entry);
+        if (!entry) {
+          console.warn("(NO $) [DEBUG][ChordEdit] Failed to clone chord entry");
+          return;
+        }
         const updated = [...chordProgression, entry];
         saveChordProgression(updated);
         setSelectedChordIndex(updated.length - 1);
       } else {
         // Update existing chord
+        console.log("(NO $) [DEBUG][ChordEdit] Updating chord at index:", selectedChordIndex);
         if (ensureBackingTrack) await ensureBackingTrack();
         const entry = cloneChordEntry(chord);
+        console.log("(NO $) [DEBUG][ChordEdit] Cloned entry for update:", entry);
         if (entry) {
           const updated = [...chordProgression];
           updated[selectedChordIndex] = entry;
+          console.log("(NO $) [DEBUG][ChordEdit] Updated progression:", {
+            before: chordProgression[selectedChordIndex],
+            after: entry,
+            fullLength: updated.length,
+          });
           saveChordProgression(updated);
           // Auto-advance to next chord
           if (selectedChordIndex < updated.length - 1) {
@@ -162,6 +181,8 @@ export const useProjectChords = ({
           } else {
             setSelectedChordIndex(null);
           }
+        } else {
+          console.warn("(NO $) [DEBUG][ChordEdit] Failed to clone chord entry for update");
         }
       }
     },
