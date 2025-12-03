@@ -136,45 +136,46 @@ export const socketServer = (httpServer) => {
       }
     });
 
-    socket.on("send-message-liveroom", async ({ roomId, message }) => {
+    socket.on('send-message-liveroom', async ({ roomId, message }) => {
       if (!tempUserId) {
-        return socket.emit("chat-error", "Xác thực không hợp lệ.");
+        return socket.emit('chat-error', 'Xác thực không hợp lệ.');
       }
-
+      
       try {
-        // ✅ Check if user is banned
         const room = await LiveRoom.findById(roomId);
         if (!room) {
-          return socket.emit("chat-error", "Phòng không tồn tại.");
+          return socket.emit('chat-error', 'Phòng không tồn tại.');
         }
 
-        const isBanned = room.bannedUsers.some(
-          (bannedId) => String(bannedId) === String(tempUserId)
-        );
-
-        if (isBanned) {
-          return socket.emit(
-            "chat-error",
-            "Bạn đã bị cấm bình luận trong phòng này."
+        const user = await User.findById(tempUserId);
+        if (!user) {
+          return socket.emit('chat-error', 'Người dùng không tồn tại.');
+        }
+        
+        // Check xem user có bị ban chat bởi host của phòng này không
+        if (user.chatBannedByHosts && user.chatBannedByHosts.length > 0) {
+          const isBannedByHost = user.chatBannedByHosts.some(
+            bannedHostId => bannedHostId.toString() === room.hostId.toString()
           );
+          if (isBannedByHost) {
+            return socket.emit('chat-error', 'Bạn đã bị cấm chat trong các phòng livestream của host này.');
+          }
         }
-
+        
         const chat = new RoomChat({
           roomId,
-          userId: tempUserId,
+          userId: tempUserId, 
           message,
-          messageType: "text",
+          messageType: 'text'
         });
-
+        
         const savedChat = await chat.save();
-        const result = await RoomChat.findById(savedChat._id).populate(
-          "userId",
-          "displayName avatarUrl"
-        );
-        io.to(roomId).emit("new-message-liveroom", result);
+        const result = await RoomChat.findById(savedChat._id).populate('userId', 'displayName avatarUrl');
+        io.to(roomId).emit('new-message-liveroom', result);
+
       } catch (err) {
         console.error(`[Socket.IO] Lỗi khi gửi tin nhắn: ${err.message}`);
-        socket.emit("chat-error", "Không thể gửi tin nhắn.");
+        socket.emit('chat-error', 'Không thể gửi tin nhắn.');
       }
     });
 
