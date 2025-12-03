@@ -2,7 +2,7 @@ import { io } from "socket.io-client";
 import { store } from "../../redux/store";
 // URL của server (cổng Express/Socket.IO)
 const SOCKET_URL =
-  process.env.REACT_APP_SOCKET_URL || "https://api.melodyhub.website";
+  process.env.REACT_APP_SOCKET_URL || "";
 console.log("[Socket.IO] SOCKET_URL resolved to:", SOCKET_URL);
 
 let socket;
@@ -122,6 +122,12 @@ export const onViewerCountUpdate = (callback) => {
 };
 export const onChatError = (callback) => {
   safeOn("chat-error", callback);
+};
+export const onChatBanned = (callback) => {
+  safeOn('chat-banned', callback);
+};
+export const onChatUnbanned = (callback) => {
+  safeOn('chat-unbanned', callback);
 };
 
 // ---- Posts / Comments realtime ----
@@ -292,6 +298,8 @@ export const offSocketEvents = () => {
   s.off("stream-privacy-updated");
   s.off("viewer-count-update");
   s.off("chat-error");
+  s.off("chat-banned");
+  s.off("chat-unbanned");
   s.off("post:comment:new");
   s.off("notification:new");
 };
