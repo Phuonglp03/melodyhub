@@ -155,6 +155,16 @@ const GoogleSignIn = ({ buttonText = "Sign in with Google", onSuccess, onError }
         const result = resultAction.payload;
         console.log('✅ Login successful, payload:', result);
         
+        // Check if account is locked
+        if (result?.isAccountLocked) {
+          const errorMessage = result.message || 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.';
+          console.error('❌ Account is locked:', errorMessage);
+          if (onError) {
+            onError(errorMessage);
+          }
+          return;
+        }
+        
         if (onSuccess) {
           // Pass user data to parent component
           onSuccess(result?.data?.user || result?.user);

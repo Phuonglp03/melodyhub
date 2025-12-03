@@ -57,17 +57,32 @@ api.interceptors.response.use(
       originalRequest.url?.includes(endpoint)
     );
 
+    // Check if 403 is due to account locked
+    const isAccountLocked = 
+      error.response?.status === 403 && 
+      error.response?.data?.message?.includes('Tài khoản của bạn đã bị khóa');
+
     // Check if 403 is due to permission denied (not token expired)
     const isPermissionDenied = 
       error.response?.status === 403 && 
+      !isAccountLocked &&
       (error.response?.data?.message?.includes('Không có quyền') || 
        error.response?.data?.message?.includes('permission') ||
        error.response?.data?.message?.includes('Yêu cầu quyền'));
 
+    // If account is locked, logout immediately
+    if (isAccountLocked) {
+      console.error("[API] Account is locked, logging out...");
+      store.dispatch(logout());
+      localStorage.clear();
+      window.location.href = "/login";
+      return Promise.reject(new Error(error.response?.data?.message || "Tài khoản của bạn đã bị khóa"));
+    }
+
     // If 401 (Unauthorized) or 403 (Forbidden - token expired) and haven't retried yet
     // Don't refresh token if it's a permission denied error
     const shouldRefreshToken =
-      (error.response?.status === 401 || (error.response?.status === 403 && !isPermissionDenied)) &&
+      (error.response?.status === 401 || (error.response?.status === 403 && !isPermissionDenied && !isAccountLocked)) &&
       !originalRequest._retry &&
       !isAuthEndpoint; // Don't retry for auth endpoints
 
