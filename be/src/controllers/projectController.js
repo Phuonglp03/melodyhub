@@ -931,6 +931,19 @@ export const getProjectTimelineForExport = async (req, res) => {
       });
     }
 
+    // Debug: Log chord progression from database
+    console.log("(IS $) [FullMixExport] Project chord progression from DB:", {
+      projectId: project._id.toString(),
+      hasChordProgression: !!project.chordProgression,
+      chordProgressionType: Array.isArray(project.chordProgression)
+        ? "array"
+        : typeof project.chordProgression,
+      chordProgressionLength: Array.isArray(project.chordProgression)
+        ? project.chordProgression.length
+        : 0,
+      chordProgression: project.chordProgression,
+    });
+
     const isOwner = project.creatorId.toString() === userId;
     const collaborator = await ProjectCollaborator.findOne({
       projectId: project._id,
@@ -1089,7 +1102,32 @@ export const getProjectTimelineForExport = async (req, res) => {
       durationSeconds: maxEndTime,
     });
 
-    return res.json({
+    // Ensure chordProgression is included (convert to plain object to ensure all fields are included)
+    const projectData = project.toObject ? project.toObject() : project;
+
+    // Explicitly get chordProgression - try multiple ways to access it
+    const chordProgression =
+      projectData.chordProgression ||
+      project.chordProgression ||
+      (project.get ? project.get("chordProgression") : null) ||
+      [];
+
+    console.log(
+      "(IS $) [FullMixExport] Preparing response with chordProgression:",
+      {
+        hasInPlain: !!projectData.chordProgression,
+        hasInDoc: !!project.chordProgression,
+        chordProgressionLength: Array.isArray(chordProgression)
+          ? chordProgression.length
+          : 0,
+        chordProgression: chordProgression,
+        projectDataKeys: Object.keys(projectData).filter(
+          (k) => k.includes("chord") || k.includes("Chord")
+        ),
+      }
+    );
+
+    const responseData = {
       success: true,
       data: {
         project: {
@@ -1099,6 +1137,7 @@ export const getProjectTimelineForExport = async (req, res) => {
           key: project.key,
           timeSignature: project.timeSignature,
           status: project.status,
+          chordProgression: chordProgression, // Explicitly include
         },
         timeline: {
           durationSeconds: maxEndTime,
@@ -1106,7 +1145,19 @@ export const getProjectTimelineForExport = async (req, res) => {
           itemsByTrackId,
         },
       },
+    };
+
+    console.log("(IS $) [FullMixExport] Response project object:", {
+      hasChordProgression: !!responseData.data.project.chordProgression,
+      chordProgressionLength: Array.isArray(
+        responseData.data.project.chordProgression
+      )
+        ? responseData.data.project.chordProgression.length
+        : 0,
+      chordProgression: responseData.data.project.chordProgression,
     });
+
+    return res.json(responseData);
   } catch (error) {
     console.error("Error loading project timeline for export:", error);
     return res.status(500).json({

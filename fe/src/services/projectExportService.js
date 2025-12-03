@@ -3,6 +3,7 @@ import * as Tone from "tone";
 import { normalizeTracks } from "../utils/timelineHelpers";
 import api from "./api";
 import { getLickById } from "./user/lickService";
+import { generateBackingTrack } from "./user/projectService";
 
 // Helper: Convert AudioBuffer to WAV Blob
 const audioBufferToWav = (buffer) => {
@@ -102,6 +103,20 @@ const uploadProjectAudioToServer = async (projectId, file) => {
 const fetchProjectTimelineForExport = async (projectId) => {
   const response = await api.get(`/projects/${projectId}/export-timeline`);
 
+  // Debug: Log raw API response
+  console.log("(NO $) [DEBUG][FullMixExport] Raw API response:", {
+    hasData: !!response.data,
+    hasSuccess: !!response.data?.success,
+    hasDataData: !!response.data?.data,
+    responseKeys: response.data ? Object.keys(response.data) : [],
+    projectKeys: response.data?.data?.project
+      ? Object.keys(response.data.data.project)
+      : [],
+    hasChordProgression: !!response.data?.data?.project?.chordProgression,
+    chordProgression: response.data?.data?.project?.chordProgression,
+    fullResponse: response.data,
+  });
+
   return response.data;
 };
 
@@ -130,25 +145,277 @@ export const exportFullProjectAudio = async (projectId) => {
       );
     }
 
+    // Debug: Log the timelineResponse structure first
+    console.log("(NO $) [DEBUG][FullMixExport] Timeline response structure:", {
+      hasData: !!timelineResponse.data,
+      dataKeys: timelineResponse.data ? Object.keys(timelineResponse.data) : [],
+      hasProject: !!timelineResponse.data?.project,
+      hasTimeline: !!timelineResponse.data?.timeline,
+    });
+
     const { project, timeline } = timelineResponse.data;
     const rawTracks = timeline?.tracks || [];
     const itemsByTrackId = timeline?.itemsByTrackId || {};
+
+    // Debug: Log project data to see what we received
+    console.log("(NO $) [DEBUG][FullMixExport] Project data:", {
+      projectId: project?.id,
+      title: project?.title,
+      hasChordProgression: !!project?.chordProgression,
+      chordProgressionType: Array.isArray(project?.chordProgression)
+        ? "array"
+        : typeof project?.chordProgression,
+      chordProgressionLength: Array.isArray(project?.chordProgression)
+        ? project.chordProgression.length
+        : 0,
+      chordProgression: project?.chordProgression,
+      allProjectKeys: project ? Object.keys(project) : [],
+      fullProject: project, // Log full project to see everything
+    });
+
+    // Check if backing track exists and needs audio generation
+    const backingTrack = rawTracks.find(
+      (t) => t.isBackingTrack === true || t.trackType === "backing"
+    );
+
+    // Check if project has chord progression
+    let chordProgression = project?.chordProgression || [];
+
+    // If no chord progression in project, try to extract from timeline items
+    if (!Array.isArray(chordProgression) || chordProgression.length === 0) {
+      console.log(
+        "(NO $) [DEBUG][FullMixExport] No chord progression in project, checking timeline items..."
+      );
+
+      // Extract chord progression from all timeline items
+      const allItems = Object.values(itemsByTrackId).flat();
+      console.log(
+        "(NO $) [DEBUG][FullMixExport] All timeline items for chord extraction:",
+        {
+          totalItems: allItems.length,
+          items: allItems.map((item) => ({
+            id: item._id || item.id,
+            type: item.type,
+            chordName: item.chordName,
+            chord: item.chord,
+            startTime: item.startTime,
+            allKeys: Object.keys(item),
+          })),
+        }
+      );
+
+      const chordItems = allItems
+        .filter((item) => item.chordName || item.chord || item.type === "chord")
+        .sort((a, b) => (a.startTime || 0) - (b.startTime || 0));
+
+      console.log("(NO $) [DEBUG][FullMixExport] Filtered chord items:", {
+        count: chordItems.length,
+        items: chordItems.map((item) => ({
+          id: item._id || item.id,
+          type: item.type,
+          chordName: item.chordName,
+          chord: item.chord,
+          startTime: item.startTime,
+        })),
+      });
+
+      if (chordItems.length > 0) {
+        chordProgression = chordItems.map(
+          (item) => item.chordName || item.chord || "Unknown"
+        );
+        console.log(
+          "(NO $) [DEBUG][FullMixExport] Extracted chord progression from timeline items:",
+          {
+            chordCount: chordProgression.length,
+            chords: chordProgression,
+          }
+        );
+      } else {
+        console.warn(
+          "(NO $) [DEBUG][FullMixExport] No chord items found in timeline items"
+        );
+      }
+    }
+
+    const hasChordProgression =
+      Array.isArray(chordProgression) && chordProgression.length > 0;
+
+    // Determine if we need to generate backing track
+    let needsGeneration = false;
+    let generationReason = "";
+
+    if (backingTrack) {
+      const backingTrackId = String(backingTrack._id || backingTrack.id);
+      const backingItems = itemsByTrackId[backingTrackId] || [];
+      const itemsWithAudio = backingItems.filter(
+        (item) => item.audioUrl || item.audio_url
+      );
+
+      // If backing track has no items or items without audio, generate it
+      if (backingItems.length === 0 || itemsWithAudio.length === 0) {
+        needsGeneration = true;
+        generationReason =
+          backingItems.length === 0
+            ? "backing track has no items"
+            : "backing track items have no audio";
+      }
+    } else if (hasChordProgression) {
+      // No backing track exists but chord progression does - create it
+      needsGeneration = true;
+      generationReason = "no backing track exists but chord progression found";
+    }
+
+    if (needsGeneration) {
+      if (!hasChordProgression) {
+        console.warn(
+          "(NO $) [DEBUG][FullMixExport] Cannot auto-generate backing track: no chord progression found"
+        );
+      } else {
+        try {
+          console.log(
+            "(NO $) [DEBUG][FullMixExport] Auto-generating backing track:",
+            {
+              reason: generationReason,
+              chordCount: chordProgression.length,
+              backingTrackExists: !!backingTrack,
+            }
+          );
+
+          // Get backing track instrument and rhythm pattern if available
+          const instrumentId =
+            backingTrack?.instrument?.instrumentId || undefined;
+          const rhythmPatternId =
+            backingTrack?.defaultRhythmPatternId || undefined;
+
+          // Generate backing track with audio (will create track if it doesn't exist)
+          const generateResponse = await generateBackingTrack(projectId, {
+            chords: chordProgression,
+            instrumentId,
+            rhythmPatternId,
+            chordDuration: 4, // Default 4 beats per chord
+            generateAudio: true, // CRITICAL: Generate audio files
+          });
+
+          if (generateResponse?.success) {
+            console.log(
+              "(NO $) [DEBUG][FullMixExport] Backing track audio generated successfully, refetching timeline..."
+            );
+
+            // Refetch timeline to get the newly generated items
+            const refreshedTimelineResponse =
+              await fetchProjectTimelineForExport(projectId);
+
+            if (
+              refreshedTimelineResponse?.success &&
+              refreshedTimelineResponse?.data
+            ) {
+              // Update with refreshed data
+              const refreshedData = refreshedTimelineResponse.data;
+              const refreshedTracks = refreshedData.timeline?.tracks || [];
+              const refreshedItemsByTrackId =
+                refreshedData.timeline?.itemsByTrackId || {};
+
+              // Update our working data
+              rawTracks.length = 0;
+              rawTracks.push(...refreshedTracks);
+              Object.keys(itemsByTrackId).forEach(
+                (key) => delete itemsByTrackId[key]
+              );
+              Object.assign(itemsByTrackId, refreshedItemsByTrackId);
+
+              // Find the backing track ID after refresh
+              const newBackingTrack = refreshedTracks.find(
+                (t) => t.isBackingTrack === true || t.trackType === "backing"
+              );
+              const newBackingTrackId = newBackingTrack
+                ? String(newBackingTrack._id || newBackingTrack.id)
+                : null;
+
+              console.log(
+                "(NO $) [DEBUG][FullMixExport] Timeline refreshed, backing track items:",
+                newBackingTrackId
+                  ? (refreshedItemsByTrackId[newBackingTrackId] || []).length
+                  : 0
+              );
+            }
+          } else {
+            console.warn(
+              "(NO $) [DEBUG][FullMixExport] Backing track generation failed:",
+              generateResponse?.message || "Unknown error"
+            );
+          }
+        } catch (genError) {
+          console.error(
+            "(NO $) [DEBUG][FullMixExport] Error auto-generating backing track:",
+            genError
+          );
+          // Continue with export even if generation fails
+        }
+      }
+    }
+
+    // Debug: Log all tracks from backend to see backing track status
+    const tracksSummary = rawTracks.map((t) => ({
+      id: String(t._id || t.id),
+      name: t.trackName,
+      type: t.trackType,
+      isBackingTrack: t.isBackingTrack,
+      hasItems: !!itemsByTrackId[String(t._id || t.id)],
+      itemCount: (itemsByTrackId[String(t._id || t.id)] || []).length,
+    }));
+    console.log("(NO $) [DEBUG][FullMixExport] All tracks from backend:", {
+      trackCount: rawTracks.length,
+      tracks: tracksSummary,
+    });
+    // Also log each track individually for easier inspection
+    tracksSummary.forEach((track, index) => {
+      console.log(`(NO $) [DEBUG][FullMixExport] Track ${index + 1}:`, track);
+    });
 
     // Debug: Log itemsByTrackId keys to see what we received
     console.log(
       "(NO $) [DEBUG][FullMixExport] Items by trackId keys:",
       Object.keys(itemsByTrackId)
     );
+    const itemsSummary = Object.entries(itemsByTrackId).map(([key, items]) => ({
+      trackId: key,
+      itemCount: items.length,
+      itemTypes: items.map((i) => i.type),
+      hasAudioUrls: items.filter((i) => i.audioUrl || i.lickId?.audioUrl)
+        .length,
+      itemsWithChordName: items.filter((i) => i.chordName || i.chord).length,
+      itemsWithChordType: items.filter((i) => i.type === "chord").length,
+    }));
     console.log(
       "(NO $) [DEBUG][FullMixExport] Items by trackId summary:",
-      Object.entries(itemsByTrackId).map(([key, items]) => ({
-        trackId: key,
-        itemCount: items.length,
-        itemTypes: items.map((i) => i.type),
-        hasAudioUrls: items.filter((i) => i.audioUrl || i.lickId?.audioUrl)
-          .length,
-      }))
+      itemsSummary
     );
+
+    // Check for any items with chord characteristics that might be backing track items
+    const allItemsFlat = Object.values(itemsByTrackId).flat();
+    const chordItems = allItemsFlat.filter(
+      (item) => item.chordName || item.chord || item.type === "chord"
+    );
+    if (chordItems.length > 0) {
+      console.log(
+        "(NO $) [DEBUG][FullMixExport] Found items with chord characteristics:",
+        {
+          count: chordItems.length,
+          items: chordItems.map((item) => ({
+            itemId: String(item._id || item.id),
+            trackId: String(item.trackId),
+            type: item.type,
+            chordName: item.chordName || item.chord,
+            hasAudioUrl: !!(item.audioUrl || item.audio_url),
+            hasLickId: !!item.lickId,
+          })),
+        }
+      );
+    } else {
+      console.log(
+        "(NO $) [DEBUG][FullMixExport] No items with chord characteristics found"
+      );
+    }
 
     // Attach items to tracks
     const tracksWithItems = rawTracks.map((track) => {
@@ -162,6 +429,13 @@ export const exportFullProjectAudio = async (projectId) => {
         isBackingTrack: track.isBackingTrack,
         itemsFound: items.length,
         availableKeys: Object.keys(itemsByTrackId),
+        // Log all track properties to see what we're working with
+        allTrackProps: {
+          isBackingTrack: track.isBackingTrack,
+          trackType: track.trackType,
+          trackName: track.trackName,
+          trackNameLower: track.trackName?.toLowerCase(),
+        },
       });
 
       // Warn if backing track has no items
@@ -190,7 +464,141 @@ export const exportFullProjectAudio = async (projectId) => {
       };
     });
 
-    const normalizedTracks = normalizeTracks(tracksWithItems);
+    // Before normalization, try to identify backing tracks by their items
+    // Backing tracks typically have items with type: "chord" and audioUrl (not lickId)
+    const tracksWithBackingDetection = tracksWithItems.map((track) => {
+      const items = track.items || [];
+
+      // PRIMARY CHECK: Check if track is already marked as backing track in database
+      // This handles cases where backing track exists but items haven't been generated yet
+      if (track.isBackingTrack === true || track.trackType === "backing") {
+        console.log(
+          "(NO $) [DEBUG][FullMixExport] Track is marked as backing track in database:",
+          {
+            trackId: String(track._id || track.id),
+            trackName: track.trackName,
+            isBackingTrack: track.isBackingTrack,
+            trackType: track.trackType,
+            itemCount: items.length,
+            detectionMethod: "database_flag",
+          }
+        );
+        // Ensure it's properly marked (in case only one property is set)
+        return {
+          ...track,
+          isBackingTrack: true,
+          trackType: "backing",
+        };
+      }
+
+      // SECONDARY CHECK: Check if this track has backing track characteristics in its items
+      // Check if this track has backing track characteristics:
+      // - Items with type "chord" and audioUrl (but no lickId)
+      // Log item details for debugging
+      if (items.length > 0) {
+        console.log(
+          "(NO $) [DEBUG][FullMixExport] Checking track items for backing detection:",
+          {
+            trackId: String(track._id || track.id),
+            trackName: track.trackName,
+            items: items.map((item) => {
+              const hasAudio = !!(item.audioUrl || item.audio_url);
+              const hasLickId = !!(item.lickId || item.lickId?._id);
+              const hasChordName = !!(item.chordName || item.chord);
+              const matchesBackingCriteria =
+                hasAudio &&
+                !hasLickId &&
+                (hasChordName || item.type === "chord");
+              return {
+                type: item.type,
+                hasAudioUrl: hasAudio,
+                audioUrl: item.audioUrl || item.audio_url || null,
+                hasLickId: hasLickId,
+                lickId: item.lickId ? item.lickId._id || item.lickId : null,
+                chordName: item.chordName || item.chord || null,
+                matchesBackingCriteria,
+                // Show all item keys for debugging
+                allKeys: Object.keys(item),
+              };
+            }),
+          }
+        );
+      }
+      // More flexible detection: backing track items have audioUrl and chordName but no lickId
+      // They might not have type: "chord" set, so check for the actual characteristics
+      const hasBackingItems = items.some((item) => {
+        const hasAudio = !!(item.audioUrl || item.audio_url);
+        const hasChordName = !!(item.chordName || item.chord);
+        const hasNoLickId = !item.lickId && !item.lickId?._id;
+        // Backing track items: have audio, have chord name, but no lickId
+        // OR: have audio, type is "chord", but no lickId
+        return (
+          hasAudio && hasNoLickId && (hasChordName || item.type === "chord")
+        );
+      });
+
+      // If track isn't already marked as backing track but has backing items, mark it
+      if (
+        !track.isBackingTrack &&
+        hasBackingItems &&
+        track.trackType !== "backing"
+      ) {
+        const backingItemCount = items.filter((item) => {
+          const hasAudio = !!(item.audioUrl || item.audio_url);
+          const hasChordName = !!(item.chordName || item.chord);
+          const hasNoLickId = !item.lickId && !item.lickId?._id;
+          return (
+            hasAudio && hasNoLickId && (hasChordName || item.type === "chord")
+          );
+        }).length;
+
+        console.log(
+          "(NO $) [DEBUG][FullMixExport] Detected backing track by items:",
+          {
+            trackId: String(track._id || track.id),
+            trackName: track.trackName,
+            backingItemCount,
+            totalItems: items.length,
+            detectionMethod: "item_characteristics",
+          }
+        );
+        return {
+          ...track,
+          isBackingTrack: true,
+          trackType: "backing",
+        };
+      }
+
+      return track;
+    });
+
+    // Log tracks before normalization
+    console.log("(NO $) [DEBUG][FullMixExport] Tracks before normalization:", {
+      trackCount: tracksWithBackingDetection.length,
+      tracks: tracksWithBackingDetection.map((t) => ({
+        id: String(t._id || t.id),
+        name: t.trackName,
+        type: t.trackType,
+        isBackingTrack: t.isBackingTrack,
+        itemCount: (t.items || []).length,
+      })),
+    });
+
+    const normalizedTracks = normalizeTracks(tracksWithBackingDetection);
+
+    // Log tracks after normalization
+    console.log("(NO $) [DEBUG][FullMixExport] Tracks after normalization:", {
+      trackCount: normalizedTracks.length,
+      tracks: normalizedTracks.map((t) => ({
+        id: String(t._id || t.id),
+        name: t.trackName,
+        type: t.trackType,
+        isBackingTrack: t.isBackingTrack,
+        itemCount: (t.items || []).length,
+      })),
+      backingTracksFound: normalizedTracks.filter((t) => t.isBackingTrack)
+        .length,
+    });
 
     // Determine export duration from timeline (fallback to 0 if none)
     const duration =
@@ -231,6 +639,18 @@ export const exportFullProjectAudio = async (projectId) => {
       (t) => (t.items || []).length === 0
     );
 
+    // Check backing track items specifically
+    const backingTrackItems = backingTracks.flatMap((t) => t.items || []);
+    const backingTrackItemsWithAudio = backingTrackItems.filter((item) => {
+      let audioUrl = item.audioUrl || item.audio_url || null;
+      if (!audioUrl && item.lickId) {
+        if (typeof item.lickId === "object" && item.lickId !== null) {
+          audioUrl = item.lickId.audioUrl || item.lickId.audio_url || null;
+        }
+      }
+      return !!audioUrl;
+    });
+
     console.log("(NO $) [DEBUG][FullMixExport] Timeline summary:", {
       projectId,
       projectTitle: project?.title,
@@ -240,6 +660,19 @@ export const exportFullProjectAudio = async (projectId) => {
       itemsWithoutAudio: allItems.length - itemsWithAudio.length,
       backingTracksCount: backingTracks.length,
       backingTracksWithNoItems: backingTracksWithNoItems.length,
+      backingTrackItemsCount: backingTrackItems.length,
+      backingTrackItemsWithAudio: backingTrackItemsWithAudio.length,
+      backingTrackItemsWithoutAudio:
+        backingTrackItems.length - backingTrackItemsWithAudio.length,
+      backingTrackItemsDetails: backingTrackItems.map((item) => ({
+        id: item._id || item.id,
+        type: item.type,
+        chordName: item.chordName,
+        hasAudioUrl: !!(item.audioUrl || item.audio_url),
+        audioUrl: item.audioUrl || item.audio_url || null,
+        startTime: item.startTime,
+        duration: item.duration,
+      })),
       durationSeconds: duration,
     });
 
@@ -372,6 +805,26 @@ export const exportFullProjectAudio = async (projectId) => {
           effectiveVolume,
         });
 
+        // Special logging for backing track items
+        if (track.isBackingTrack) {
+          console.log("(NO $) [DEBUG][FullMixExport] BACKING TRACK ITEMS:", {
+            trackId: track._id || track.id,
+            trackName: track.trackName,
+            itemCount: (track.items || []).length,
+            items: (track.items || []).map((item) => ({
+              id: item._id || item.id,
+              type: item.type,
+              chordName: item.chordName,
+              audioUrl: item.audioUrl || item.audio_url || null,
+              startTime: item.startTime,
+              duration: item.duration,
+              offset: item.offset,
+              hasAudioUrl: !!(item.audioUrl || item.audio_url),
+              allKeys: Object.keys(item),
+            })),
+          });
+        }
+
         for (const item of track.items || []) {
           const clipId = item._id || item.id;
           const clipStart = item.startTime || 0;
@@ -451,7 +904,7 @@ export const exportFullProjectAudio = async (projectId) => {
           }
 
           try {
-            console.log("(NO $) [DEBUG][FullMixExport] Scheduling clip:", {
+            const logData = {
               clipId,
               itemType: item.type,
               audioUrl: audioUrl.substring(0, 50) + "...",
@@ -460,7 +913,25 @@ export const exportFullProjectAudio = async (projectId) => {
               offset: item.offset || 0,
               trackName: track.trackName || "unnamed",
               isBackingTrack: track.isBackingTrack,
-            });
+            };
+
+            // Extra logging for backing track items
+            if (track.isBackingTrack) {
+              logData.chordName = item.chordName;
+              logData.fullAudioUrl = audioUrl;
+              logData.itemDetails = {
+                type: item.type,
+                chordName: item.chordName,
+                startTime: item.startTime,
+                duration: item.duration,
+                offset: item.offset,
+              };
+            }
+
+            console.log(
+              "(NO $) [DEBUG][FullMixExport] Scheduling clip:",
+              logData
+            );
 
             const player = new Tone.Player({
               url: audioUrl,

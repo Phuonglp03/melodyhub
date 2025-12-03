@@ -1013,6 +1013,16 @@ const ProjectDetailPage = () => {
               bandSettings,
               status: project?.status,
               timeSignature: normalizedTimeSignature,
+              onStatusChange: (newStatus) => {
+                // Update project status in local state when it changes
+                setProject((prev) =>
+                  prev ? { ...prev, status: newStatus } : prev
+                );
+                // Optionally refresh project data from server
+                if (refreshProjectRef.current) {
+                  refreshProjectRef.current();
+                }
+              },
               onExportComplete: (exportData) => {
                 setProject((prev) =>
                   prev

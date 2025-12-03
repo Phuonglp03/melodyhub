@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { FaDownload } from "react-icons/fa";
 import { exportFullProjectAudio } from "../services/projectExportService";
-import { saveProjectExport } from "../services/user/projectService";
+import { saveProjectExport, updateProject } from "../services/user/projectService";
 
 export default function ProjectExportButton({
   projectId,
@@ -21,6 +21,7 @@ export default function ProjectExportButton({
   variant = "default",
   className = "",
   onExportComplete,
+  onStatusChange, // Callback when project status changes
 }) {
   const [isExporting, setIsExporting] = useState(false);
   const [showMenu] = useState(false); // kept for backward compatibility with layout, but menu is no longer used
@@ -49,10 +50,6 @@ export default function ProjectExportButton({
               alert("No project selected");
               return;
             }
-            if (status !== "active") {
-              alert("Project must be ACTIVE before exporting audio.");
-              return;
-            }
 
             setIsExporting(true);
             console.log(
@@ -65,6 +62,33 @@ export default function ProjectExportButton({
             );
 
             try {
+              // If project is not active, activate it first
+              if (status !== "active") {
+                console.log(
+                  "(NO $) [DEBUG][FullMixExport] Project is not active, activating it..."
+                );
+                try {
+                  await updateProject(projectId, { status: "active" });
+                  console.log(
+                    "(NO $) [DEBUG][FullMixExport] Project activated successfully"
+                  );
+                  // Notify parent component of status change
+                  if (onStatusChange) {
+                    onStatusChange("active");
+                  }
+                } catch (statusError) {
+                  console.error(
+                    "[FullMixExport] Failed to activate project:",
+                    statusError
+                  );
+                  alert(
+                    "Failed to activate project. Please try again or activate it manually."
+                  );
+                  setIsExporting(false);
+                  return;
+                }
+              }
+
               const result = await exportFullProjectAudio(projectId);
 
               if (!result?.success) {
@@ -127,7 +151,7 @@ export default function ProjectExportButton({
               setIsExporting(false);
             }
           }}
-          disabled={isExporting || !projectId || status !== "active"}
+          disabled={isExporting || !projectId}
           className={[
             "bg-blue-600 hover:bg-blue-500 text-white font-medium flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
             variantClasses,
@@ -135,9 +159,11 @@ export default function ProjectExportButton({
             .filter(Boolean)
             .join(" ")}
           title={
-            projectId && status === "active"
-              ? "Export full project mix (all tracks)"
-              : "Project must be ACTIVE to export full mix"
+            projectId
+              ? status === "active"
+                ? "Export full project mix (all tracks)"
+                : "Click to activate project and export (first time)"
+              : "No project selected"
           }
         >
           {isExporting ? (
