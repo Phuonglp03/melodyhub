@@ -111,13 +111,16 @@ export default function ProjectChordDeck({
                 >
                   N.C.
                 </button>
-                <button
-                  onClick={() => onChordSelect("")}
-                  className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 rounded text-gray-300 text-xs"
-                  title="Clear"
-                >
-                  Clear
-                </button>
+              <button
+                onClick={() => {
+                  console.log("(NO $) [DEBUG][ChordDeck] Clear button clicked");
+                  onChordSelect(""); // Pass empty string to clear chord
+                }}
+                className="px-2.5 py-1 bg-gray-800 hover:bg-gray-700 rounded text-gray-300 text-xs"
+                title="Clear"
+              >
+                Clear
+              </button>
               </>
             )}
             <button
