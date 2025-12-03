@@ -81,3 +81,30 @@ export const updateReportLimitSetting = async (limit) => {
   return res.data;
 };
 
+
+/**
+ * Report a livestream
+ * @param {string} roomId - ID of the livestream room to report
+ * @param {object} reportData - Report data
+ * @param {string} reportData.reason - Reason for reporting (spam, inappropriate, copyright, harassment, other)
+ * @param {string} [reportData.description] - Optional description
+ * @returns {Promise<object>} Response data
+ */
+export const reportLivestream = async (roomId, reportData) => {
+  // Changed: endpoint moved to liveroomRoutes
+  const res = await api.post(`/livestreams/${roomId}/report`, reportData);
+  return res.data;
+};
+
+/**
+ * Check if current user has reported a livestream
+ * @param {string} roomId - ID of the livestream room
+ * @returns {Promise<object>} Response data with hasReported boolean
+ */
+export const checkLivestreamReport = async (roomId) => {
+  // Changed: endpoint moved to liveroomRoutes
+  const res = await api.get(`/livestreams/${roomId}/report/check`);
+  return res.data;
+};
+
+

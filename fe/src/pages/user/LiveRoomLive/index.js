@@ -16,7 +16,9 @@ import {
   disconnectSocket,
   onMessageRemoved,
   onViewerCountUpdate,
-  onChatError
+  onChatError,
+  onChatBanned,
+  onChatUnbanned
 } from '../../../services/user/socketService';
 import { Dropdown, Button, Modal, Input, Form, Badge, Avatar, message } from 'antd';
 import { 
@@ -42,6 +44,9 @@ const LiveStreamLive = () => {
   const navigate = useNavigate();
   const { user } = useSelector((state) => state.auth);
 
+
+  const [modal, contextHolder] = Modal.useModal();
+
   // State
   const [room, setRoom] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -50,6 +55,7 @@ const LiveStreamLive = () => {
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [chatBanned, setChatBanned] = useState(false);
   
   // Edit State
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
@@ -71,6 +77,8 @@ const LiveStreamLive = () => {
   const videoRef = useRef(null);
   const playerRef = useRef(null);
   const chatEndRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
+  const maxReconnectAttempts = 3;
 
   // --- EFFECT: INIT & SOCKET ---
   useEffect(() => {
@@ -125,10 +133,13 @@ const LiveStreamLive = () => {
     });
 
     onStreamEnded(() => {
-      Modal.info({
+      modal.info({
         title: 'Kết thúc',
         content: 'Livestream đã kết thúc.',
-        onOk: () => navigate('/')
+        maskClosable: true,
+        okText: 'Về trang chủ',
+        onOk: () => navigate('/'),
+        onCancel: () => navigate('/') // Click bên ngoài cũng redirect
       });
     });
 
@@ -153,18 +164,30 @@ const LiveStreamLive = () => {
     });
 
     onChatError((errorMsg) => {
-      message.error(errorMsg);
+      if (errorMsg && errorMsg.includes('cấm chat')) {
+        setChatBanned(true);
+        message.error(errorMsg);
+      } else {
+        message.error(errorMsg);
+      }
+    });
+
+    onChatBanned(() => {
+      setChatBanned(true);
+      message.error('Bạn đã bị cấm chat trong các phòng livestream của host này');
+    });
+
+    onChatUnbanned(() => {
+      setChatBanned(false);
+      message.success('Bạn đã được gỡ cấm chat trong livestream');
     });
 
     return () => {
       offSocketEvents();
       disconnectSocket();
-      if (playerRef.current) {
-        playerRef.current.dispose();
-        playerRef.current = null;
-      }
+      // Player được cleanup ở VIDEO PLAYER useEffect
     };
-  }, [roomId, navigate, user, editForm]);
+  }, [roomId, navigate, user, editForm, modal]);
 
   // --- EFFECT: AUTO SCROLL CHAT ---
   useEffect(() => {
@@ -182,28 +205,119 @@ const LiveStreamLive = () => {
     return () => clearInterval(interval);
   }, [room]);
 
-  // --- EFFECT: VIDEO PLAYER ---
+  // --- EFFECT: VIDEO PLAYER với auto-end khi OBS tắt ---
   useEffect(() => {
-    if (playbackUrl && videoRef.current && !playerRef.current) {
-      const player = videojs(videoRef.current, {
-        autoplay: true,
-        muted: true, 
-        controls: true,
-        fluid: true,
-        liveui: true,
-        html5: {
-          vhs: {
-            enableLowInitialPlaylist: true,
-            smoothQualityChange: true,
-            overrideNative: true,
-            liveSyncDurationCount: 3,
-          }
+    const cleanup = () => {
+      if (playerRef.current) {
+        try {
+          playerRef.current.dispose();
+        } catch (e) {
+          console.error('[Video.js] Dispose error:', e);
         }
-      });
-      player.src({ src: playbackUrl, type: 'application/x-mpegURL' });
-      playerRef.current = player;
+        playerRef.current = null;
+      }
+    };
+
+    if (playbackUrl && videoRef.current && !playerRef.current) {
+      setTimeout(() => {
+        if (!videoRef.current) return;
+
+        try {
+          const player = videojs(videoRef.current, {
+            autoplay: true,
+            muted: true, 
+            controls: true,
+            fluid: true,
+            liveui: true,
+            liveTracker: {
+              trackingThreshold: 15,
+              liveTolerance: 10,
+            },
+            html5: {
+              vhs: {
+                enableLowInitialPlaylist: true,
+                smoothQualityChange: true,
+                overrideNative: true,
+                liveSyncDurationCount: 3,
+                playlistRetryCount: 3,
+                playlistRetryDelay: 500,
+              }
+            }
+          });
+
+          player.src({ src: playbackUrl, type: 'application/x-mpegURL' });
+          
+          player.ready(() => {
+            player.play().catch(() => {
+              player.muted(true);
+              player.play();
+            });
+          });
+
+          playerRef.current = player;
+
+          // Xử lý khi OBS tắt - stream lỗi
+          player.on('error', async () => {
+            const err = player.error();
+            console.warn('[VideoJS] Error:', err);
+
+            // Media errors (code 2, 3, 4) thường xảy ra khi OBS tắt
+            if (err && (err.code === 2 || err.code === 3 || err.code === 4)) {
+              reconnectAttemptsRef.current += 1;
+              console.log(`[Stream] Đang thử kết nối lại... (${reconnectAttemptsRef.current}/${maxReconnectAttempts})`);
+
+              if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
+                // Đã thử đủ số lần, tự động kết thúc stream
+                console.log('[Stream] Không thể kết nối, tự động kết thúc stream...');
+                message.warning('OBS đã ngắt kết nối. Đang kết thúc livestream...');
+                
+                try {
+                  await livestreamService.endLiveStream(roomId);
+                } catch (endErr) {
+                  console.error('[Stream] Lỗi kết thúc stream:', endErr);
+                }
+                return;
+              }
+
+              // Thử kết nối lại sau 2 giây
+              setTimeout(() => {
+                if (player && !player.isDisposed()) {
+                  player.src({
+                    src: playbackUrl,
+                    type: 'application/x-mpegURL'
+                  });
+                  player.play().catch(e => console.log('[Stream] Auto-play prevented:', e));
+                }
+              }, 2000);
+            }
+          });
+
+          // Reset retry count khi stream hoạt động tốt
+          player.on('playing', () => {
+            reconnectAttemptsRef.current = 0;
+          });
+
+          // Xử lý khi pause/play để seek về live edge
+          let wasPaused = false;
+          player.on('pause', () => { wasPaused = true; });
+          player.on('play', () => {
+            if (wasPaused) {
+              setTimeout(() => {
+                const liveTracker = player.liveTracker;
+                if (liveTracker?.seekToLiveEdge) liveTracker.seekToLiveEdge();
+              }, 100);
+              wasPaused = false;
+            }
+          });
+
+        } catch (error) {
+          console.error('[Video.js] Initialization error:', error);
+        }
+      }, 100);
     }
-  }, [playbackUrl]);
+
+    return cleanup;
+  }, [playbackUrl, roomId]);
 
   // --- HANDLERS ---
 
@@ -221,12 +335,13 @@ const LiveStreamLive = () => {
   };
 
   const handleEndStream = () => {
-    Modal.confirm({
+    modal.confirm({
       title: 'Kết thúc Livestream?',
       content: 'Hành động này sẽ dừng phát sóng ngay lập tức.',
       okText: 'Kết thúc ngay',
       okType: 'danger',
       cancelText: 'Hủy',
+      maskClosable: true,
       onOk: async () => {
         try {
           await livestreamService.endLiveStream(roomId);
@@ -290,7 +405,7 @@ const LiveStreamLive = () => {
     try {
       await livestreamService.unbanUser(roomId, userId);
       setBannedUsers(prev => prev.filter(u => u._id !== userId));
-      message.success("Đã bỏ chặn");
+      message.success("Đã bỏ chặn. Người dùng này có thể chat lại trong tất cả livestream.");
     } catch (e) { 
       console.error(e);
       message.error("Lỗi khi bỏ chặn");
@@ -304,11 +419,13 @@ const LiveStreamLive = () => {
     return `${h}:${m}:${sec}`;
   };
 
-  if (loading) return <div style={{height:'100vh', background:'#000', color:'#fff', display:'flex', justifyContent:'center', alignItems:'center'}}>Loading...</div>;
+  if (loading) return <div style={{height:'100vh', background:'#000', color:'#fff', display:'flex', justifyContent:'center', alignItems:'center'}}>Loading Studio...</div>;
   if (error) return <div style={{height:'100vh', background:'#000', color:'red', display:'flex', justifyContent:'center', alignItems:'center'}}>{error}</div>;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0e0e10', color: '#efeff1' }}>
+      {/* Context holder cho Modal hook */}
+      {contextHolder}
       
       {/* --- TOP HEADER BAR --- */}
       <header style={{
@@ -433,7 +550,7 @@ const LiveStreamLive = () => {
                     menu={{
                       items: [
                         { key: '1', label: 'Xóa tin nhắn & Ban', onClick: () => handleBanAction(msg.userId, msg._id, 'delete') },
-                        { key: '2', label: 'Chỉ cấm chat', onClick: () => handleBanAction(msg.userId, msg._id, 'mute') }
+                        { key: '2', label: 'Ban', onClick: () => handleBanAction(msg.userId, msg._id, 'mute') }
                       ]
                     }} 
                     trigger={['click']}
@@ -448,6 +565,21 @@ const LiveStreamLive = () => {
 
           {/* Chat Input */}
           <div style={{ padding: '15px', borderTop: '1px solid #2f2f35', position: 'relative' }}>
+            {chatBanned && (
+              <div style={{
+                background: 'rgba(255, 77, 79, 0.1)',
+                border: '1px solid rgba(255, 77, 79, 0.3)',
+                borderRadius: '6px',
+                padding: '8px 12px',
+                marginBottom: '10px',
+                color: '#ff4d4f',
+                fontSize: '12px',
+                fontWeight: '500',
+                textAlign: 'center'
+              }}>
+                🚫 Bạn đã bị cấm chat trong các phòng livestream của host này
+              </div>
+            )}
             {showEmojiPicker && (
               <div style={{ position: 'absolute', bottom: '100%', right: '10px', zIndex: 10 }}>
                 <EmojiPicker onEmojiClick={onEmojiClick} theme="dark" height={300} />
@@ -458,15 +590,37 @@ const LiveStreamLive = () => {
                 <Input 
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Gửi tin nhắn..."
-                  style={{ borderRadius: '20px', background: '#2f2f35', border: 'none', color: '#fff', paddingRight: '30px' }}
+                  placeholder={chatBanned ? "Bạn đã bị cấm chat" : "Gửi tin nhắn..."}
+                  disabled={chatBanned}
+                  style={{ 
+                    borderRadius: '20px', 
+                    background: chatBanned ? '#1f1f23' : '#2f2f35', 
+                    border: 'none', 
+                    color: chatBanned ? '#666' : '#fff', 
+                    paddingRight: '30px',
+                    cursor: chatBanned ? 'not-allowed' : 'text'
+                  }}
                 />
                 <SmileOutlined 
-                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', color: '#adadb8', cursor: 'pointer', fontSize: '16px' }} 
+                  onClick={() => !chatBanned && setShowEmojiPicker(!showEmojiPicker)}
+                  style={{ 
+                    position: 'absolute', 
+                    right: '10px', 
+                    top: '50%', 
+                    transform: 'translateY(-50%)', 
+                    color: chatBanned ? '#444' : '#adadb8', 
+                    cursor: chatBanned ? 'not-allowed' : 'pointer', 
+                    fontSize: '16px' 
+                  }} 
                 />
               </div>
-              <Button type="primary" shape="circle" icon={<SendOutlined />} htmlType="submit" disabled={!chatInput.trim()} />
+              <Button 
+                type="primary" 
+                shape="circle" 
+                icon={<SendOutlined />} 
+                htmlType="submit" 
+                disabled={!chatInput.trim() || chatBanned} 
+              />
             </form>
           </div>
         </div>
@@ -522,15 +676,18 @@ const LiveStreamLive = () => {
 
       {/* Banned Users Modal */}
       <Modal
-        title={`Danh sách chặn (${bannedUsers.length})`}
+        title={`Danh sách chặn chat (${bannedUsers.length})`}
         open={isBannedModalVisible}
         onCancel={() => setIsBannedModalVisible(false)}
         footer={null}
       >
+        <div style={{ marginBottom: '12px', padding: '8px 12px', background: '#fff3cd', borderRadius: '4px', fontSize: '12px', color: '#856404' }}>
+          💡 Lưu ý: Người dùng bị chặn sẽ không thể chat trong các phòng livestream của bạn. Họ vẫn có thể chat trong phòng của host khác. Bỏ chặn để họ có thể chat lại trong phòng của bạn.
+        </div>
         <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
           {bannedUsers.length === 0 ? (
             <div style={{textAlign:'center', color:'#999', padding:'20px'}}>
-              Chưa có người dùng nào bị chặn
+              Chưa có người dùng nào bị chặn chat
             </div>
           ) : (
             bannedUsers.map(u => (
@@ -543,7 +700,7 @@ const LiveStreamLive = () => {
                   </div>
                 </div>
                 <Button size="small" type="primary" danger ghost onClick={() => handleUnban(u._id)}>
-                  Bỏ chặn
+                  Bỏ chặn chat
                 </Button>
               </div>
             ))

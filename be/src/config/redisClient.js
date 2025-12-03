@@ -5,8 +5,7 @@ let connectPromise = null;
 
 const getRedisUrl = () =>
   process.env.REDIS_URL ||
-  process.env.REDIS_TLS_URL || // support common Redis envs
-  "redis://127.0.0.1:6379";
+  "";
 
 const createRedisClient = () => {
   const client = createClient({
