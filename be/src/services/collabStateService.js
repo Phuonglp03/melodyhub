@@ -1,4 +1,3 @@
-import CollabSnapshot from "../models/CollabSnapshot.js";
 import { getRedisClient } from "../config/redisClient.js";
 import { recordCollabMetric } from "../utils/collabMetrics.js";
 
@@ -191,4 +190,3 @@ export const clearCollabState = async (projectId) => {
   await client.del(OPS_KEY(projectId));
   pendingSnapshotTimers.delete(projectId);
 };
-
