@@ -1,7 +1,7 @@
 // UserManagement.js
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Lock, Unlock, Search, Edit } from 'lucide-react';
+import { Lock, Unlock, Search, Eye } from 'lucide-react';
 import api from '../../../services/api';
 
 const UserManagement = () => {
@@ -16,7 +16,7 @@ const UserManagement = () => {
     const [total, setTotal] = useState(0);
     const [totalPages, setTotalPages] = useState(1);
     const [loading, setLoading] = useState(false);
-    const [editingUser, setEditingUser] = useState(null);
+    const [viewingUser, setViewingUser] = useState(null);
     const [showModal, setShowModal] = useState(false);
     const [error, setError] = useState('');
 
@@ -75,37 +75,12 @@ const UserManagement = () => {
         }
     };
 
-    const handleViewEdit = (user) => {
-        setEditingUser({ 
+    const handleViewDetail = (user) => {
+        setViewingUser({ 
             ...user, 
             birthday: user.birthday ? new Date(user.birthday).toISOString().substring(0, 10) : ''
         });
         setShowModal(true);
-    };
-
-    const handleSaveUser = async () => {
-        if (!editingUser) return;
-        
-        try {
-            const updates = {
-                username: editingUser.username,
-                displayName: editingUser.displayName,
-                email: editingUser.email,
-                birthday: editingUser.birthday,
-                roleId: editingUser.roleId,
-            };
-            
-            const response = await api.put(`/admin/users/${editingUser._id}`, updates); 
-            
-            setUsers(users.map(user => 
-                user._id === editingUser._id ? response.data.data : user
-            ));
-
-            setShowModal(false);
-            setEditingUser(null);
-        } catch (err) {
-            setError(`Lỗi khi cập nhật người dùng: ${err.message}`);
-        }
     };
 
     const handlePageChange = (newPage) => {
@@ -164,8 +139,8 @@ const UserManagement = () => {
                     onChange={(e) => { setSortOrder(e.target.value); setPage(1); }}
                     className="px-4 py-2 bg-teal-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
                 >
-                    <option value="asc">ASC</option>
-                    <option value="desc">DESC</option>
+                    <option value="asc">↑</option>
+                    <option value="desc">↓</option>
                 </select>
             </div>
 
@@ -246,11 +221,11 @@ const UserManagement = () => {
                                         <td className="py-4 px-4">
                                             <div className="flex gap-2">
                                                 <button
-                                                    onClick={() => handleViewEdit(user)}
+                                                    onClick={() => handleViewDetail(user)}
                                                     className="flex items-center space-x-2 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition"
                                                 >
-                                                    <Edit size={16} />
-                                                    <span>Edit</span>
+                                                    <Eye size={16} />
+                                                    <span>Detail</span>
                                                 </button>
                                                 <button
                                                     onClick={() => toggleLock(user._id, user.isActive)}
@@ -314,91 +289,98 @@ const UserManagement = () => {
                 )}
             </div>
 
-            {/* Edit Modal (Giữ nguyên) */}
-            {showModal && editingUser && (
+            {/* Detail Modal (Read-only) */}
+            {showModal && viewingUser && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                        <h3 className="text-2xl font-bold mb-6">Edit User Details</h3>
+                        <h3 className="text-2xl font-bold mb-6">User Details</h3>
                         
                         <div className="space-y-4">
                             <div>
-                                <label className="block text-sm font-medium mb-2">ObjectID (Read-only)</label>
+                                <label className="block text-sm font-medium mb-2 text-gray-400">Username</label>
                                 <input
                                     type="text"
-                                    value={editingUser._id}
+                                    value={viewingUser.username || ''}
                                     disabled
-                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg text-gray-400 cursor-not-allowed"
+                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg text-gray-300 cursor-not-allowed"
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium mb-2">Username</label>
+                                <label className="block text-sm font-medium mb-2 text-gray-400">Display Name</label>
                                 <input
                                     type="text"
-                                    value={editingUser.username}
-                                    onChange={(e) => setEditingUser({...editingUser, username: e.target.value})}
-                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    value={viewingUser.displayName || ''}
+                                    disabled
+                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg text-gray-300 cursor-not-allowed"
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium mb-2">Display Name</label>
-                                <input
-                                    type="text"
-                                    value={editingUser.displayName}
-                                    onChange={(e) => setEditingUser({...editingUser, displayName: e.target.value})}
-                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium mb-2">Email</label>
+                                <label className="block text-sm font-medium mb-2 text-gray-400">Email</label>
                                 <input
                                     type="email"
-                                    value={editingUser.email}
-                                    onChange={(e) => setEditingUser({...editingUser, email: e.target.value})}
-                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    value={viewingUser.email || ''}
+                                    disabled
+                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg text-gray-300 cursor-not-allowed"
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium mb-2">Birthday</label>
+                                <label className="block text-sm font-medium mb-2 text-gray-400">Birthday</label>
                                 <input
                                     type="date"
-                                    value={editingUser.birthday}
-                                    onChange={(e) => setEditingUser({...editingUser, birthday: e.target.value})}
-                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    value={viewingUser.birthday || ''}
+                                    disabled
+                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg text-gray-300 cursor-not-allowed"
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium mb-2">Role</label>
-                                <select
-                                    value={editingUser.roleId}
-                                    onChange={(e) => setEditingUser({...editingUser, roleId: e.target.value})}
-                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                    <option value="user">User</option>
-                                    <option value="admin">Admin</option>
-                                </select>
+                                <label className="block text-sm font-medium mb-2 text-gray-400">Role</label>
+                                <input
+                                    type="text"
+                                    value={viewingUser.roleId ? viewingUser.roleId.toUpperCase() : ''}
+                                    disabled
+                                    className="w-full px-4 py-2 bg-gray-700 rounded-lg text-gray-300 cursor-not-allowed"
+                                />
                             </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2 text-gray-400">Status</label>
+                                <div className="w-full px-4 py-2">
+                                    <span className={`px-4 py-1 rounded-full text-sm font-semibold ${
+                                        viewingUser.isActive 
+                                            ? 'bg-green-600 text-white' 
+                                            : 'bg-red-600 text-white'
+                                    }`}>
+                                        {viewingUser.isActive ? 'Active' : 'Locked'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {viewingUser.createdAt && (
+                                <div>
+                                    <label className="block text-sm font-medium mb-2 text-gray-400">Created At</label>
+                                    <input
+                                        type="text"
+                                        value={new Date(viewingUser.createdAt).toLocaleString()}
+                                        disabled
+                                        className="w-full px-4 py-2 bg-gray-700 rounded-lg text-gray-300 cursor-not-allowed"
+                                    />
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex gap-4 mt-6">
                             <button
-                                onClick={handleSaveUser}
-                                className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition"
-                            >
-                                Save Changes
-                            </button>
-                            <button
                                 onClick={() => {
                                     setShowModal(false);
-                                    setEditingUser(null);
+                                    setViewingUser(null);
                                 }}
                                 className="flex-1 px-6 py-3 bg-gray-600 hover:bg-gray-700 rounded-lg font-semibold transition"
                             >
-                                Cancel
+                                Close
                             </button>
                         </div>
                     </div>

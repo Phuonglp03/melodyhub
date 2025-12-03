@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Form, Input, Button, message, Divider, ConfigProvider } from 'antd';
+import React, { useEffect, useRef, useReducer } from 'react';
+import { Form, Input, Button, message, Divider, ConfigProvider, Alert } from 'antd';
 import { EyeInvisibleOutlined, EyeOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
@@ -21,6 +21,12 @@ const Login = () => {
   const dispatch = useDispatch();
   const { isLoading, isError, message: authMessage } = useSelector((state) => state.auth);
   const [messageApi, contextHolder] = message.useMessage();
+  const isProcessingRef = useRef(false); // Prevent duplicate calls
+  const lastErrorRef = useRef(null); // Track last error to prevent duplicate messages
+  const errorMessageRef = useRef(''); // Ref to store error message
+  const [errorMessage, setErrorMessage] = React.useState(''); // State to display error message
+  const [errorKey, setErrorKey] = React.useState(0); // Key to force re-render
+  const [, forceUpdate] = React.useReducer(x => x + 1, 0); // Force re-render
 
   const from = location.state?.from?.pathname || '/';
 
@@ -35,14 +41,21 @@ const Login = () => {
       // Clear the state to prevent showing the message again on refresh
       window.history.replaceState({}, document.title);
     }
+  }, [messageApi, location.state]);
 
-    // Show error message if any
-    if (isError && authMessage) {
-      messageApi.error(authMessage);
-    }
-  }, [isError, authMessage, messageApi, location.state]);
 
   const onFinish = async (values) => {
+    // Prevent duplicate calls (especially in StrictMode)
+    if (isProcessingRef.current) {
+      return;
+    }
+    
+    // Clear previous error message
+    setErrorMessage('');
+    errorMessageRef.current = '';
+    setErrorKey(0);
+    isProcessingRef.current = true;
+    
     try {
       const resultAction = await dispatch(login({
         email: values.email,
@@ -63,10 +76,27 @@ const Login = () => {
               messageType: 'warning'
             } 
           });
+          isProcessingRef.current = false;
+          return;
+        }
+
+        // If account is locked
+        if (result.isAccountLocked) {
+          const errorMessage = result.message || 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.';
+          // Only show error if it's different from the last one (prevent duplicate)
+          if (lastErrorRef.current !== errorMessage) {
+            lastErrorRef.current = errorMessage;
+            messageApi.error(errorMessage);
+          }
+          // Reset after a short delay to allow retry
+          setTimeout(() => {
+            isProcessingRef.current = false;
+          }, 500);
           return;
         }
 
         // If login is successful
+        setErrorMessage(''); // Clear any error message
         messageApi.success('Đăng nhập thành công!');
         
         if (result.user?.roleId === 'admin') {
@@ -74,10 +104,36 @@ const Login = () => {
         } else {
           navigate(from, { replace: true });
         }
+        isProcessingRef.current = false;
+      } else if (login.rejected.match(resultAction)) {
+        // Handle rejected case (including wrong password, account locked, etc.)
+        const errorMsg = resultAction.payload || 'Đăng nhập thất bại. Vui lòng thử lại.';
+        
+        // Clear form errors first
+        form.setFields([]);
+        
+        // Set error message state
+        setErrorMessage(errorMsg);
+        errorMessageRef.current = errorMsg;
+        
+        // Force form to re-validate and show error
+        setTimeout(() => {
+          forceUpdate();
+        }, 0);
+        
+        // Reset after a short delay to allow retry
+        setTimeout(() => {
+          isProcessingRef.current = false;
+        }, 500);
       }
     } catch (error) {
-      console.error('Login error:', error);
-      messageApi.error(error || 'Login failed. Please try again.');
+      const errorMsg = error?.message || error?.toString() || 'Login failed. Please try again.';
+      setErrorMessage(errorMsg);
+      errorMessageRef.current = errorMsg;
+      // Reset after a short delay to allow retry
+      setTimeout(() => {
+        isProcessingRef.current = false;
+      }, 500);
     }
   };
 
@@ -114,9 +170,28 @@ const Login = () => {
               form={form}
               name="login"
               onFinish={onFinish}
+              onFinishFailed={() => {}}
               layout="vertical"
               autoComplete="off"
             >
+              {/* Error message display - Always render, show/hide based on errorMessage */}
+              {errorMessage && (
+                <Form.Item>
+                  <Alert
+                    message="Lỗi đăng nhập"
+                    description={errorMessage}
+                    type="error"
+                    showIcon
+                    closable
+                    onClose={() => {
+                      setErrorMessage('');
+                      errorMessageRef.current = '';
+                    }}
+                    style={{ marginBottom: '20px' }}
+                  />
+                </Form.Item>
+              )}
+              
               <Form.Item
                 label={<span className="form-label">Email</span>}
                 name="email"
@@ -172,7 +247,13 @@ const Login = () => {
                     }
                   }}
                   onError={(error) => {
-                    messageApi.error(error || 'Đăng nhập thất bại. Vui lòng thử lại.');
+                    // Check if error message contains account locked message
+                    if (error?.includes('Tài khoản của bạn đã bị khóa') || 
+                        error?.includes('account is locked')) {
+                      messageApi.error(error || 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.');
+                    } else {
+                      messageApi.error(error || 'Đăng nhập thất bại. Vui lòng thử lại.');
+                    }
                   }}
                 />
               </div>

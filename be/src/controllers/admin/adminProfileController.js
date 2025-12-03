@@ -19,17 +19,6 @@ export const getAdminProfile = async (req, res) => {
     
     // Convert to plain object to check permissions
     const userObj = user.toObject ? user.toObject() : user;
-    
-    // Log to debug permissions before transform
-    console.log('🔍 Raw user from DB (before transform):', {
-      userId: userObj._id?.toString() || userObj.id,
-      hasPermissions: 'permissions' in userObj,
-      permissions: userObj.permissions,
-      permissionsType: typeof userObj.permissions,
-      permissionsIsArray: Array.isArray(userObj.permissions),
-      permissionsLength: userObj.permissions?.length || 0,
-      userKeys: Object.keys(userObj).slice(0, 20) // First 20 keys
-    });
 
     // Verify user is admin
     if (user.roleId !== 'admin') {
@@ -70,15 +59,6 @@ export const getAdminProfile = async (req, res) => {
       createdAt: userObj.createdAt,
       updatedAt: userObj.updatedAt
     };
-
-    // Log permissions for debugging
-    console.log('🔍 Admin Profile Response:', {
-      userId: userResponse.id,
-      displayName: userResponse.displayName,
-      rawPermissions: userObj.permissions,
-      responsePermissions: userResponse.permissions,
-      permissionsLength: userResponse.permissions?.length || 0
-    });
 
     res.json({
       success: true,
