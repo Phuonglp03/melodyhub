@@ -86,18 +86,12 @@ const AdminLayout = () => {
       try {
         const response = await api.get('/admin/profile');
         const profileData = response.data.data.user;
-        console.log('📋 Admin Profile fetched:', {
-          displayName: profileData.displayName,
-          permissions: profileData.permissions,
-          permissionsLength: profileData.permissions?.length || 0
-        });
         setAdminProfile(profileData);
       } catch (error) {
         console.error('Failed to fetch admin profile:', error);
         // Don't crash if it's just a permission error or network error
         // Fallback: use authUser data if available
         if (authUser?.user) {
-          console.log('⚠️ Using authUser as fallback:', authUser.user);
           setAdminProfile({
             displayName: authUser.user.displayName,
             avatarUrl: authUser.user.avatarUrl,
@@ -280,15 +274,7 @@ const AdminLayout = () => {
                     {adminProfile?.displayName || authUser?.user?.username || "Admin"}
                   </p>
                   <p className={`text-xs truncate ${getAdminType(adminProfile?.permissions).color}`}>
-                    {(() => {
-                      const adminType = getAdminType(adminProfile?.permissions);
-                      console.log('🔍 Admin Type determined:', {
-                        permissions: adminProfile?.permissions,
-                        type: adminType.type,
-                        label: adminType.label
-                      });
-                      return adminType.label;
-                    })()}
+                    {getAdminType(adminProfile?.permissions).label}
                   </p>
                 </div>
               </div>
@@ -307,7 +293,9 @@ const AdminLayout = () => {
               <span className="text-gray-400">Admin</span>
               <ChevronRight size={16} className="text-gray-600" />
               <span className="font-medium">
-                {menuItems.find(item => item.path === location.pathname)?.label || "Dashboard"}
+                {location.pathname === "/admin/profile" 
+                  ? "Admin Profile"
+                  : menuItems.find(item => item.path === location.pathname)?.label || "Dashboard"}
               </span>
             </div>
 

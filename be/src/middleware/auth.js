@@ -50,7 +50,6 @@ export const verifyToken = (req, res, next) => {
     req.userId = decoded.userId || decoded.id;
     req.userRole = decoded.roleId || decoded.role;
     
-    console.log('[verifyToken] Token verified successfully. userId:', req.userId);
     next();
   } catch (error) {
     console.error('[verifyToken] Token verification error:', error.message);
@@ -59,11 +58,41 @@ export const verifyToken = (req, res, next) => {
 };
 
 // Middleware kiểm tra quyền admin
-export const isAdmin = (req, res, next) => {
-  if (req.userRole !== 'admin') {
-    return res.status(403).json({ message: 'Yêu cầu quyền admin' });
+export const isAdmin = async (req, res, next) => {
+  try {
+    // If userRole is already set and is 'admin', allow access
+    if (req.userRole && req.userRole.toLowerCase() === 'admin') {
+      return next();
+    }
+    
+    // If userRole is not set or not 'admin', check database to be sure
+    if (req.userId) {
+      const User = (await import('../models/User.js')).default;
+      const user = await User.findById(req.userId).select('roleId');
+      
+      if (user && user.roleId === 'admin') {
+        // Update req.userRole for consistency
+        req.userRole = 'admin';
+        return next();
+      }
+      
+      return res.status(403).json({ 
+        success: false,
+        message: 'Yêu cầu quyền admin' 
+      });
+    }
+    
+    return res.status(403).json({ 
+      success: false,
+      message: 'Yêu cầu quyền admin' 
+    });
+  } catch (error) {
+    console.error('Error checking admin role:', error);
+    return res.status(500).json({ 
+      success: false,
+      message: 'Lỗi kiểm tra quyền admin' 
+    });
   }
-  next();
 };
 
 // Middleware kiểm tra quyền user thông thường
