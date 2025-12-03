@@ -240,29 +240,21 @@ export const exportFullProjectAudio = async (projectId) => {
     const hasChordProgression =
       Array.isArray(chordProgression) && chordProgression.length > 0;
 
-    // Determine if we need to generate backing track
+    // Always regenerate backing track if chord progression exists
+    // This ensures the backing track is always up-to-date with current chord progression
     let needsGeneration = false;
     let generationReason = "";
 
-    if (backingTrack) {
-      const backingTrackId = String(backingTrack._id || backingTrack.id);
-      const backingItems = itemsByTrackId[backingTrackId] || [];
-      const itemsWithAudio = backingItems.filter(
-        (item) => item.audioUrl || item.audio_url
-      );
-
-      // If backing track has no items or items without audio, generate it
-      if (backingItems.length === 0 || itemsWithAudio.length === 0) {
-        needsGeneration = true;
-        generationReason =
-          backingItems.length === 0
-            ? "backing track has no items"
-            : "backing track items have no audio";
-      }
-    } else if (hasChordProgression) {
-      // No backing track exists but chord progression does - create it
+    if (hasChordProgression) {
       needsGeneration = true;
-      generationReason = "no backing track exists but chord progression found";
+      if (backingTrack) {
+        const backingTrackId = String(backingTrack._id || backingTrack.id);
+        const backingItems = itemsByTrackId[backingTrackId] || [];
+        generationReason = `regenerating backing track (existing track has ${backingItems.length} items)`;
+      } else {
+        generationReason =
+          "no backing track exists but chord progression found";
+      }
     }
 
     if (needsGeneration) {
@@ -281,17 +273,48 @@ export const exportFullProjectAudio = async (projectId) => {
             }
           );
 
-          // Get backing track instrument and rhythm pattern if available
-          const instrumentId =
-            backingTrack?.instrument?.instrumentId || undefined;
-          const rhythmPatternId =
-            backingTrack?.defaultRhythmPatternId || undefined;
+          // Validate bandSettings is required for audio generation
+          const hasBandSettings = project?.bandSettings?.members?.length > 0;
+
+          if (!hasBandSettings) {
+            console.error(
+              "(NO $) [DEBUG][FullMixExport] Cannot generate backing track: bandSettings.members is required"
+            );
+            throw new Error(
+              "Band settings are required for backing track generation. Please configure your band settings first."
+            );
+          }
+
+          if (!project?.bandSettings?.style) {
+            console.error(
+              "(NO $) [DEBUG][FullMixExport] Cannot generate backing track: bandSettings.style is required"
+            );
+            throw new Error(
+              "Band style is required for backing track generation. Please set a style (Swing, Bossa, Latin, Ballad, Funk, or Rock)."
+            );
+          }
+
+          // Log project settings including band settings
+          console.log(
+            "(NO $) [DEBUG][FullMixExport] Project settings for backing track generation:",
+            {
+              projectId,
+              tempo: project?.tempo,
+              key: project?.key,
+              timeSignature: project?.timeSignature,
+              swingAmount: project?.swingAmount,
+              bandSettings: project?.bandSettings,
+              bandSettingsStyle: project?.bandSettings?.style,
+              bandSettingsSwingAmount: project?.bandSettings?.swingAmount,
+              bandSettingsMembers: project?.bandSettings?.members?.length || 0,
+              chordProgression: chordProgression,
+            }
+          );
 
           // Generate backing track with audio (will create track if it doesn't exist)
+          // bandSettings is required - don't pass instrumentId/rhythmPatternId
           const generateResponse = await generateBackingTrack(projectId, {
             chords: chordProgression,
-            instrumentId,
-            rhythmPatternId,
             chordDuration: 4, // Default 4 beats per chord
             generateAudio: true, // CRITICAL: Generate audio files
           });
@@ -815,12 +838,13 @@ export const exportFullProjectAudio = async (projectId) => {
               id: item._id || item.id,
               type: item.type,
               chordName: item.chordName,
-              audioUrl: item.audioUrl || item.audio_url || null,
+              audioUrl: item.audioUrl || item.audio_url || null, // FULL URL - not truncated
               startTime: item.startTime,
               duration: item.duration,
               offset: item.offset,
               hasAudioUrl: !!(item.audioUrl || item.audio_url),
               allKeys: Object.keys(item),
+              fullItem: item, // Include full item object for inspection
             })),
           });
         }
@@ -918,13 +942,15 @@ export const exportFullProjectAudio = async (projectId) => {
             // Extra logging for backing track items
             if (track.isBackingTrack) {
               logData.chordName = item.chordName;
-              logData.fullAudioUrl = audioUrl;
+              logData.fullAudioUrl = audioUrl; // FULL URL - not truncated
+              logData.audioUrlFull = audioUrl; // Another field with full URL
               logData.itemDetails = {
                 type: item.type,
                 chordName: item.chordName,
                 startTime: item.startTime,
                 duration: item.duration,
                 offset: item.offset,
+                audioUrl: audioUrl, // FULL URL in details too
               };
             }
 
@@ -933,14 +959,55 @@ export const exportFullProjectAudio = async (projectId) => {
               logData
             );
 
-            const player = new Tone.Player({
-              url: audioUrl,
-            }).toDestination();
+            // For backing tracks, also log the full URL separately for easy inspection
+            if (track.isBackingTrack) {
+              console.log(
+                "(NO $) [DEBUG][FullMixExport] Backing track item FULL audio URL:",
+                {
+                  chordName: item.chordName,
+                  clipId: clipId,
+                  audioUrl: audioUrl, // FULL URL - no truncation
+                }
+              );
+            }
 
-            // Apply volume (convert gain to dB)
-            player.volume.value = Tone.gainToDb(effectiveVolume);
+            // For backing tracks, create separate player for each segment
+            // Tone.js may have issues with multiple schedules on the same player with different offsets
+            // So we create a new player for each segment even if they share the same audioUrl
+            let player;
 
-            players.push(player);
+            if (track.isBackingTrack) {
+              // Always create a new player for each backing track segment
+              // This ensures each segment plays independently
+              player = new Tone.Player({
+                url: audioUrl,
+              }).toDestination();
+
+              // Apply volume (convert gain to dB)
+              player.volume.value = Tone.gainToDb(effectiveVolume);
+
+              console.log(
+                "(NO $) [DEBUG][FullMixExport] Created player for backing track segment:",
+                {
+                  chordName: item.chordName,
+                  audioUrl: audioUrl.substring(0, 80),
+                  volume: effectiveVolume,
+                  volumeDb: Tone.gainToDb(effectiveVolume),
+                }
+              );
+
+              players.push(player);
+            } else {
+              // For non-backing tracks, create player normally
+              player = new Tone.Player({
+                url: audioUrl,
+              }).toDestination();
+
+              // Apply volume (convert gain to dB)
+              player.volume.value = Tone.gainToDb(effectiveVolume);
+
+              players.push(player);
+            }
 
             // Sync to transport and schedule
             const offset = item.offset || 0;
@@ -948,13 +1015,140 @@ export const exportFullProjectAudio = async (projectId) => {
             const playbackRate = item.playbackRate || 1;
 
             player.playbackRate = playbackRate;
-            player.sync().start(clipStart, offset, clipDuration);
+
+            // For backing track items, log detailed scheduling info
+            if (track.isBackingTrack) {
+              console.log(
+                "(NO $) [DEBUG][FullMixExport] Backing track scheduling:",
+                {
+                  chordName: item.chordName,
+                  timelineStart: clipStart,
+                  audioOffset: offset,
+                  duration: clipDuration,
+                  audioUrl: audioUrl, // FULL URL - no truncation
+                  volume: effectiveVolume,
+                  volumeDb: Tone.gainToDb(effectiveVolume),
+                  itemOffset: item.offset, // Show original item offset
+                  itemStartTime: item.startTime, // Show original item startTime
+                  itemDuration: item.duration, // Show original item duration
+                }
+              );
+            }
+
+            // Schedule the clip
+            // For Tone.Player.start(time, offset, duration):
+            // - time: when to start in the transport timeline
+            // - offset: offset into the audio file (in seconds)
+            // - duration: how long to play (in seconds)
+
+            // For backing tracks, verify player is ready before scheduling
+            if (track.isBackingTrack) {
+              // Check if player is loaded
+              const playerState = {
+                loaded: player.loaded,
+                state: player.state,
+                buffer: player.buffer ? "exists" : "null",
+                bufferDuration: player.buffer ? player.buffer.duration : null,
+              };
+
+              console.log(
+                "(NO $) [DEBUG][FullMixExport] Player state before scheduling:",
+                {
+                  chordName: item.chordName,
+                  ...playerState,
+                }
+              );
+
+              // If player not loaded, log warning but continue (Tone.loaded() will wait)
+              if (!player.loaded) {
+                console.warn(
+                  "(NO $) [DEBUG][FullMixExport] WARNING: Player not loaded yet for:",
+                  item.chordName
+                );
+              }
+            }
+
+            try {
+              player.sync().start(clipStart, offset, clipDuration);
+
+              // Additional logging for backing tracks to verify scheduling
+              if (track.isBackingTrack) {
+                console.log(
+                  "(NO $) [DEBUG][FullMixExport] Backing track scheduled:",
+                  {
+                    chordName: item.chordName,
+                    scheduled: true,
+                    timelineTime: clipStart,
+                    fileOffset: offset,
+                    playDuration: clipDuration,
+                    playerLoaded: player.loaded,
+                  }
+                );
+              }
+            } catch (scheduleError) {
+              console.error(
+                "(NO $) [DEBUG][FullMixExport] Failed to schedule backing track segment:",
+                {
+                  chordName: item.chordName,
+                  error: scheduleError.message,
+                  stack: scheduleError.stack,
+                  clipStart,
+                  offset,
+                  clipDuration,
+                }
+              );
+              throw scheduleError;
+            }
           } catch (error) {
             console.error(
               "[FullMixExport] Failed to prepare player for clip",
               clipId,
               error
             );
+            // Log error details for backing track items
+            if (track.isBackingTrack) {
+              console.error(
+                "(NO $) [DEBUG][FullMixExport] Backing track item error details:",
+                {
+                  clipId,
+                  chordName: item.chordName,
+                  audioUrl: audioUrl?.substring(0, 80),
+                  error: error.message,
+                  stack: error.stack,
+                }
+              );
+            }
+          }
+        }
+      }
+
+      // Count backing track players
+      const backingTrackPlayers = players.filter((p, idx) => {
+        // Find which track this player belongs to by checking the items we processed
+        let playerIdx = 0;
+        for (const track of normalizedTracks) {
+          if (track.muted) continue;
+          for (const item of track.items || []) {
+            if (playerIdx === idx && track.isBackingTrack) {
+              return true;
+            }
+            playerIdx++;
+          }
+        }
+        return false;
+      });
+
+      // Count scheduled backing track segments
+      const backingTrackSchedules = [];
+      for (const track of normalizedTracks) {
+        if (track.isBackingTrack && !track.muted) {
+          for (const item of track.items || []) {
+            backingTrackSchedules.push({
+              chordName: item.chordName,
+              timelineStart: item.startTime,
+              audioOffset: item.offset,
+              duration: item.duration,
+            });
           }
         }
       }
@@ -962,12 +1156,18 @@ export const exportFullProjectAudio = async (projectId) => {
       console.log("(NO $) [DEBUG][FullMixExport] Prepared players:", {
         projectId,
         playerCount: players.length,
+        backingTrackPlayerCount: backingTrackPlayers.length,
         totalTracks: normalizedTracks.length,
         tracksProcessed: normalizedTracks.filter((t) => !t.muted).length,
         totalItems: normalizedTracks.reduce(
           (sum, t) => sum + (t.items?.length || 0),
           0
         ),
+        backingTrackItems: normalizedTracks
+          .filter((t) => t.isBackingTrack)
+          .reduce((sum, t) => sum + (t.items?.length || 0), 0),
+        backingTrackSchedules: backingTrackSchedules,
+        backingTrackScheduleCount: backingTrackSchedules.length,
       });
 
       if (!players.length) {

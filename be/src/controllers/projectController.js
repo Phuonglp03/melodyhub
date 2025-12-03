@@ -108,6 +108,73 @@ const sanitizeMidiEvents = (events) => {
     .filter(Boolean);
 };
 
+// Helper: Convert bandSettings.style to rhythm pattern noteEvents
+// Maps style names to the hardcoded patterns from frontend ProjectBandEngine.js
+const styleToRhythmPattern = (style) => {
+  const stylePatterns = {
+    Swing: {
+      piano: [0, 2],
+      bass: [0, 2],
+      drums: { kick: [0], snare: [1, 3], hihat: [0, 1, 2, 3] },
+    },
+    Bossa: {
+      piano: [0, 1.5, 3],
+      bass: [0, 1.5, 2, 3.5],
+      drums: {
+        kick: [0, 2],
+        snare: [],
+        hihat: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5],
+      },
+    },
+    Latin: {
+      piano: [0, 0.5, 1.5, 2, 3],
+      bass: [0, 1, 2, 3],
+      drums: {
+        kick: [0, 2.5],
+        snare: [1, 3],
+        hihat: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5],
+      },
+    },
+    Ballad: {
+      piano: [0],
+      bass: [0, 2],
+      drums: { kick: [0], snare: [2], hihat: [0, 1, 2, 3] },
+    },
+    Funk: {
+      piano: [0, 0.5, 1.5, 2.5, 3],
+      bass: [0, 0.75, 1.5, 2, 2.75, 3.5],
+      drums: {
+        kick: [0, 1.5, 2.5],
+        snare: [1, 3],
+        hihat: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5],
+      },
+    },
+    Rock: {
+      piano: [0, 2],
+      bass: [0, 1, 2, 3],
+      drums: {
+        kick: [0, 2],
+        snare: [1, 3],
+        hihat: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5],
+      },
+    },
+  };
+
+  const pattern = stylePatterns[style] || stylePatterns.Swing;
+
+  // Convert pattern to noteEvents format for comping/rhythm instruments
+  // Use piano pattern as default rhythm pattern
+  const noteEvents = pattern.piano.map((beat) => ({
+    beat: Math.floor(beat),
+    subdivision: beat % 1,
+    velocity: 0.8,
+    duration: 0.5,
+    noteOffset: 0,
+  }));
+
+  return { noteEvents, beatsPerPattern: 4, patternType: "style" };
+};
+
 const clampTempo = (value, fallback = 120) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
@@ -1127,6 +1194,9 @@ export const getProjectTimelineForExport = async (req, res) => {
       }
     );
 
+    // Include band settings in response
+    const projectPlain = project.toObject ? project.toObject() : project;
+
     const responseData = {
       success: true,
       data: {
@@ -1138,6 +1208,9 @@ export const getProjectTimelineForExport = async (req, res) => {
           timeSignature: project.timeSignature,
           status: project.status,
           chordProgression: chordProgression, // Explicitly include
+          swingAmount: project.swingAmount,
+          bandSettings:
+            projectPlain.bandSettings || project.bandSettings || null,
         },
         timeline: {
           durationSeconds: maxEndTime,
@@ -2252,6 +2325,30 @@ export const generateBackingTrack = async (req, res) => {
       });
     }
 
+    // Require bandSettings for audio generation
+    if (generateAudio) {
+      const hasBandSettings =
+        project.bandSettings?.members &&
+        project.bandSettings.members.length > 0;
+
+      if (!hasBandSettings) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "bandSettings with at least one member is required for backing track audio generation. Please configure your band settings first.",
+        });
+      }
+
+      // Require bandSettings.style for rhythm pattern
+      if (!project.bandSettings?.style) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "bandSettings.style is required for backing track audio generation. Please set a style (Swing, Bossa, Latin, Ballad, Funk, or Rock).",
+        });
+      }
+    }
+
     const isOwner = project.creatorId.toString() === userId;
     const collaborator = await ProjectCollaborator.findOne({
       projectId: project._id,
@@ -2583,24 +2680,398 @@ export const generateBackingTrack = async (req, res) => {
     let audioFile = null;
     if (generateAudio) {
       const cloudinaryFolder = `projects/${projectId}/backing_tracks`;
+
+      // bandSettings is required for audio generation (validated above)
+      // Extract instruments from band members
+      let finalInstrumentId = null; // Will be extracted per-member
+      let finalRhythmPatternId = null; // Will come from bandSettings.style
+      let finalInstrumentProgram = instrumentProgram;
+
+      const hasBandSettings =
+        project.bandSettings?.members &&
+        project.bandSettings.members.length > 0;
+
+      console.log(
+        "(IS $) [Backing Track] Using bandSettings - extracting instruments from members"
+      );
+
+      // Extract from band members
+      if (hasBandSettings) {
+        console.log(
+          "(IS $) [Backing Track] Extracting settings from band members..."
+        );
+
+        // Find comping or rhythm member (typically used for backing track)
+        const compingMember = project.bandSettings.members.find(
+          (m) => m.role === "comping" || m.role === "rhythm"
+        );
+
+        if (compingMember) {
+          console.log(
+            `(IS $) [Backing Track] Found comping/rhythm member: ${compingMember.name} (${compingMember.type}, ${compingMember.role})`
+          );
+
+          // Extract instrument from band member
+          if (compingMember.soundBank) {
+            try {
+              const Instrument = (await import("../models/Instrument.js"))
+                .default;
+              const foundInstrument = await Instrument.findOne({
+                soundfontKey: compingMember.soundBank,
+              });
+              if (foundInstrument) {
+                finalInstrumentId = foundInstrument._id;
+                console.log(
+                  `(IS $) [Backing Track] ✓ Extracted instrument from band: ${foundInstrument.name} (${compingMember.soundBank})`
+                );
+              }
+            } catch (err) {
+              console.warn(
+                "(IS $) [Backing Track] Could not lookup instrument from soundBank:",
+                err.message
+              );
+            }
+          }
+
+          // Extract rhythm pattern if member has one
+          // Note: Band members might have rhythmPatternId stored, but we'll use the project's default
+          // or look for it in the member's properties if available
+        }
+
+        // Convert bandSettings.style to rhythm pattern if available
+        if (project.bandSettings?.style && !finalRhythmPatternId) {
+          const stylePattern = styleToRhythmPattern(project.bandSettings.style);
+          console.log(
+            `(IS $) [Backing Track] Converted style "${project.bandSettings.style}" to rhythm pattern with ${stylePattern.noteEvents.length} events`
+          );
+          // Style pattern will be passed via bandSettings to audio generator
+        }
+
+        // If no comping member, try to get from first non-muted member
+        if (!compingMember) {
+          const activeMember = project.bandSettings.members.find(
+            (m) => !m.isMuted
+          );
+          if (activeMember && activeMember.soundBank) {
+            try {
+              const Instrument = (await import("../models/Instrument.js"))
+                .default;
+              const foundInstrument = await Instrument.findOne({
+                soundfontKey: activeMember.soundBank,
+              });
+              if (foundInstrument) {
+                finalInstrumentId = foundInstrument._id;
+                console.log(
+                  `(IS $) [Backing Track] ✓ Extracted instrument from first active member: ${foundInstrument.name}`
+                );
+              }
+            } catch (err) {
+              console.warn(
+                "(IS $) [Backing Track] Could not lookup instrument:",
+                err.message
+              );
+            }
+          }
+        }
+      }
+
+      // Define activeBandMembers (non-muted members) for audio generation
+      const activeBandMembers =
+        project.bandSettings?.members?.filter((m) => !m.isMuted) || [];
+
+      // Log band settings and project settings
+      console.log(
+        "(IS $) [Backing Track] Project settings for audio generation:",
+        {
+          projectId: project._id.toString(),
+          tempo: project.tempo || 120,
+          key: project.key,
+          timeSignature: project.timeSignature,
+          swingAmount: project.swingAmount,
+          bandSettings: project.bandSettings || null,
+          bandSettingsStyle: project.bandSettings?.style,
+          bandSettingsSwingAmount: project.bandSettings?.swingAmount,
+          bandSettingsMembers: project.bandSettings?.members?.length || 0,
+          activeBandMembers: activeBandMembers.length,
+          bandMembers: activeBandMembers.map((m) => ({
+            type: m.type,
+            role: m.role,
+            soundBank: m.soundBank,
+            name: m.name,
+            volume: m.volume,
+          })),
+          chordCount: chords.length,
+          chordDuration,
+        }
+      );
+
       try {
         console.log(
-          "[Backing Track] Using legacy waveform renderer (midiToAudioConverter)..."
+          "[Backing Track] Generating individual backing tracks for each chord, then consolidating..."
         );
         const { convertMIDIToAudioAuto } = await import(
           "../utils/midiToAudioConverter.js"
         );
-        audioFile = await convertMIDIToAudioAuto(chords, {
+        const { consolidateAudioFiles } = await import(
+          "../utils/audioConsolidator.js"
+        );
+
+        // Build audio generation params - bandSettings is required, so never include instrumentId/rhythmPatternId
+        const audioGenParams = {
           tempo: project.tempo || 120,
           chordDuration,
           sampleRate: 44100,
           uploadToCloud: true,
           cloudinaryFolder,
           projectId: project._id.toString(),
-          rhythmPatternId,
-          instrumentId,
-          instrumentProgram,
+          instrumentProgram: finalInstrumentProgram,
+          // bandSettings is required for audio generation
+          bandSettings: project.bandSettings,
+          swingAmount:
+            project.swingAmount ||
+            project.bandSettings?.swingAmount ||
+            undefined,
+        };
+
+        console.log("(IS $) [Backing Track] Audio generation parameters:", {
+          ...audioGenParams,
+          bandSettings: audioGenParams.bandSettings ? "present" : "missing",
+          bandSettingsMembers:
+            audioGenParams.bandSettings?.members?.length || 0,
+          bandMembersDetails: audioGenParams.bandSettings?.members?.map(
+            (m) => ({
+              type: m.type,
+              role: m.role,
+              soundBank: m.soundBank,
+            })
+          ),
         });
+
+        // Generate backing track for EACH chord, with EACH band member mixed together
+        console.log(
+          `(IS $) [Backing Track] Generating ${chords.length} chords × ${
+            activeBandMembers.length
+          } members = ${
+            chords.length * activeBandMembers.length
+          } individual tracks...`
+        );
+        const chordAudioFiles = [];
+
+        // Import chord name to MIDI converter
+        const { chordNameToMidiNotes } = await import(
+          "../utils/midiToAudioConverter.js"
+        );
+
+        for (let i = 0; i < chords.length; i++) {
+          const chord = chords[i];
+          // Ensure chord has chordName - chords array might just be strings
+          const chordName =
+            typeof chord === "string"
+              ? chord
+              : chord.chordName || chord.name || `Chord ${i + 1}`;
+
+          // Convert string chord to object with MIDI notes
+          let chordObj;
+          if (typeof chord === "string") {
+            // Convert chord name to MIDI notes
+            const midiNotes = chordNameToMidiNotes(chordName);
+            chordObj = {
+              chordName: chordName,
+              name: chordName,
+              midiNotes: midiNotes,
+            };
+            console.log(
+              `(IS $) [Backing Track] Converted chord "${chordName}" to MIDI notes:`,
+              midiNotes
+            );
+          } else {
+            // Ensure existing chord object has MIDI notes
+            if (!chordObj.midiNotes || chordObj.midiNotes.length === 0) {
+              const midiNotes = chordNameToMidiNotes(chordName);
+              chordObj = { ...chord, midiNotes: midiNotes };
+              console.log(
+                `(IS $) [Backing Track] Added MIDI notes to chord "${chordName}":`,
+                midiNotes
+              );
+            } else {
+              chordObj = chord;
+            }
+          }
+
+          console.log(
+            `(IS $) [Backing Track] Processing chord ${i + 1}/${
+              chords.length
+            }: ${chordName}`
+          );
+
+          // Generate audio for each band member for this chord
+          const memberAudioFiles = [];
+
+          for (let j = 0; j < activeBandMembers.length; j++) {
+            const member = activeBandMembers[j];
+            console.log(
+              `(IS $) [Backing Track]   Generating track for member ${j + 1}/${
+                activeBandMembers.length
+              }: ${member.name} (${member.type}, ${member.role}, soundBank: ${
+                member.soundBank
+              })`
+            );
+
+            try {
+              // Look up instrument from soundBank
+              let memberInstrumentId = null;
+              let memberInstrumentProgram = 0;
+
+              if (member.soundBank) {
+                try {
+                  const Instrument = (await import("../models/Instrument.js"))
+                    .default;
+                  const foundInstrument = await Instrument.findOne({
+                    soundfontKey: member.soundBank,
+                  });
+                  if (foundInstrument) {
+                    memberInstrumentId = foundInstrument._id;
+                    memberInstrumentProgram = foundInstrument.program || 0;
+                    console.log(
+                      `(IS $) [Backing Track]     Found instrument: ${foundInstrument.name} (program: ${memberInstrumentProgram})`
+                    );
+                  }
+                } catch (err) {
+                  console.warn(
+                    `(IS $) [Backing Track]     Could not lookup instrument for ${member.soundBank}:`,
+                    err.message
+                  );
+                }
+              }
+
+              // Generate audio for this chord + member combination
+              const memberAudio = await convertMIDIToAudioAuto([chordObj], {
+                tempo: project.tempo || 120,
+                chordDuration,
+                sampleRate: 44100,
+                uploadToCloud: true,
+                cloudinaryFolder: `${cloudinaryFolder}/chords/${i}/members`, // Organize by chord and member
+                projectId: project._id.toString(),
+                // Don't pass rhythmPatternId when using style-based pattern
+                rhythmPatternId: project.bandSettings?.style
+                  ? null
+                  : finalRhythmPatternId,
+                instrumentId: memberInstrumentId || finalInstrumentId,
+                instrumentProgram:
+                  memberInstrumentProgram || finalInstrumentProgram,
+                bandSettings: project.bandSettings || undefined,
+                swingAmount:
+                  project.swingAmount ||
+                  project.bandSettings?.swingAmount ||
+                  undefined,
+                // Apply member volume
+                volume: member.volume || 0.8,
+              });
+
+              if (
+                memberAudio &&
+                (memberAudio.url || memberAudio.cloudinaryUrl)
+              ) {
+                memberAudioFiles.push({
+                  url: memberAudio.url,
+                  cloudinaryUrl: memberAudio.cloudinaryUrl || memberAudio.url,
+                  memberName: member.name,
+                  memberType: member.type,
+                  memberRole: member.role,
+                  volume: member.volume || 0.8,
+                });
+                console.log(
+                  `(IS $) [Backing Track]     ✓ Generated ${member.name} track for ${chordName}`
+                );
+              } else {
+                console.warn(
+                  `(IS $) [Backing Track]     ✗ Failed to generate ${member.name} track for ${chordName}`
+                );
+              }
+            } catch (memberError) {
+              console.error(
+                `(IS $) [Backing Track]     Error generating ${member.name} track:`,
+                memberError.message
+              );
+            }
+          }
+
+          // Mix all member tracks for this chord into one
+          if (memberAudioFiles.length > 0) {
+            console.log(
+              `(IS $) [Backing Track]   Mixing ${memberAudioFiles.length} member tracks for ${chordName}...`
+            );
+            try {
+              const { consolidateAudioFiles } = await import(
+                "../utils/audioConsolidator.js"
+              );
+              const mixedChordAudio = await consolidateAudioFiles(
+                memberAudioFiles.map((m, idx) => ({
+                  ...m,
+                  chordName: `${chordName} - ${m.memberName}`,
+                  index: idx,
+                })),
+                {
+                  cloudinaryFolder: `${cloudinaryFolder}/chords`,
+                  projectId: project._id.toString(),
+                  tempo: project.tempo || 120,
+                  chordDuration,
+                  mixMode: true, // Mix mode: overlay all tracks instead of sequential
+                }
+              );
+
+              if (
+                mixedChordAudio &&
+                (mixedChordAudio.url || mixedChordAudio.cloudinaryUrl)
+              ) {
+                chordAudioFiles.push({
+                  url: mixedChordAudio.url,
+                  cloudinaryUrl:
+                    mixedChordAudio.cloudinaryUrl || mixedChordAudio.url,
+                  chordName: chordName,
+                  index: i,
+                });
+                console.log(
+                  `(IS $) [Backing Track]   ✓ Mixed ${memberAudioFiles.length} members into chord ${chordName} track`
+                );
+              }
+            } catch (mixError) {
+              console.error(
+                `(IS $) [Backing Track]   Error mixing members for ${chordName}:`,
+                mixError.message
+              );
+            }
+          }
+        }
+
+        console.log(
+          `(IS $) [Backing Track] Generated ${chordAudioFiles.length}/${chords.length} chord backing tracks`
+        );
+
+        // Consolidate all chord audio files into one
+        if (chordAudioFiles.length > 0) {
+          console.log(
+            `(IS $) [Backing Track] Consolidating ${chordAudioFiles.length} chord backing tracks into one file...`
+          );
+          audioFile = await consolidateAudioFiles(chordAudioFiles, {
+            cloudinaryFolder,
+            projectId: project._id.toString(),
+            tempo: project.tempo || 120,
+            chordDuration,
+          });
+          console.log(
+            `(IS $) [Backing Track] ✓ Consolidated backing track created: ${
+              audioFile?.cloudinaryUrl || audioFile?.url || "N/A"
+            }`
+          );
+        } else {
+          // Fallback: generate all chords together if individual generation failed
+          console.warn(
+            "(IS $) [Backing Track] No individual chord tracks generated, falling back to single file generation..."
+          );
+          audioFile = await convertMIDIToAudioAuto(chords, audioGenParams);
+        }
+
         console.log(
           `[Backing Track] Audio generation completed. Success: ${!!audioFile}, URL: ${
             audioFile?.cloudinaryUrl || audioFile?.url || "N/A"

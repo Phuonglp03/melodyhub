@@ -51,7 +51,8 @@ export const useProjectBackingTrack = ({
   setAiNotification,
   fetchProject,
 }) => {
-  const [isGeneratingBackingTrack, setIsGeneratingBackingTrack] = useState(false);
+  const [isGeneratingBackingTrack, setIsGeneratingBackingTrack] =
+    useState(false);
 
   // Ensure backing track exists
   const ensureBackingTrack = useCallback(async () => {
@@ -273,7 +274,9 @@ export const useProjectBackingTrack = ({
       } catch (error) {
         console.error("Error adding chord to timeline:", error);
         alert(
-          `Failed to add chord: ${error.response?.data?.message || error.message}`
+          `Failed to add chord: ${
+            error.response?.data?.message || error.message
+          }`
         );
       }
     },
@@ -291,17 +294,19 @@ export const useProjectBackingTrack = ({
   // Handle generating full backing track with audio generation
   const handleGenerateBackingTrack = useCallback(
     async (data) => {
-      // Validate that instrument is selected (required for audio generation)
-      if (!data.instrumentId) {
+      // Validate bandSettings is required for audio generation
+      const hasBandSettings = project?.bandSettings?.members?.length > 0;
+
+      if (!hasBandSettings) {
         alert(
-          "Please select an instrument first to generate audio for the backing track"
+          "Band settings are required for backing track generation. Please configure your band settings first."
         );
         return;
       }
 
-      if (!data.rhythmPatternId) {
+      if (!project?.bandSettings?.style) {
         alert(
-          "Please select a rhythm pattern first to generate audio for the backing track"
+          "Band style is required for backing track generation. Please set a style (Swing, Bossa, Latin, Ballad, Funk, or Rock)."
         );
         return;
       }
@@ -329,15 +334,13 @@ export const useProjectBackingTrack = ({
           "[Generate Backing Track] Starting generation with data:",
           generationData
         );
-        const response = await generateBackingTrackAPI(projectId, generationData);
+        const response = await generateBackingTrackAPI(
+          projectId,
+          generationData
+        );
 
         if (response.success) {
-          // Update selectedInstrumentId from response if available
-          if (response.data?.track?.instrument?.instrumentId) {
-            setSelectedInstrumentId(
-              response.data.track.instrument.instrumentId
-            );
-          }
+          // bandSettings is always used now, so don't update selectedInstrumentId
 
           // Small delay to ensure server has saved everything
           await new Promise((resolve) => setTimeout(resolve, 500));
@@ -352,7 +355,9 @@ export const useProjectBackingTrack = ({
             } chord clips!`
           );
         } else {
-          throw new Error(response.message || "Failed to generate backing track");
+          throw new Error(
+            response.message || "Failed to generate backing track"
+          );
         }
       } catch (error) {
         console.error(
@@ -369,13 +374,7 @@ export const useProjectBackingTrack = ({
         setIsGeneratingBackingTrack(false);
       }
     },
-    [
-      project,
-      projectId,
-      setSelectedInstrumentId,
-      refreshProject,
-      setError,
-    ]
+    [project, projectId, setSelectedInstrumentId, refreshProject, setError]
   );
 
   // Handle AI Backing Track Generation with Suno
@@ -424,4 +423,3 @@ export const useProjectBackingTrack = ({
     handleGenerateAIBackingTrack,
   };
 };
-
