@@ -12,11 +12,7 @@ const AdminProfile = () => {
     birthday: '',
     gender: 'unspecified',
     location: '',
-    links: ['', ''],
-    theme: 'dark',
-    language: 'en',
-    emailNotifications: true,
-    pushNotifications: true
+    links: ['', '']
   });
   const [avatarPreview, setAvatarPreview] = useState('');
   const [coverPreview, setCoverPreview] = useState('');
@@ -42,16 +38,12 @@ const AdminProfile = () => {
         birthday: user.birthday ? new Date(user.birthday).toISOString().split('T')[0] : '',
         gender: user.gender || 'unspecified',
         location: user.location || '',
-        links: user.links && user.links.length > 0 ? [...user.links, ''].slice(0, 2) : ['', ''],
-        theme: user.theme || 'dark',
-        language: user.language || 'en',
-        emailNotifications: user.emailNotifications !== undefined ? user.emailNotifications : true,
-        pushNotifications: user.pushNotifications !== undefined ? user.pushNotifications : true
+        links: user.links && user.links.length > 0 ? [...user.links, ''].slice(0, 2) : ['', '']
       });
       setAvatarPreview(user.avatarUrl || '');
       setCoverPreview(user.coverPhotoUrl || '');
     } catch (err) {
-      setError(err.response?.data?.message || 'Không thể tải thông tin profile');
+      setError(err.response?.data?.message || 'Failed to load profile information');
     } finally {
       setLoading(false);
     }
@@ -72,7 +64,7 @@ const AdminProfile = () => {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      setError('Vui lòng chọn file hình ảnh');
+      setError('Please select an image file');
       return;
     }
 
@@ -84,10 +76,10 @@ const AdminProfile = () => {
 
       const response = await api.post('/admin/profile/avatar', formData);
       setAvatarPreview(response.data.data.avatarUrl);
-      setSuccess('Cập nhật avatar thành công');
+      setSuccess('Avatar updated successfully');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.message || 'Upload avatar thất bại');
+      setError(err.response?.data?.message || 'Failed to upload avatar');
     } finally {
       setUploadingAvatar(false);
       e.target.value = ''; // Reset input
@@ -99,7 +91,7 @@ const AdminProfile = () => {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      setError('Vui lòng chọn file hình ảnh');
+      setError('Please select an image file');
       return;
     }
 
@@ -111,10 +103,10 @@ const AdminProfile = () => {
 
       const response = await api.post('/admin/profile/cover-photo', formData);
       setCoverPreview(response.data.data.coverPhotoUrl);
-      setSuccess('Cập nhật cover photo thành công');
+      setSuccess('Cover photo updated successfully');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.message || 'Upload cover photo thất bại');
+      setError(err.response?.data?.message || 'Failed to upload cover photo');
     } finally {
       setUploadingCover(false);
       e.target.value = ''; // Reset input
@@ -133,19 +125,15 @@ const AdminProfile = () => {
         birthday: formData.birthday || undefined,
         gender: formData.gender,
         location: formData.location,
-        links: formData.links.filter(link => link.trim() !== ''),
-        theme: formData.theme,
-        language: formData.language,
-        emailNotifications: formData.emailNotifications,
-        pushNotifications: formData.pushNotifications
+        links: formData.links.filter(link => link.trim() !== '')
       };
 
       const response = await api.put('/admin/profile', updates);
       setProfile(response.data.data.user);
-      setSuccess('Cập nhật profile thành công');
+      setSuccess('Profile updated successfully');
       setTimeout(() => setSuccess(''), 3000);
     } catch (err) {
-      setError(err.response?.data?.message || 'Cập nhật profile thất bại');
+      setError(err.response?.data?.message || 'Failed to update profile');
     } finally {
       setSaving(false);
     }
@@ -156,7 +144,7 @@ const AdminProfile = () => {
       <div className="min-h-screen bg-gray-900 text-white p-8 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p>Đang tải thông tin...</p>
+          <p>Loading...</p>
         </div>
       </div>
     );
@@ -170,7 +158,7 @@ const AdminProfile = () => {
           <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
             Admin Profile
           </h1>
-          <p className="text-gray-400 mt-2">Quản lý thông tin cá nhân của bạn</p>
+          <p className="text-gray-400 mt-2">Manage your personal information</p>
         </div>
 
         {/* Messages */}
@@ -213,7 +201,7 @@ const AdminProfile = () => {
               {uploadingCover ? (
                 <>
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  <span>Đang upload...</span>
+                  <span>Uploading...</span>
                 </>
               ) : (
                 <>
@@ -265,26 +253,26 @@ const AdminProfile = () => {
           <div className="space-y-6">
             {/* Display Name */}
             <div>
-              <label className="block text-sm font-medium mb-2">Tên hiển thị</label>
+              <label className="block text-sm font-medium mb-2">Display Name</label>
               <input
                 type="text"
                 value={formData.displayName}
                 onChange={(e) => handleInputChange('displayName', e.target.value)}
                 className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Nhập tên hiển thị"
+                placeholder="Enter display name"
               />
             </div>
 
             {/* Bio */}
             <div>
-              <label className="block text-sm font-medium mb-2">Giới thiệu</label>
+              <label className="block text-sm font-medium mb-2">About</label>
               <textarea
                 value={formData.bio}
                 onChange={(e) => handleInputChange('bio', e.target.value)}
                 rows={4}
                 maxLength={500}
                 className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                placeholder="Nhập giới thiệu về bạn..."
+                placeholder="Enter your introduction..."
               />
               <p className="text-xs text-gray-500 mt-1">{formData.bio.length}/500</p>
             </div>
@@ -292,7 +280,7 @@ const AdminProfile = () => {
             {/* Birthday & Gender */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-2">Ngày sinh</label>
+                <label className="block text-sm font-medium mb-2">Date of Birth</label>
                 <input
                   type="date"
                   value={formData.birthday}
@@ -301,35 +289,35 @@ const AdminProfile = () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-2">Giới tính</label>
+                <label className="block text-sm font-medium mb-2">Gender</label>
                 <select
                   value={formData.gender}
                   onChange={(e) => handleInputChange('gender', e.target.value)}
                   className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="unspecified">Không xác định</option>
-                  <option value="male">Nam</option>
-                  <option value="female">Nữ</option>
-                  <option value="other">Khác</option>
+                  <option value="unspecified">Unspecified</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
                 </select>
               </div>
             </div>
 
             {/* Location */}
             <div>
-              <label className="block text-sm font-medium mb-2">Địa điểm</label>
+              <label className="block text-sm font-medium mb-2">Location</label>
               <input
                 type="text"
                 value={formData.location}
                 onChange={(e) => handleInputChange('location', e.target.value)}
                 className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Nhập địa điểm"
+                placeholder="Enter location"
               />
             </div>
 
             {/* Links */}
             <div>
-              <label className="block text-sm font-medium mb-2">Liên kết</label>
+              <label className="block text-sm font-medium mb-2">Links</label>
               {formData.links.map((link, index) => (
                 <input
                   key={index}
@@ -342,56 +330,6 @@ const AdminProfile = () => {
               ))}
             </div>
 
-            {/* Theme & Language */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Theme</label>
-                <select
-                  value={formData.theme}
-                  onChange={(e) => handleInputChange('theme', e.target.value)}
-                  className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="dark">Dark</option>
-                  <option value="light">Light</option>
-                  <option value="auto">Auto</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Ngôn ngữ</label>
-                <select
-                  value={formData.language}
-                  onChange={(e) => handleInputChange('language', e.target.value)}
-                  className="w-full px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="en">English</option>
-                  <option value="vi">Tiếng Việt</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Notifications */}
-            <div className="space-y-3">
-              <label className="block text-sm font-medium mb-2">Thông báo</label>
-              <label className="flex items-center space-x-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.emailNotifications}
-                  onChange={(e) => handleInputChange('emailNotifications', e.target.checked)}
-                  className="w-5 h-5 rounded bg-gray-700 border-gray-600 focus:ring-2 focus:ring-blue-500"
-                />
-                <span>Email notifications</span>
-              </label>
-              <label className="flex items-center space-x-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.pushNotifications}
-                  onChange={(e) => handleInputChange('pushNotifications', e.target.checked)}
-                  className="w-5 h-5 rounded bg-gray-700 border-gray-600 focus:ring-2 focus:ring-blue-500"
-                />
-                <span>Push notifications</span>
-              </label>
-            </div>
-
             {/* Save Button */}
             <div className="pt-4 border-t border-gray-700">
               <button
@@ -402,12 +340,12 @@ const AdminProfile = () => {
                 {saving ? (
                   <>
                     <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    <span>Đang lưu...</span>
+                    <span>Saving...</span>
                   </>
                 ) : (
                   <>
                     <Save size={20} />
-                    <span>Lưu thay đổi</span>
+                    <span>Save Changes</span>
                   </>
                 )}
               </button>
