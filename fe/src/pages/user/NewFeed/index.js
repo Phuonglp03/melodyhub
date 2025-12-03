@@ -11,6 +11,7 @@ import { getMyLicks, getTopLicksLeaderboard, playLickAudio } from '../../../serv
 import { getUserProjects } from '../../../services/user/projectService';
 import { reportPost, checkPostReport } from '../../../services/user/reportService';
 import PostLickEmbed from '../../../components/PostLickEmbed';
+import ProjectPlayer from '../../../components/ProjectPlayer';
 import './newFeedResponsive.css';
 
 const { Title, Text } = Typography;
@@ -76,9 +77,10 @@ const Suggestion = ({ user, following, loading, onFollow }) => {
     onFollow(user.id);
   };
 
-  const primaryReason = Array.isArray(user?.reasons) && user.reasons.length > 0
-    ? user.reasons[0]
-    : null;
+  // Hiển thị lý do theo thứ tự ưu tiên từ backend
+  // Thứ tự: 1. mutualFollowing, 2. sharedFollowers, 3. interactions, 4. popularity
+  const reasons = Array.isArray(user?.reasons) ? user.reasons : [];
+  const primaryReason = reasons.length > 0 ? reasons[0] : null;
 
   return (
   <div 
@@ -288,6 +290,10 @@ const NewsFeed = () => {
   const [editingPost, setEditingPost] = useState(null);
   const [editText, setEditText] = useState('');
   const [editing, setEditing] = useState(false);
+  const [editSelectedLickIds, setEditSelectedLickIds] = useState([]);
+  const [editSelectedProjectId, setEditSelectedProjectId] = useState(null);
+  const [editLinkPreview, setEditLinkPreview] = useState(null);
+  const [editLinkLoading, setEditLinkLoading] = useState(false);
   const [deletingPostId, setDeletingPostId] = useState(null);
   const [followingUsers, setFollowingUsers] = useState([]);
   const [loadingFollowing, setLoadingFollowing] = useState(false);
@@ -486,29 +492,53 @@ const NewsFeed = () => {
 
   const toggleFollow = async (uid) => {
     if (!uid) return;
+    // Normalize ID thành string để đảm bảo consistency
+    const uidStr = String(uid);
     try {
-      setUserIdToFollowLoading((prev) => ({ ...prev, [uid]: true }));
-      const isFollowing = !!userIdToFollowing[uid];
+      setUserIdToFollowLoading((prev) => ({ ...prev, [uidStr]: true }));
+      const isFollowing = !!userIdToFollowing[uidStr] || !!userIdToFollowing[uid];
       if (isFollowing) {
         await unfollowUser(uid);
-        setUserIdToFollowing((prev) => ({ ...prev, [uid]: false }));
+        setUserIdToFollowing((prev) => {
+          const next = { ...prev };
+          delete next[uidStr];
+          delete next[uid]; // Xóa cả 2 format để đảm bảo
+          return next;
+        });
         message.success('Đã bỏ theo dõi');
+        // Refresh suggestions để loại bỏ user đã unfollow (nếu có trong suggestions)
+        loadSuggestions();
       } else {
         await followUser(uid);
-        setUserIdToFollowing((prev) => ({ ...prev, [uid]: true }));
+        setUserIdToFollowing((prev) => ({ ...prev, [uidStr]: true }));
         message.success('Đã theo dõi');
+        // Refresh suggestions để loại bỏ user đã follow khỏi danh sách
+        setSuggestions((prev) => prev.filter((u) => {
+          const uIdStr = String(u.id);
+          return uIdStr !== uidStr && u.id !== uid;
+        }));
       }
     } catch (e) {
       const msg = e?.message || '';
-      if (!userIdToFollowing[uid] && msg.toLowerCase().includes('already following')) {
+      if (!userIdToFollowing[uidStr] && !userIdToFollowing[uid] && msg.toLowerCase().includes('already following')) {
         // BE trả về 400 nếu đã theo dõi trước đó; đồng bộ UI thành đang theo dõi
-        setUserIdToFollowing((prev) => ({ ...prev, [uid]: true }));
+        setUserIdToFollowing((prev) => ({ ...prev, [uidStr]: true }));
         message.success('Đã theo dõi');
+        // Refresh suggestions
+        setSuggestions((prev) => prev.filter((u) => {
+          const uIdStr = String(u.id);
+          return uIdStr !== uidStr && u.id !== uid;
+        }));
       } else {
         message.error(msg || 'Thao tác thất bại');
       }
     } finally {
-      setUserIdToFollowLoading((prev) => ({ ...prev, [uid]: false }));
+      setUserIdToFollowLoading((prev) => {
+        const next = { ...prev };
+        delete next[uidStr];
+        delete next[uid];
+        return next;
+      });
     }
   };
 
@@ -517,10 +547,21 @@ const NewsFeed = () => {
       setSuggestionsLoading(true);
       const res = await getFollowSuggestions(10);
       const list = (res?.data || [])
-        .filter((u) => !!u?.id && (!currentUserId || u.id.toString() !== currentUserId.toString()))
+        .filter((u) => {
+          if (!u?.id) return false;
+          // Loại bỏ current user
+          if (currentUserId && u.id.toString() === currentUserId.toString()) return false;
+          // Loại bỏ các user đã follow
+          const uidStr = u.id.toString();
+          return !userIdToFollowing[uidStr] && !userIdToFollowing[u.id];
+        })
         .slice(0, 5);
+      // Normalize ID thành string để đảm bảo match với userIdToFollowing
       const map = {};
-      list.forEach((u) => { map[u.id] = false; }); // BE đã lọc CHƯA follow
+      list.forEach((u) => {
+        const uidStr = String(u.id);
+        map[uidStr] = false; // BE đã lọc CHƯA follow, nhưng đảm bảo normalize ID
+      });
       setUserIdToFollowing((prev) => ({ ...prev, ...map }));
       setSuggestions(list);
     } catch (e) {
@@ -821,7 +862,32 @@ const NewsFeed = () => {
   const openEditModal = (post) => {
     setEditingPost(post);
     setEditText(post?.textContent || '');
+    setEditLinkPreview(post?.linkPreview || null);
+    // Khởi tạo danh sách lick đang đính kèm để có thể chỉnh sửa
+    if (post?.attachedLicks && Array.isArray(post.attachedLicks)) {
+      const ids = post.attachedLicks.map((lick) => {
+        if (!lick) return null;
+        if (typeof lick === 'string') return lick;
+        return lick._id || lick.id || lick.lick_id || null;
+      }).filter(Boolean);
+      setEditSelectedLickIds(ids);
+    } else {
+      setEditSelectedLickIds([]);
+    }
+    // Khởi tạo project đang đính kèm (nếu có)
+    if (post?.projectId) {
+      const pid = post.projectId._id || post.projectId.id || post.projectId;
+      // Normalize ID thành string để đảm bảo match với options
+      setEditSelectedProjectId(pid ? String(pid) : null);
+    } else {
+      setEditSelectedProjectId(null);
+    }
     setEditModalOpen(true);
+    // Fetch licks và projects khi mở modal
+    if (currentUserId) {
+      fetchActiveLicks();
+      fetchActiveProjects();
+    }
   };
 
   const handleUpdatePost = async () => {
@@ -833,17 +899,128 @@ const NewsFeed = () => {
       message.error('Không tìm thấy bài viết');
       return;
     }
+    
+    // Kiểm tra: nếu có lick và có link preview → không cho cập nhật
+    const hasLicks = editSelectedLickIds && editSelectedLickIds.length > 0;
+    const hasLinkPreview = !!editLinkPreview;
+    const hasProject = !!editSelectedProjectId;
+    const hasUrl = !!extractFirstUrl(editText.trim());
+    
+    // Kiểm tra xem bài post ban đầu có lick hoặc project không
+    const originalUrl = extractFirstUrl(editingPost?.textContent || '');
+    const originalSharedLickId = originalUrl ? parseSharedLickId(originalUrl) : null;
+    const hasOriginalLick = (editingPost?.attachedLicks && Array.isArray(editingPost.attachedLicks) && editingPost.attachedLicks.length > 0) || !!originalSharedLickId;
+    const hasOriginalProject = editingPost?.projectId && 
+      ((typeof editingPost.projectId === 'string' && editingPost.projectId.trim() !== '') ||
+       (typeof editingPost.projectId === 'object' && editingPost.projectId !== null && 
+        Object.keys(editingPost.projectId).length > 0 && 
+        (editingPost.projectId._id || editingPost.projectId.id)));
+    
+    // Debug log
+    console.log('[Update Post] Validation check:', {
+      hasLicks,
+      hasLinkPreview,
+      hasProject,
+      hasUrl,
+      hasOriginalLick,
+      hasOriginalProject,
+      editSelectedLickIds,
+      editText: editText.substring(0, 50),
+      editingPost: {
+        attachedLicks: editingPost?.attachedLicks,
+        projectId: editingPost?.projectId,
+        textContent: editingPost?.textContent?.substring(0, 50)
+      }
+    });
+    
+    // Nếu bài post ban đầu có lick và người dùng dán link vào → không cho cập nhật
+    if ((hasLicks || hasOriginalLick) && (hasLinkPreview || hasUrl)) {
+      console.log('[Update Post] Blocked: Has lick and link', { hasLicks, hasOriginalLick, hasLinkPreview, hasUrl });
+      // Sử dụng modal.warning từ hook để đảm bảo thông báo hiển thị
+      modal.warning({
+        title: 'Không thể cập nhật',
+        content: 'Chỉ được chọn 1 loại đính kèm: Lick hoặc Link. Vui lòng xóa link trong nội dung hoặc bỏ chọn Lick.',
+        okText: 'Đã hiểu',
+      });
+      return;
+    }
+    
+    // Nếu bài post ban đầu có project và người dùng dán link vào → không cho cập nhật
+    if ((hasProject || hasOriginalProject) && (hasLinkPreview || hasUrl)) {
+      console.log('[Update Post] Blocked: Has project and link', { hasProject, hasOriginalProject, hasLinkPreview, hasUrl });
+      modal.warning({
+        title: 'Không thể cập nhật',
+        content: 'Chỉ được chọn 1 loại đính kèm: Project hoặc Link. Vui lòng xóa link trong nội dung hoặc bỏ chọn Project.',
+        okText: 'Đã hiểu',
+      });
+      return;
+    }
+    
+    if (hasLicks && hasLinkPreview) {
+      console.log('[Update Post] Blocked: Has licks and link preview', { hasLicks, hasLinkPreview });
+      modal.warning({
+        title: 'Không thể cập nhật',
+        content: 'Chỉ được chọn 1 loại đính kèm: Lick hoặc Link. Vui lòng xóa link trong nội dung hoặc bỏ chọn Lick.',
+        okText: 'Đã hiểu',
+      });
+      return;
+    }
+    
+    if (hasLicks && hasProject) {
+      message.warning('Chỉ được chọn 1 loại đính kèm: Lick hoặc Project. Vui lòng bỏ chọn một trong hai.');
+      return;
+    }
+    
+    if (hasLinkPreview && hasProject) {
+      message.warning('Chỉ được chọn 1 loại đính kèm: Link hoặc Project. Vui lòng xóa link trong nội dung hoặc bỏ chọn Project.');
+      return;
+    }
+    
     try {
       setEditing(true);
       const payload = {
         postType: 'status_update',
         textContent: editText.trim(),
       };
+      
+      // Chỉ cho phép một trong ba: lick, project, hoặc link preview
+      // Nếu có lick → chỉ gửi lick, không gửi link preview
+      if (hasLicks) {
+        payload.attachedLickIds = editSelectedLickIds;
+        // Không gửi linkPreview khi có lick
+        payload.linkPreview = undefined;
+        payload.projectId = null;
+      } 
+      // Nếu có project → chỉ gửi project, không gửi lick và link preview
+      else if (hasProject) {
+        payload.projectId = editSelectedProjectId;
+        payload.attachedLickIds = [];
+        payload.linkPreview = undefined;
+      } 
+      // Nếu có link preview → chỉ gửi link preview, không gửi lick
+      else if (hasLinkPreview) {
+        payload.linkPreview = editLinkPreview;
+        payload.attachedLickIds = [];
+        payload.projectId = null;
+      }
+      // Nếu không có gì cả → xóa tất cả
+      else {
+        payload.attachedLickIds = [];
+        payload.linkPreview = undefined;
+        // Nếu post cũ có project nhưng giờ không chọn nữa → xóa project
+        if (editingPost?.projectId) {
+          payload.projectId = null;
+        }
+      }
+      
       await updatePost(editingPost._id, payload);
       message.success('Cập nhật bài viết thành công');
       setEditModalOpen(false);
       setEditingPost(null);
       setEditText('');
+      setEditSelectedLickIds([]);
+      setEditSelectedProjectId(null);
+      setEditLinkPreview(null);
       // Refresh the feed
       fetchData(1);
       setPage(1);
@@ -943,16 +1120,23 @@ const NewsFeed = () => {
           <List
             itemLayout="horizontal"
             dataSource={suggestions}
-            renderItem={(user) => (
-              <List.Item style={{ padding: '8px 0' }}>
-                <Suggestion 
-                  user={user}
-                  following={!!userIdToFollowing[user.id]}
-                  loading={!!userIdToFollowLoading[user.id]}
-                  onFollow={(uid) => toggleFollow(uid)}
-                />
-              </List.Item>
-            )}
+            renderItem={(user) => {
+              // Normalize ID để đảm bảo match với userIdToFollowing
+              const userIdStr = user?.id ? String(user.id) : null;
+              const isFollowing = userIdStr ? (!!userIdToFollowing[userIdStr] || !!userIdToFollowing[user.id]) : false;
+              const isLoading = userIdStr ? (!!userIdToFollowLoading[userIdStr] || !!userIdToFollowLoading[user.id]) : false;
+              
+              return (
+                <List.Item style={{ padding: '8px 0' }}>
+                  <Suggestion 
+                    user={user}
+                    following={isFollowing}
+                    loading={isLoading}
+                    onFollow={(uid) => toggleFollow(uid)}
+                  />
+                </List.Item>
+              );
+            }}
           />
         )}
       </Card>
@@ -1261,6 +1445,61 @@ const NewsFeed = () => {
     };
   }, [newText, selectedLickIds, selectedProjectId]);
 
+  // useEffect để cập nhật link preview khi chỉnh sửa bài post
+  useEffect(() => {
+    // Nếu đã chọn lick hoặc project thì không xử lý link preview nữa
+    // Và tự động clear link preview nếu có
+    if (editSelectedLickIds && editSelectedLickIds.length > 0) {
+      setEditLinkPreview(null);
+      setEditLinkLoading(false);
+      return;
+    }
+    if (editSelectedProjectId) {
+      setEditLinkPreview(null);
+      setEditLinkLoading(false);
+      return;
+    }
+    
+    // Nếu có lick hoặc project từ bài post ban đầu, không cho phép thêm link preview
+    const originalUrl = extractFirstUrl(editingPost?.textContent || '');
+    const originalSharedLickId = originalUrl ? parseSharedLickId(originalUrl) : null;
+    const hasOriginalLick = (editingPost?.attachedLicks && Array.isArray(editingPost.attachedLicks) && editingPost.attachedLicks.length > 0) || !!originalSharedLickId;
+    const hasOriginalProject = editingPost?.projectId && 
+      ((typeof editingPost.projectId === 'string' && editingPost.projectId.trim() !== '') ||
+       (typeof editingPost.projectId === 'object' && editingPost.projectId !== null && 
+        Object.keys(editingPost.projectId).length > 0 && 
+        (editingPost.projectId._id || editingPost.projectId.id)));
+    
+    // Nếu bài post ban đầu có lick hoặc project, không cho phép thêm link preview
+    if (hasOriginalLick || hasOriginalProject) {
+      const url = extractFirstUrl(editText);
+      // Nếu người dùng dán link vào nhưng bài post có lick/project → không set link preview
+      if (url) {
+        setEditLinkPreview(null);
+        setEditLinkLoading(false);
+        return;
+      }
+    }
+    
+    const url = extractFirstUrl(editText);
+    if (!url) {
+      setEditLinkPreview(null);
+      return;
+    }
+    let aborted = false;
+    setEditLinkLoading(true);
+    resolvePreview(url)
+      .then((data) => {
+        if (!aborted) setEditLinkPreview({ url, ...data });
+      })
+      .finally(() => {
+        if (!aborted) setEditLinkLoading(false);
+      });
+    return () => {
+      aborted = true;
+    };
+  }, [editText, editSelectedLickIds, editSelectedProjectId, editingPost]);
+
   const fetchData = async (p = page, l = limit) => {
     setLoading(true);
     setError('');
@@ -1458,7 +1697,7 @@ const NewsFeed = () => {
       const res = await getUserProjects('all', 'active');
       if (res?.success && Array.isArray(res.data)) {
         const formattedProjects = res.data.map((project) => ({
-          value: project._id,
+          value: String(project._id), // Normalize ID thành string để đảm bảo match với editSelectedProjectId
           label: project.title || 'Untitled Project',
           ...project
         }));
@@ -2088,20 +2327,38 @@ const NewsFeed = () => {
                   })()}
                 </Space>
               </div>
-              {post?.textContent && (
-                <div
-                  style={{
-                    marginBottom: 10,
-                    color: '#fff',
-                    fontSize: 15,
-                    lineHeight: 1.6,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {post.textContent}
-                </div>
-              )}
+              {/* Chỉ hiển thị text, nhưng ẩn các dòng chỉ chứa URL (để không lộ link thô) */}
+              {(() => {
+                if (!post?.textContent) return null;
+                const raw = String(post.textContent || '').trim();
+                const firstUrl = extractFirstUrl(raw || '');
+                // Bỏ các dòng mà nội dung chỉ là URL
+                const lines = raw.split(/\r?\n/);
+                const filteredLines = lines.filter((line) => {
+                  const trimmed = line.trim();
+                  if (!trimmed) return false;
+                  const lineUrl = extractFirstUrl(trimmed);
+                  // Nếu cả dòng chỉ là một URL → không hiển thị
+                  if (lineUrl && trimmed === lineUrl.trim()) return false;
+                  return true;
+                });
+                const displayText = filteredLines.join('\n').trim();
+                if (!displayText) return null;
+                return (
+                  <div
+                    style={{
+                      marginBottom: 10,
+                      color: '#fff',
+                      fontSize: 15,
+                      lineHeight: 1.6,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {displayText}
+                  </div>
+                );
+              })()}
           {(() => {
             const url = extractFirstUrl(post?.textContent);
             const sharedLickId = parseSharedLickId(url);
@@ -2111,6 +2368,18 @@ const NewsFeed = () => {
               </div>
             ) : null;
           })()}
+
+          {/* Preview project đính kèm: dùng ProjectPlayer phát nhạc, không hiển thị trạng thái/updated */}
+          {post?.projectId?.audioUrl && (
+            <div style={{ marginBottom: 12 }}>
+              <ProjectPlayer
+                audioUrl={post.projectId.audioUrl}
+                waveformData={post.projectId.waveformData}
+                audioDuration={post.projectId.audioDuration}
+                projectName={post.projectId.title}
+              />
+            </div>
+          )}
               {/* Hiển thị attached licks với waveform */}
               {post?.attachedLicks && Array.isArray(post.attachedLicks) && post.attachedLicks.length > 0 && (
                 <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -2575,6 +2844,9 @@ const NewsFeed = () => {
           setEditModalOpen(false);
           setEditingPost(null);
           setEditText('');
+          setEditSelectedLickIds([]);
+          setEditSelectedProjectId(null);
+          setEditLinkPreview(null);
         }
       }}
       footer={
@@ -2593,6 +2865,9 @@ const NewsFeed = () => {
                 setEditModalOpen(false);
                 setEditingPost(null);
                 setEditText('');
+                setEditSelectedLickIds([]);
+                setEditSelectedProjectId(null);
+                setEditLinkPreview(null);
               }
             }}
             style={{
@@ -2641,63 +2916,300 @@ const NewsFeed = () => {
           onChange={(e) => setEditText(e.target.value)}
         />
 
-        {/* Preview phần nội dung giống ngoài feed (lick/media) */}
-        {editingPost && (
-          <>
-            {(() => {
-              const url = extractFirstUrl(editingPost?.textContent || '');
-              const sharedLickId = parseSharedLickId(url);
-              if (!sharedLickId) return null;
-              return (
-                <div style={{ marginTop: 8 }}>
-                  <PostLickEmbed lickId={sharedLickId} url={url} />
-                </div>
-              );
-            })()}
+        {/* Chỉ hiển thị phần chỉnh sửa tương ứng với loại nội dung của bài post */}
+        {(() => {
+          // Kiểm tra xem bài post có lick không (attachedLicks hoặc shared lick URL trong textContent ban đầu)
+          const originalUrl = extractFirstUrl(editingPost?.textContent || '');
+          const originalSharedLickId = originalUrl ? parseSharedLickId(originalUrl) : null;
+          const hasAttachedLicks = editingPost?.attachedLicks && Array.isArray(editingPost.attachedLicks) && editingPost.attachedLicks.length > 0;
+          const hasSharedLickUrl = !!originalSharedLickId;
+          const hasLick = hasAttachedLicks || hasSharedLickUrl;
+          
+          // Kiểm tra xem bài post có project không (phải là giá trị hợp lệ, không phải object rỗng)
+          const projectIdValue = editingPost?.projectId;
+          let hasValidProject = false;
+          
+          // Chỉ coi là có project nếu projectId thực sự tồn tại và hợp lệ
+          // Kiểm tra chặt chẽ: phải có giá trị và không phải null/undefined
+          if (projectIdValue != null) { // != null checks for both null and undefined
+            if (typeof projectIdValue === 'string') {
+              // Nếu là string, phải không rỗng
+              hasValidProject = projectIdValue.trim() !== '';
+            } else if (typeof projectIdValue === 'object') {
+              // Nếu là object, phải có _id hoặc id hợp lệ
+              const projectId = projectIdValue._id || projectIdValue.id;
+              if (projectId) {
+                // Kiểm tra xem có phải là object rỗng không
+                const keys = Object.keys(projectIdValue);
+                // Phải có ít nhất 1 key (không phải object rỗng) VÀ phải có _id hoặc id hợp lệ
+                // Đảm bảo projectId không phải là string rỗng hoặc giá trị falsy
+                const isValidId = typeof projectId === 'string' 
+                  ? projectId.trim() !== '' 
+                  : !!projectId;
+                hasValidProject = keys.length > 0 && isValidId;
+              } else {
+                // Nếu không có _id hoặc id → không phải project hợp lệ
+                hasValidProject = false;
+              }
+            }
+          } else {
+            // Nếu projectId là null hoặc undefined → không có project
+            hasValidProject = false;
+          }
+          
+          // Debug log để kiểm tra
+          console.log('[Edit Modal] Content check:', {
+            hasAttachedLicks,
+            hasSharedLickUrl,
+            hasLick,
+            projectIdValue,
+            projectIdType: typeof projectIdValue,
+            projectIdKeys: projectIdValue && typeof projectIdValue === 'object' ? Object.keys(projectIdValue) : null,
+            hasValidProject,
+            hasProject: hasValidProject && !hasLick,
+            editingPost: {
+              attachedLicks: editingPost?.attachedLicks,
+              projectId: editingPost?.projectId,
+              textContent: editingPost?.textContent?.substring(0, 50)
+            }
+          });
+          
+          // Chỉ hiển thị project nếu có project hợp lệ VÀ không có lick (vì chỉ chọn 1 trong 3)
+          // Đảm bảo hasValidProject phải là true và hasLick phải là false
+          const hasProject = hasValidProject === true && hasLick === false;
+          
+          // Kiểm tra xem bài post có link preview không (và không phải là shared lick URL, và không có lick/project)
+          const hasLinkPreview = !!editingPost?.linkPreview && !originalSharedLickId && !hasLick && !hasValidProject;
 
-            {/* Attached licks giống ngoài feed */}
-            {editingPost?.attachedLicks &&
-              Array.isArray(editingPost.attachedLicks) &&
-              editingPost.attachedLicks.length > 0 && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 12,
-                  }}
-                >
-                  {editingPost.attachedLicks.map((lick) => {
-                    const lickId = lick?._id || lick?.lick_id || lick;
-                    if (!lickId) return null;
-                    return (
-                      <div key={lickId} style={{ marginBottom: 8 }}>
-                        <PostLickEmbed lickId={lickId} />
+          // Chỉ hiển thị phần Select tương ứng với loại nội dung mà bài post có
+          return (
+            <>
+              {/* Chỉ hiển thị nếu bài post có lick */}
+              {hasLick && (
+                <div style={{ ...composerSectionStyle, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={composerLabelStyle}>Đính kèm lick (chỉnh sửa)</div>
+                      <div style={composerHintStyle}>
+                        Bạn có thể thay đổi hoặc bỏ lick đang đính kèm.
                       </div>
-                    );
-                  })}
+                    </div>
+                    <Tag color="#1f1f1f" style={{ borderRadius: 999, color: '#9ca3af', border: 'none' }}>Tùy chọn</Tag>
+                  </div>
+                  <Select
+                    mode="multiple"
+                    placeholder="Chọn 1 lick để đính kèm..."
+                    value={editSelectedLickIds}
+                    onChange={(values) => {
+                      const next = Array.isArray(values) ? values.slice(0, 1) : [];
+                      setEditSelectedLickIds(next);
+                      if (next.length > 0) {
+                        setEditLinkPreview(null);
+                        setEditSelectedProjectId(null);
+                      }
+                    }}
+                    loading={loadingLicks}
+                    style={{ 
+                      width: '100%',
+                      backgroundColor: '#1a1a1a',
+                      border: '1px solid #3a3a3a',
+                      borderRadius: 8,
+                    }}
+                    options={availableLicks}
+                    notFoundContent={loadingLicks ? <Spin size="small" /> : <Empty description="Không có lick active nào" />}
+                    filterOption={(input, option) =>
+                      (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                    }
+                    popupClassName="dark-select-dropdown"
+                    allowClear
+                    disabled={!!extractFirstUrl(editText) || !!editSelectedProjectId}
+                  />
                 </div>
               )}
 
-            {editingPost?.media?.length > 0 && (
+              {/* Chỉ hiển thị nếu bài post có project VÀ không có lick */}
+              {hasProject && !hasLick && (
+                <div className="composer-section" style={{ ...composerSectionStyle, display: 'flex', flexDirection: 'column', gap: 16, border: '1px solid #2a2a2a' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ ...composerLabelStyle, marginBottom: 6, fontSize: 16 }}>Chọn project (chỉnh sửa)</div>
+                      <div style={{ ...composerHintStyle, lineHeight: '1.5' }}>
+                        Bạn có thể thay đổi hoặc bỏ project đang đính kèm.
+                      </div>
+                    </div>
+                    <Tag color="#1f1f1f" style={{ borderRadius: 999, color: '#9ca3af', border: 'none', marginLeft: 12 }}>Tùy chọn</Tag>
+                  </div>
+                  <Select
+                    placeholder="Chọn project để đính kèm..."
+                    value={editSelectedProjectId}
+                    onChange={(value) => {
+                      setEditSelectedProjectId(value);
+                      if (value) {
+                        setEditSelectedLickIds([]);
+                        setEditLinkPreview(null);
+                      }
+                    }}
+                    loading={loadingProjects}
+                    style={{ 
+                      width: '100%',
+                      backgroundColor: '#1a1a1a',
+                      border: '1px solid #3a3a3a',
+                      borderRadius: 8,
+                    }}
+                    options={availableProjects}
+                    notFoundContent={loadingProjects ? <Spin size="small" /> : <Empty description="Không có project active nào" />}
+                    filterOption={(input, option) =>
+                      (option?.label ?? '')
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                    }
+                    popupClassName="dark-select-dropdown"
+                    allowClear
+                    disabled={editSelectedLickIds.length > 0 || !!extractFirstUrl(editText)}
+                    showSearch
+                    optionFilterProp="label"
+                  />
+                </div>
+              )}
+
+              {/* Chỉ hiển thị nếu bài post có link preview (không phải shared lick) */}
+              {hasLinkPreview && (
+                <div style={{ ...composerSectionStyle, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={composerLabelStyle}>Link preview (chỉnh sửa)</div>
+                      <div style={composerHintStyle}>
+                        Link preview sẽ tự động cập nhật khi bạn thay đổi URL trong nội dung.
+                      </div>
+                    </div>
+                    <Tag color="#1f1f1f" style={{ borderRadius: 999, color: '#9ca3af', border: 'none' }}>Tự động</Tag>
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
+
+        {/* Preview phần nội dung giống ngoài feed (lick/media/link) */}
+        <>
+          {/* Preview shared lick từ URL trong text */}
+          {(() => {
+            const url = extractFirstUrl(editText || '');
+            const sharedLickId = parseSharedLickId(url);
+            if (!sharedLickId) return null;
+            return (
+              <div style={{ marginTop: 8 }}>
+                <PostLickEmbed lickId={sharedLickId} url={url} />
+              </div>
+            );
+          })()}
+
+          {/* Preview attached licks đã chọn */}
+          {editSelectedLickIds && editSelectedLickIds.length > 0 && (
+            <div
+              style={{
+                marginTop: 12,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              {editSelectedLickIds.map((lickId) => {
+                if (!lickId) return null;
+                return (
+                  <div key={lickId} style={{ marginBottom: 8 }}>
+                    <PostLickEmbed lickId={lickId} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Preview project đã chọn */}
+          {editSelectedProjectId && (() => {
+            const selectedProject = availableProjects.find(p => p.value === editSelectedProjectId);
+            if (!selectedProject) return null;
+            return (
               <div style={{ marginTop: 12 }}>
-                <div
-                  style={{
-                    height: 120,
-                    background: '#111',
-                    borderRadius: 8,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#9ca3af',
-                  }}
-                >
-                  Media hiện tại của bài viết
+                {selectedProject.audioUrl ? (
+                  <ProjectPlayer
+                    audioUrl={selectedProject.audioUrl}
+                    waveformData={selectedProject.waveformData}
+                    audioDuration={selectedProject.audioDuration}
+                    projectName={selectedProject.title}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      height: 120,
+                      background: '#111',
+                      borderRadius: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#9ca3af',
+                    }}
+                  >
+                    Project preview
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Preview link */}
+          {editLinkPreview && !editSelectedLickIds?.length && !editSelectedProjectId && (
+            <div style={{ marginTop: 12 }}>
+              <div
+                style={{
+                  border: '1px solid #2a2a2a',
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  background: '#1a1a1a',
+                }}
+              >
+                {editLinkPreview.thumbnailUrl && (
+                  <div
+                    style={{
+                      width: '100%',
+                      height: 200,
+                      backgroundImage: `url(${editLinkPreview.thumbnailUrl})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    }}
+                  />
+                )}
+                <div style={{ padding: 16 }}>
+                  <div style={{ fontWeight: 600, color: '#fff', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {editLinkPreview.title || editLinkPreview.url}
+                  </div>
+                  <div style={{ color: '#9ca3af', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {editLinkPreview.url}
+                  </div>
                 </div>
               </div>
-            )}
-          </>
-        )}
+            </div>
+          )}
+
+          {/* Media hiện tại của bài viết (chỉ hiển thị, không chỉnh sửa được) */}
+          {editingPost?.media?.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div
+                style={{
+                  height: 120,
+                  background: '#111',
+                  borderRadius: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#9ca3af',
+                }}
+              >
+                Media hiện tại của bài viết
+              </div>
+            </div>
+          )}
+        </>
       </div>
     </Modal>
   </>

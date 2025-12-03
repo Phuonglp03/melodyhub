@@ -15,7 +15,6 @@ import {
   VideoCameraOutlined,
   InfoCircleOutlined,
   LikeOutlined,
-  SmileOutlined,
   MenuOutlined,
 } from '@ant-design/icons';
 import useDMConversations from '../../../hooks/useDMConversations';
@@ -785,13 +784,6 @@ const ChatPage = () => {
                   disabled={selectedConv?.status === 'pending' && !isRequester}
                 />
                 <div className="chat-input-right">
-                  <Button 
-                    type="text" 
-                    icon={<SmileOutlined />} 
-                    className="chat-input-icon"
-                    title="Emoji"
-                    disabled={selectedConv?.status === 'pending' && !isRequester}
-                  />
                   <Button 
                     type="text" 
                     icon={<LikeOutlined />} 

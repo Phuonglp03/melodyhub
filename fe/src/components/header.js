@@ -419,17 +419,6 @@ const AppHeader = () => {
                   </div>
                   <Text style={{ color: '#fff', fontWeight: 600, fontSize: 18 }}>Đoạn chat</Text>
                 </div>
-                <Space>
-                  <MoreOutlined style={{ color: '#9ca3af', fontSize: 16, cursor: 'pointer' }} />
-                  <ExpandOutlined style={{ color: '#9ca3af', fontSize: 16, cursor: 'pointer' }} />
-                  <EditOutlined
-                    style={{ color: '#9ca3af', fontSize: 16, cursor: 'pointer' }}
-                    onClick={() => {
-                      setChatPopoverVisible(false);
-                      navigate('/chat');
-                    }}
-                  />
-                </Space>
               </div>
 
               {/* Search */}
@@ -450,7 +439,7 @@ const AppHeader = () => {
 
               {/* Tabs */}
               <div style={{ display: 'flex', gap: 8, padding: '12px 16px', borderBottom: '1px solid #2a2a2a' }}>
-                {['all', 'unread', 'groups'].map((f) => (
+                {['all', 'unread'].map((f) => (
                   <Button
                     key={f}
                     type={chatFilter === f ? 'primary' : 'text'}
@@ -462,7 +451,7 @@ const AppHeader = () => {
                       border: 'none',
                     }}
                   >
-                    {f === 'all' ? 'Tất cả' : f === 'unread' ? 'Chưa đọc' : 'Nhóm'}
+                    {f === 'all' ? 'Tất cả' : 'Chưa đọc'}
                   </Button>
                 ))}
               </div>
