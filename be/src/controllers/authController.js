@@ -574,8 +574,9 @@ const generateResetToken = () => {
 
 // Send reset password email
 const sendResetPasswordEmail = async (email, resetToken) => {
-  // Note: Replace http://localhost:3000 with your actual frontend domain in production
-  const resetLink = `http://localhost:3000/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
+  // Sử dụng biến môi trường FRONTEND_URL nếu có, fallback về localhost khi dev
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+  const resetLink = `${frontendUrl.replace(/\/+$/, '')}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
   const subject = 'Your Password Reset Request';
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
