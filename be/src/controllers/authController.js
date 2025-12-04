@@ -673,7 +673,8 @@ export const resetPassword = async (req, res) => {
     const user = await User.findOne({
       email,
       resetPasswordToken: token,
-      resetPasswordExpires: { $gt: Date.now() } // Check if token is not expired
+      // Dùng Date thay vì số để so sánh chính xác với kiểu Date trong MongoDB
+      resetPasswordExpires: { $gt: new Date() }
     });
 
     if (!user) {
@@ -682,13 +683,10 @@ export const resetPassword = async (req, res) => {
       });
     }
 
-    // Hash the new password
-    // Assume 'bcrypt' is imported and available
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(newPassword, salt);
-
-    // Update user password and clear reset token
-    user.passwordHash = passwordHash; // Assuming your user model uses 'passwordHash'
+    // Cập nhật mật khẩu mới (sẽ được hash trong pre-save hook của User model)
+    // Lưu ý: User model đã có middleware pre('save') để tự động hash trường `passwordHash`.
+    // Nếu hash thêm lần nữa ở đây sẽ dẫn tới "double hash" và không thể đăng nhập bằng mật khẩu mới.
+    user.passwordHash = newPassword; // User pre-save hook sẽ hash giá trị này
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
 
