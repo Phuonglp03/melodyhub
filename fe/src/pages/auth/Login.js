@@ -109,12 +109,19 @@ const Login = () => {
         // Handle rejected case (including wrong password, account locked, etc.)
         const errorMsg = resultAction.payload || 'Đăng nhập thất bại. Vui lòng thử lại.';
         
-        // Clear form errors first
-        form.setFields([]);
+        // Set lỗi trực tiếp cho trường password để luôn nhìn thấy dưới ô nhập
+        form.setFields([
+          {
+            name: 'password',
+            errors: [errorMsg],
+          },
+        ]);
         
-        // Set error message state
+        // Lưu lại errorMessage để Alert (nếu hiển thị) vẫn đồng bộ
         setErrorMessage(errorMsg);
         errorMessageRef.current = errorMsg;
+        // Hiển thị toast lỗi rõ ràng
+        messageApi.error(errorMsg);
         
         // Force form to re-validate and show error
         setTimeout(() => {
@@ -130,6 +137,8 @@ const Login = () => {
       const errorMsg = error?.message || error?.toString() || 'Login failed. Please try again.';
       setErrorMessage(errorMsg);
       errorMessageRef.current = errorMsg;
+      // Hiển thị toast lỗi khi xảy ra exception không mong muốn
+      messageApi.error(errorMsg);
       // Reset after a short delay to allow retry
       setTimeout(() => {
         isProcessingRef.current = false;
@@ -231,6 +240,20 @@ const Login = () => {
                   Log in
                 </Button>
               </Form.Item>
+
+              {/* Thông báo lỗi dựa trên state local */}
+              {errorMessage && (
+                <div style={{ color: '#f5222d', marginBottom: 16 }}>
+                  {errorMessage}
+                </div>
+              )}
+
+              {/* Thông báo lỗi fallback lấy trực tiếp từ Redux (auth.message) */}
+              {isError && authMessage && !errorMessage && (
+                <div style={{ color: '#f5222d', marginBottom: 16 }}>
+                  {authMessage}
+                </div>
+              )}
 
               <Divider>or continue with</Divider>
 
