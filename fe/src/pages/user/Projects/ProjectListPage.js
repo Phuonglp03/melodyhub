@@ -146,19 +146,13 @@ const ProjectListPage = () => {
     try {
       setSharingProjectId(project._id);
 
-      const origin =
-        typeof window !== "undefined" && window.location
-          ? window.location.origin
-          : "";
-      const projectUrl = origin
-        ? `${origin}/projects/${project._id}`
-        : `/projects/${project._id}`;
       const title = project?.title || "My exported project";
-      const textContent = `🎵 ${title}\n${projectUrl}`;
+      const textContent = `🎵 ${title}`;
 
       await createPostApi({
         postType: "status_update",
         textContent,
+        projectId: project._id,
       });
       // Optional: toast via alert for now
       alert("Shared project to your feed.");

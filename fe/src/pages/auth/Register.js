@@ -268,6 +268,7 @@ const Register = () => {
               <Form.Item
                 label={<span className="form-label">Địa chỉ chi tiết</span>}
                 name="addressLine"
+                rules={[{ required: true, message: 'Please input your detailed address!' }]}
               >
                 <Input 
                   placeholder="House number, street name, etc."
