@@ -52,6 +52,21 @@ const PlaylistDetailPage = () => {
   const [editForm, setEditForm] = useState({ name: "", description: "" });
   const [saving, setSaving] = useState(false);
 
+  // Toast notification state
+  const [toast, setToast] = useState({
+    show: false,
+    message: "",
+    type: "success",
+  });
+
+  // Confirmation modal state
+  const [confirmModal, setConfirmModal] = useState({
+    show: false,
+    message: "",
+    onConfirm: null,
+    lickId: null,
+  });
+
   // Memoize existing lick IDs to avoid recalculating on every render
   const existingLickIds = useMemo(
     () => new Set((playlist?.licks || []).map((l) => l.lick_id)),
@@ -266,15 +281,74 @@ const PlaylistDetailPage = () => {
     }
   };
 
-  const handleRemoveLick = async (lickId) => {
-    if (!window.confirm("Remove this lick from playlist?")) return;
-    try {
-      await removeLickFromPlaylist(playlistId, lickId);
-      await fetchPlaylist();
-    } catch (err) {
-      console.error("Error removing lick:", err);
-      alert(err.message || "Failed to remove lick");
-    }
+  const handleRemoveLick = (lickId) => {
+    // Show confirmation modal instead of browser alert
+    setConfirmModal({
+      show: true,
+      message: "Remove this lick from playlist?",
+      onConfirm: async () => {
+        try {
+          const result = await removeLickFromPlaylist(playlistId, lickId);
+          if (result.success) {
+            // Close confirmation modal
+            setConfirmModal({
+              show: false,
+              message: "",
+              onConfirm: null,
+              lickId: null,
+            });
+
+            // Show success toast
+            setToast({
+              show: true,
+              message: "Lick removed from playlist successfully",
+              type: "success",
+            });
+
+            // Auto-hide toast after 3 seconds
+            setTimeout(() => {
+              setToast({ show: false, message: "", type: "success" });
+            }, 3000);
+
+            // Refresh playlist to show updated list
+            await fetchPlaylist();
+            // Also update suggested licks if search is open
+            if (showSearch) {
+              loadSuggestedLicks();
+            }
+          } else {
+            throw new Error(result.message || "Failed to remove lick");
+          }
+        } catch (err) {
+          console.error("(NO $) [DEBUG] Error removing lick:", err);
+          const errorMessage =
+            err.response?.data?.message ||
+            err.message ||
+            "Failed to remove lick";
+
+          // Close confirmation modal
+          setConfirmModal({
+            show: false,
+            message: "",
+            onConfirm: null,
+            lickId: null,
+          });
+
+          // Show error toast
+          setToast({
+            show: true,
+            message: errorMessage,
+            type: "error",
+          });
+
+          // Auto-hide toast after 4 seconds
+          setTimeout(() => {
+            setToast({ show: false, message: "", type: "error" });
+          }, 4000);
+        }
+      },
+      lickId,
+    });
   };
 
   const handleDelete = async () => {
@@ -703,8 +777,9 @@ const PlaylistDetailPage = () => {
                   {isOwner && (
                     <button
                       onClick={() => handleRemoveLick(lick.lick_id)}
-                      className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white p-2 rounded-full opacity-80 group-hover:opacity-100 transition-opacity z-20 shadow-lg"
                       title="Remove from playlist"
+                      aria-label="Remove lick from playlist"
                     >
                       <FaTimes size={12} />
                     </button>
@@ -777,6 +852,106 @@ const PlaylistDetailPage = () => {
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal */}
+      {confirmModal.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() =>
+              setConfirmModal({
+                show: false,
+                message: "",
+                onConfirm: null,
+                lickId: null,
+              })
+            }
+          />
+          <div className="relative z-10 w-full max-w-md mx-4 bg-gray-900 border border-gray-800 rounded-lg shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-800">
+              <h2 className="text-lg font-semibold text-white">
+                Confirm Removal
+              </h2>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <p className="text-gray-300 text-sm">{confirmModal.message}</p>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-800 flex justify-end gap-3">
+              <button
+                type="button"
+                className="px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-700 transition-colors"
+                onClick={() =>
+                  setConfirmModal({
+                    show: false,
+                    message: "",
+                    onConfirm: null,
+                    lickId: null,
+                  })
+                }
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
+                onClick={() => {
+                  if (confirmModal.onConfirm) {
+                    confirmModal.onConfirm();
+                  }
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast.show && (
+        <div
+          className={`fixed top-20 right-6 z-50 px-6 py-4 rounded-lg shadow-2xl transition-all duration-300 ${
+            toast.type === "success"
+              ? "bg-green-600 text-white"
+              : "bg-red-600 text-white"
+          }`}
+          style={{
+            animation: "slideInRight 0.3s ease-out",
+            minWidth: "300px",
+            maxWidth: "400px",
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-xl">
+              {toast.type === "success" ? "✓" : "✕"}
+            </span>
+            <span className="flex-1 font-medium">{toast.message}</span>
+            <button
+              onClick={() =>
+                setToast({ show: false, message: "", type: "success" })
+              }
+              className="text-white hover:text-gray-200 transition-colors"
+              aria-label="Close notification"
+            >
+              <FaTimes size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Animation Styles */}
+      <style>{`
+        @keyframes slideInRight {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+      `}</style>
     </div>
   );
 };
