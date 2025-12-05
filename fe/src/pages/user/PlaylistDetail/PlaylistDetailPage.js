@@ -269,11 +269,22 @@ const PlaylistDetailPage = () => {
   const handleRemoveLick = async (lickId) => {
     if (!window.confirm("Remove this lick from playlist?")) return;
     try {
-      await removeLickFromPlaylist(playlistId, lickId);
-      await fetchPlaylist();
+      const result = await removeLickFromPlaylist(playlistId, lickId);
+      if (result.success) {
+        // Refresh playlist to show updated list
+        await fetchPlaylist();
+        // Also update suggested licks if search is open
+        if (showSearch) {
+          loadSuggestedLicks();
+        }
+      } else {
+        throw new Error(result.message || "Failed to remove lick");
+      }
     } catch (err) {
-      console.error("Error removing lick:", err);
-      alert(err.message || "Failed to remove lick");
+      console.error("(NO $) [DEBUG] Error removing lick:", err);
+      const errorMessage =
+        err.response?.data?.message || err.message || "Failed to remove lick";
+      alert(errorMessage);
     }
   };
 
@@ -703,8 +714,9 @@ const PlaylistDetailPage = () => {
                   {isOwner && (
                     <button
                       onClick={() => handleRemoveLick(lick.lick_id)}
-                      className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white p-2 rounded-full opacity-80 group-hover:opacity-100 transition-opacity z-20 shadow-lg"
                       title="Remove from playlist"
+                      aria-label="Remove lick from playlist"
                     >
                       <FaTimes size={12} />
                     </button>

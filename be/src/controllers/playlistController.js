@@ -846,7 +846,7 @@ export const removeLickFromPlaylist = async (req, res) => {
     }
 
     // Validate playlist exists and user owns it
-    const playlist = await Playlist.findById(playlistId);
+    const playlist = await Playlist.findById(playlistId).lean();
     if (!playlist) {
       return res.status(404).json({
         success: false,
@@ -861,6 +861,23 @@ export const removeLickFromPlaylist = async (req, res) => {
       });
     }
 
+    // Get the lick being removed to know its position
+    const lickToRemove = await PlaylistLick.findOne({
+      playlistId,
+      lickId,
+    })
+      .select("position")
+      .lean();
+
+    if (!lickToRemove) {
+      return res.status(404).json({
+        success: false,
+        message: "Lick not found in this playlist",
+      });
+    }
+
+    const removedPosition = lickToRemove.position;
+
     // Remove lick from playlist
     const result = await PlaylistLick.deleteOne({ playlistId, lickId });
 
@@ -870,6 +887,17 @@ export const removeLickFromPlaylist = async (req, res) => {
         message: "Lick not found in this playlist",
       });
     }
+
+    // Reorder positions: decrement positions of all licks after the removed one
+    await PlaylistLick.updateMany(
+      {
+        playlistId,
+        position: { $gt: removedPosition },
+      },
+      {
+        $inc: { position: -1 },
+      }
+    );
 
     res.status(200).json({
       success: true,
