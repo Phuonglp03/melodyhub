@@ -522,7 +522,7 @@ const NotificationBell = () => {
       {/* Footer */}
       <Divider style={{ margin: "8px 0", borderColor: "#2a2a2a" }} />
       <div style={{ textAlign: "center", padding: "8px" }}>
-        <Button
+        {/* <Button
           type="text"
           onClick={() => {
             setVisible(false);
@@ -531,7 +531,7 @@ const NotificationBell = () => {
           style={{ color: "#3b82f6" }}
         >
           Xem tất cả thông báo
-        </Button>
+        </Button> */}
       </div>
     </div>
   );

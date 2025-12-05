@@ -447,30 +447,16 @@ export const register = async (req, res) => {
       });
     }
 
-    // Địa chỉ chi tiết (addressLine) chỉ là phần bổ sung (số nhà, tên đường),
-    // nên KHÔNG bắt buộc khi đăng ký. Người dùng chỉ cần chọn Tỉnh/Quận/Phường.
-    const requiredAddressFields = [
-      { value: provinceCode, message: 'Vui lòng chọn tỉnh/thành phố' },
-      { value: provinceName, message: 'Vui lòng chọn tỉnh/thành phố' },
-      { value: districtCode, message: 'Vui lòng chọn quận/huyện' },
-      { value: districtName, message: 'Vui lòng chọn quận/huyện' },
-      { value: wardCode, message: 'Vui lòng chọn phường/xã' },
-      { value: wardName, message: 'Vui lòng chọn phường/xã' }
-    ];
-
-    for (const field of requiredAddressFields) {
-      if (!field.value || (typeof field.value === 'string' && !field.value.trim())) {
-        return res.status(400).json({ message: field.message });
-      }
-    }
-
+    // Các trường địa chỉ không bắt buộc khi đăng ký
     const normalizedAddressLine =
       typeof addressLine === 'string' ? addressLine.trim() : '';
+    
+    // Tạo fullLocation từ các trường địa chỉ (nếu có)
     const fullLocation = [
       normalizedAddressLine,
-      wardName.trim(),
-      districtName.trim(),
-      provinceName.trim()
+      wardName ? wardName.trim() : '',
+      districtName ? districtName.trim() : '',
+      provinceName ? provinceName.trim() : ''
     ].filter(Boolean).join(', ');
 
     // Check if user already exists
@@ -507,14 +493,14 @@ export const register = async (req, res) => {
       displayName: fullName,
       birthday: birthday ? new Date(birthday) : null,
       gender: normalizedGender,
-      addressLine: normalizedAddressLine,
-      provinceCode: provinceCode.toString(),
-      provinceName: provinceName.trim(),
-      districtCode: districtCode.toString(),
-      districtName: districtName.trim(),
-      wardCode: wardCode.toString(),
-      wardName: wardName.trim(),
-      location: fullLocation,
+      addressLine: normalizedAddressLine || undefined,
+      provinceCode: provinceCode ? provinceCode.toString() : undefined,
+      provinceName: provinceName ? provinceName.trim() : undefined,
+      districtCode: districtCode ? districtCode.toString() : undefined,
+      districtName: districtName ? districtName.trim() : undefined,
+      wardCode: wardCode ? wardCode.toString() : undefined,
+      wardName: wardName ? wardName.trim() : undefined,
+      location: fullLocation || undefined,
       otp,
       otpExpires,
       verifiedEmail: false,
