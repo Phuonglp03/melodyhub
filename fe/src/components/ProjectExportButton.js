@@ -174,7 +174,7 @@ export default function ProjectExportButton({
           ) : (
             <>
               <FaDownload size={12} />
-              Full Mix
+              Publish
             </>
           )}
         </button>

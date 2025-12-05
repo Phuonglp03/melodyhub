@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { Modal, Input, Button, Tag } from "antd";
 import {
   FaPlus,
   FaTrash,
@@ -36,6 +37,10 @@ const ProjectListPage = () => {
   const [processingInvitation, setProcessingInvitation] = useState(null);
   const [playingProjectId, setPlayingProjectId] = useState(null);
   const [sharingProjectId, setSharingProjectId] = useState(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareProject, setShareProject] = useState(null);
+  const [shareText, setShareText] = useState("");
+  const [sharing, setSharing] = useState(false);
   const audioRef = useRef(null);
 
   const user = useSelector((state) => state.auth.user);
@@ -139,27 +144,55 @@ const ProjectListPage = () => {
     }
   };
 
-  const handleShareProject = async (project, e) => {
+  const handleShareProject = (project, e) => {
     if (e) e.stopPropagation();
     if (!project?._id || !project?.audioUrl) return;
 
-    try {
-      setSharingProjectId(project._id);
+    const title = project?.title || "My exported project";
+    const defaultText = `🎵 ${title}`;
+    
+    setShareProject(project);
+    setShareText(defaultText);
+    setShareModalOpen(true);
+  };
 
-      const title = project?.title || "My exported project";
-      const textContent = `🎵 ${title}`;
+  const handleCloseShareModal = () => {
+    if (!sharing) {
+      setShareModalOpen(false);
+      setShareProject(null);
+      setShareText("");
+    }
+  };
+
+  const handleConfirmShare = async () => {
+    if (!shareProject?._id) return;
+
+    try {
+      setSharing(true);
+      setSharingProjectId(shareProject._id);
+
+      // Generate project preview URL
+      const previewUrl = `${window.location.origin}/projects/${shareProject._id}`;
 
       await createPostApi({
         postType: "status_update",
-        textContent,
-        projectId: project._id,
+        textContent: shareText,
+        linkPreview: {
+          url: previewUrl,
+          title: shareProject.title || "Project Preview",
+          description: shareProject.description || "",
+        },
       });
-      // Optional: toast via alert for now
+
       alert("Shared project to your feed.");
+      setShareModalOpen(false);
+      setShareProject(null);
+      setShareText("");
     } catch (error) {
       console.error("(NO $) [DEBUG][ProjectList] Share project failed:", error);
       alert(error?.message || "Failed to share project.");
     } finally {
+      setSharing(false);
       setSharingProjectId(null);
     }
   };
@@ -537,16 +570,16 @@ const ProjectListPage = () => {
                         <button
                           type="button"
                           onClick={(e) => handleShareProject(project, e)}
-                          disabled={sharingProjectId === project._id}
+                          disabled={sharing && shareProject?._id === project._id}
                           className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-medium ${
-                            sharingProjectId === project._id
+                            sharing && shareProject?._id === project._id
                               ? "bg-gray-700 text-gray-400 cursor-not-allowed"
                               : "bg-purple-600 text-white hover:bg-purple-500"
                           }`}
                           title="Share project to your feed"
                         >
                           <FaShareAlt size={10} />
-                          {sharingProjectId === project._id
+                          {sharing && shareProject?._id === project._id
                             ? "Sharing..."
                             : "Share"}
                         </button>
@@ -600,6 +633,152 @@ const ProjectListPage = () => {
           </div>
         </div>
       )}
+
+      {/* Share Project Modal */}
+      <Modal
+        open={shareModalOpen}
+        title={
+          <span style={{ color: "#fff", fontWeight: 600 }}>Chia sẻ project</span>
+        }
+        onCancel={handleCloseShareModal}
+        footer={
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <Button
+              shape="round"
+              onClick={handleCloseShareModal}
+              disabled={sharing}
+              style={{
+                height: 44,
+                borderRadius: 22,
+                padding: 0,
+                width: 108,
+                background: "#1f1f1f",
+                color: "#e5e7eb",
+                borderColor: "#303030",
+              }}
+            >
+              Hủy
+            </Button>
+            <Button
+              shape="round"
+              type="primary"
+              loading={sharing}
+              onClick={handleConfirmShare}
+              disabled={sharing || !shareText.trim()}
+              style={{
+                height: 44,
+                borderRadius: 22,
+                padding: 0,
+                width: 108,
+                background: "#7c3aed",
+                borderColor: "#7c3aed",
+              }}
+            >
+              Chia sẻ
+            </Button>
+          </div>
+        }
+        styles={{
+          content: { background: "#0f0f10" },
+          header: {
+            background: "#0f0f10",
+            borderBottom: "1px solid #1f1f1f",
+          },
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Input.TextArea
+            placeholder="Chia sẻ điều gì đó..."
+            autoSize={{ minRows: 6, maxRows: 16 }}
+            value={shareText}
+            onChange={(e) => setShareText(e.target.value)}
+            maxLength={300}
+            showCount
+            style={{
+              background: "#1a1a1a",
+              color: "#e5e7eb",
+              borderColor: "#3a3a3a",
+            }}
+          />
+
+          {/* Project Preview Link Section */}
+          {shareProject && (
+            <div
+              style={{
+                background: "#141414",
+                border: "1px solid #262626",
+                borderRadius: 16,
+                padding: "18px 20px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 16,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  marginBottom: 4,
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      color: "#f8fafc",
+                      fontWeight: 600,
+                      fontSize: 16,
+                      marginBottom: 6,
+                    }}
+                  >
+                    Link preview project
+                  </div>
+                  <div
+                    style={{
+                      color: "#9ca3af",
+                      fontSize: 13,
+                      lineHeight: "1.5",
+                    }}
+                  >
+                    Link này sẽ hiển thị preview của project trong bài đăng.
+                  </div>
+                </div>
+                <Tag
+                  color="#1f1f1f"
+                  style={{
+                    borderRadius: 999,
+                    color: "#9ca3af",
+                    border: "none",
+                    marginLeft: 12,
+                  }}
+                >
+                  Tự động
+                </Tag>
+              </div>
+              <Input
+                value={`${window.location.origin}/projects/${shareProject._id}`}
+                readOnly
+                style={{
+                  width: "100%",
+                  backgroundColor: "#1a1a1a",
+                  border: "1px solid #3a3a3a",
+                  borderRadius: 8,
+                  color: "#9ca3af",
+                  cursor: "text",
+                }}
+                onFocus={(e) => e.target.select()}
+              />
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 };
