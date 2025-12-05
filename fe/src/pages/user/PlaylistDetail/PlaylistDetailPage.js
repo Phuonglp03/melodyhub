@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   FaSearch,
@@ -18,7 +18,10 @@ import {
   removeLickFromPlaylist,
   updatePlaylist,
 } from "../../../services/user/playlistService";
-import { getCommunityLicks } from "../../../services/user/lickService";
+import {
+  getCommunityLicks,
+  getMyLicks,
+} from "../../../services/user/lickService";
 import LickCard from "../../../components/LickCard";
 import { useSelector } from "react-redux";
 
@@ -39,7 +42,7 @@ const PlaylistDetailPage = () => {
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [addingLick, setAddingLick] = useState(null);
-  
+
   // Suggested licks state
   const [suggestedLicks, setSuggestedLicks] = useState([]);
   const [loadingSuggested, setLoadingSuggested] = useState(false);
@@ -49,21 +52,11 @@ const PlaylistDetailPage = () => {
   const [editForm, setEditForm] = useState({ name: "", description: "" });
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    fetchPlaylist();
-    
-    // Auto-open search if this is a new playlist
-    if (searchParams.get("new") === "true") {
-      setShowSearch(true);
-    }
-  }, [playlistId, searchParams]);
-
-  // Load suggested licks when playlist is empty or search is shown
-  useEffect(() => {
-    if (playlist && (playlist.licks_count === 0 || showSearch)) {
-      loadSuggestedLicks();
-    }
-  }, [playlist, showSearch]);
+  // Memoize existing lick IDs to avoid recalculating on every render
+  const existingLickIds = useMemo(
+    () => new Set((playlist?.licks || []).map((l) => l.lick_id)),
+    [playlist?.licks]
+  );
 
   const fetchPlaylist = async () => {
     try {
@@ -83,63 +76,163 @@ const PlaylistDetailPage = () => {
     }
   };
 
-  const loadSuggestedLicks = async () => {
+  const loadSuggestedLicks = useCallback(async () => {
     try {
       setLoadingSuggested(true);
-      // Load popular/trending licks as suggestions
-      const res = await getCommunityLicks({
-        sortBy: "popular",
-        limit: 12,
-      });
-      if (res.success) {
-        // Filter out licks already in playlist
-        const existingLickIds = new Set(
-          (playlist?.licks || []).map((l) => l.lick_id)
+      const promises = [];
+
+      // Always load community licks
+      promises.push(
+        getCommunityLicks({
+          sortBy: "popular",
+          limit: 12,
+        }).catch((err) => {
+          console.error("(NO $) [DEBUG] Error loading community licks:", err);
+          return { success: false, data: [] };
+        })
+      );
+
+      // If playlist is private, also load user's private licks
+      if (playlist && !playlist.is_public && authUser) {
+        promises.push(
+          getMyLicks({
+            status: "active",
+            limit: 12,
+          }).catch((err) => {
+            console.error("(NO $) [DEBUG] Error loading my licks:", err);
+            return { success: false, data: [] };
+          })
         );
-        const filtered = res.data.filter(
-          (lick) => !existingLickIds.has(lick.lick_id)
-        );
-        setSuggestedLicks(filtered);
       }
+
+      // Use allSettled to handle partial failures gracefully
+      const results = await Promise.allSettled(promises);
+      const communityLicks =
+        results[0]?.status === "fulfilled" && results[0].value?.success
+          ? results[0].value.data
+          : [];
+      const myLicks =
+        results[1]?.status === "fulfilled" && results[1].value?.success
+          ? results[1].value.data
+          : [];
+
+      // Use memoized existingLickIds for O(n) duplicate removal
+      const uniqueLickMap = new Map();
+      [...communityLicks, ...myLicks].forEach((lick) => {
+        if (
+          !existingLickIds.has(lick.lick_id) &&
+          !uniqueLickMap.has(lick.lick_id)
+        ) {
+          uniqueLickMap.set(lick.lick_id, lick);
+        }
+      });
+
+      setSuggestedLicks(Array.from(uniqueLickMap.values()));
     } catch (err) {
-      console.error("Error loading suggested licks:", err);
+      console.error("(NO $) [DEBUG] Error loading suggested licks:", err);
+      setSuggestedLicks([]);
     } finally {
       setLoadingSuggested(false);
     }
-  };
+  }, [playlist, authUser, existingLickIds]);
 
-  const handleSearch = async (query) => {
-    if (!query.trim()) {
-      setSearchResults([]);
-      // Show suggested licks when search is empty
-      if (suggestedLicks.length > 0) {
-        setSearchResults(suggestedLicks);
-      }
-      return;
-    }
+  useEffect(() => {
+    fetchPlaylist();
 
-    try {
-      setSearching(true);
-      const res = await getCommunityLicks({
-        search: query,
-        limit: 20,
-      });
-      if (res.success) {
-        // Filter out licks already in playlist
-        const existingLickIds = new Set(
-          (playlist?.licks || []).map((l) => l.lick_id)
-        );
-        const filtered = res.data.filter(
-          (lick) => !existingLickIds.has(lick.lick_id)
-        );
-        setSearchResults(filtered);
-      }
-    } catch (err) {
-      console.error("Error searching licks:", err);
-    } finally {
-      setSearching(false);
+    // Auto-open search if this is a new playlist
+    if (searchParams.get("new") === "true") {
+      setShowSearch(true);
     }
-  };
+  }, [playlistId, searchParams]);
+
+  // Memoize whether we should load suggested licks
+  const shouldLoadSuggested = useMemo(
+    () => playlist && (playlist.licks_count === 0 || showSearch),
+    [playlist, showSearch]
+  );
+
+  // Load suggested licks when playlist is empty or search is shown
+  useEffect(() => {
+    if (shouldLoadSuggested) {
+      loadSuggestedLicks();
+    }
+  }, [shouldLoadSuggested, loadSuggestedLicks]);
+
+  const handleSearch = useCallback(
+    async (query) => {
+      if (!query.trim()) {
+        setSearchResults([]);
+        // Show suggested licks when search is empty
+        if (suggestedLicks.length > 0) {
+          setSearchResults(suggestedLicks);
+        }
+        return;
+      }
+
+      try {
+        setSearching(true);
+        const promises = [];
+
+        // Always search community licks
+        promises.push(
+          getCommunityLicks({
+            search: query,
+            limit: 20,
+          }).catch((err) => {
+            console.error(
+              "(NO $) [DEBUG] Error searching community licks:",
+              err
+            );
+            return { success: false, data: [] };
+          })
+        );
+
+        // If playlist is private, also search user's private licks
+        if (playlist && !playlist.is_public && authUser) {
+          promises.push(
+            getMyLicks({
+              search: query,
+              status: "active",
+              limit: 20,
+            }).catch((err) => {
+              console.error("(NO $) [DEBUG] Error searching my licks:", err);
+              return { success: false, data: [] };
+            })
+          );
+        }
+
+        // Use allSettled to handle partial failures gracefully
+        const results = await Promise.allSettled(promises);
+        const communityLicks =
+          results[0]?.status === "fulfilled" && results[0].value?.success
+            ? results[0].value.data
+            : [];
+        const myLicks =
+          results[1]?.status === "fulfilled" && results[1].value?.success
+            ? results[1].value.data
+            : [];
+
+        // Use memoized existingLickIds for O(n) duplicate removal
+        const uniqueLickMap = new Map();
+        [...communityLicks, ...myLicks].forEach((lick) => {
+          if (
+            !existingLickIds.has(lick.lick_id) &&
+            !uniqueLickMap.has(lick.lick_id)
+          ) {
+            uniqueLickMap.set(lick.lick_id, lick);
+          }
+        });
+
+        setSearchResults(Array.from(uniqueLickMap.values()));
+      } catch (err) {
+        console.error("(NO $) [DEBUG] Error searching licks:", err);
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    },
+    [playlist, authUser, existingLickIds, suggestedLicks]
+  );
 
   useEffect(() => {
     if (showSearch && searchTerm) {
@@ -150,7 +243,7 @@ const PlaylistDetailPage = () => {
     } else {
       setSearchResults([]);
     }
-  }, [searchTerm, showSearch]);
+  }, [searchTerm, showSearch, handleSearch]);
 
   const handleAddLick = async (lickId) => {
     try {
@@ -391,7 +484,9 @@ const PlaylistDetailPage = () => {
                 />
               ) : (
                 <div className="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center text-xs">
-                  {(playlist.owner?.display_name || playlist.owner?.username || "U")[0].toUpperCase()}
+                  {(playlist.owner?.display_name ||
+                    playlist.owner?.username ||
+                    "U")[0].toUpperCase()}
                 </div>
               )}
               <span className="text-sm font-medium">
@@ -540,7 +635,9 @@ const PlaylistDetailPage = () => {
                               <div
                                 key={i}
                                 className="w-0.5 mx-px bg-orange-500"
-                                style={{ height: `${Math.max(amp * 100, 20)}%` }}
+                                style={{
+                                  height: `${Math.max(amp * 100, 20)}%`,
+                                }}
                               />
                             ))}
                           </div>
@@ -595,7 +692,8 @@ const PlaylistDetailPage = () => {
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xl font-bold">Licks in this playlist</h2>
               <span className="text-sm text-gray-400">
-                {playlist.licks.length} {playlist.licks.length === 1 ? "lick" : "licks"}
+                {playlist.licks.length}{" "}
+                {playlist.licks.length === 1 ? "lick" : "licks"}
               </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
@@ -648,12 +746,14 @@ const PlaylistDetailPage = () => {
           />
           <div className="relative z-10 w-full max-w-md mx-4 bg-gray-900 border border-gray-800 rounded-lg shadow-xl">
             <div className="px-6 py-4 border-b border-gray-800">
-              <h2 className="text-lg font-semibold text-white">Delete Playlist</h2>
+              <h2 className="text-lg font-semibold text-white">
+                Delete Playlist
+              </h2>
             </div>
             <div className="px-6 py-5 space-y-3">
               <p className="text-gray-300 text-sm">
-                Are you sure you want to delete this playlist? This action cannot be
-                undone.
+                Are you sure you want to delete this playlist? This action
+                cannot be undone.
               </p>
             </div>
             <div className="px-6 py-4 border-t border-gray-800 flex justify-end gap-3">
