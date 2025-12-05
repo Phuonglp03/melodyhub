@@ -6,7 +6,6 @@ import {
   VideoCameraOutlined,
   MinusOutlined,
   CloseOutlined,
-  SmileOutlined,
   LikeOutlined,
   CheckOutlined
 } from '@ant-design/icons';
@@ -520,13 +519,6 @@ const FloatingChatWindow = ({
           disabled={conversation?.status === 'pending' && String(conversation.requestedBy) !== String(currentUserId)}
         />
         <div className="floating-chat-input-right">
-          <Button
-            type="text"
-            icon={<SmileOutlined />}
-            className="floating-chat-input-icon"
-            title="Emoji"
-            style={{ fontSize: 20 }}
-          />
           <Button
             type="text"
             icon={<LikeOutlined />}

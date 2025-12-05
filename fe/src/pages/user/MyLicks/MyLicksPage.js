@@ -18,6 +18,7 @@ import {
   fetchTagsGrouped,
   upsertTags,
   replaceContentTags,
+  searchTags,
 } from "../../../services/user/tagService";
 import { createPost as createPostApi } from "../../../services/user/post";
 import MyLickCard from "../../../components/MyLickCard";
@@ -36,6 +37,12 @@ const MyLicksPage = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedTags, setSelectedTags] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+
+  // Tag suggestions
+  const [tagInput, setTagInput] = useState("");
+  const [tagSuggestions, setTagSuggestions] = useState([]);
+  const [showTagSuggestions, setShowTagSuggestions] = useState(false);
+  const [loadingTagSuggestions, setLoadingTagSuggestions] = useState(false);
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -210,7 +217,91 @@ const MyLicksPage = () => {
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [searchTerm, selectedTags]);
+  }, [searchTerm, selectedTags, statusFilter]);
+
+  // Fetch tag suggestions when tag input changes
+  useEffect(() => {
+    const fetchTagSuggestions = async () => {
+      if (!showTagSuggestions) return;
+
+      try {
+        setLoadingTagSuggestions(true);
+        console.log(
+          "[DEBUG] (IS $) Fetching tag suggestions for query:",
+          tagInput
+        );
+        const res = await searchTags(tagInput);
+        console.log("[DEBUG] (IS $) Tag search response:", {
+          success: res?.success,
+          dataLength: res?.data?.length,
+          data: res?.data,
+        });
+        if (res?.success && Array.isArray(res.data)) {
+          setTagSuggestions(res.data);
+        } else {
+          console.warn(
+            "[DEBUG] (IS $) Invalid tag search response format:",
+            res
+          );
+          setTagSuggestions([]);
+        }
+      } catch (err) {
+        console.error("[DEBUG] (IS $) Error fetching tag suggestions:", {
+          error: err,
+          message: err?.message,
+          response: err?.response?.data,
+          status: err?.response?.status,
+        });
+        setTagSuggestions([]);
+      } finally {
+        setLoadingTagSuggestions(false);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      fetchTagSuggestions();
+    }, 300); // Debounce tag search
+
+    return () => clearTimeout(timer);
+  }, [tagInput, showTagSuggestions]);
+
+  // Load all tags when tag input is focused and empty
+  useEffect(() => {
+    if (showTagSuggestions && tagInput === "") {
+      const fetchAllTags = async () => {
+        try {
+          setLoadingTagSuggestions(true);
+          console.log("[DEBUG] (IS $) Fetching all tags (empty query)");
+          const res = await searchTags("");
+          console.log("[DEBUG] (IS $) All tags response:", {
+            success: res?.success,
+            dataLength: res?.data?.length,
+            data: res?.data,
+          });
+          if (res?.success && Array.isArray(res.data)) {
+            setTagSuggestions(res.data);
+          } else {
+            console.warn(
+              "[DEBUG] (IS $) Invalid all tags response format:",
+              res
+            );
+            setTagSuggestions([]);
+          }
+        } catch (err) {
+          console.error("[DEBUG] (IS $) Error fetching all tags:", {
+            error: err,
+            message: err?.message,
+            response: err?.response?.data,
+            status: err?.response?.status,
+          });
+          setTagSuggestions([]);
+        } finally {
+          setLoadingTagSuggestions(false);
+        }
+      };
+      fetchAllTags();
+    }
+  }, [showTagSuggestions, tagInput]);
 
   // Handle lick click
   const handleLickClick = (lickId) => {
@@ -593,17 +684,129 @@ const MyLicksPage = () => {
 
           {/* Tags Filter */}
           <div className="relative flex-1 min-w-[150px]">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 z-10">
               <FaFilter size={12} />
             </span>
             <input
               type="text"
               placeholder="Filter by tags..."
-              value={selectedTags}
-              onChange={(e) => setSelectedTags(e.target.value)}
+              value={tagInput}
+              onChange={(e) => {
+                setTagInput(e.target.value);
+                setShowTagSuggestions(true);
+              }}
+              onFocus={() => setShowTagSuggestions(true)}
+              onBlur={() => {
+                // Delay hiding to allow clicking on suggestions
+                setTimeout(() => setShowTagSuggestions(false), 200);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && tagInput.trim()) {
+                  e.preventDefault();
+                  const trimmed = tagInput.trim();
+                  if (selectedTags) {
+                    const existingTags = selectedTags
+                      .split(",")
+                      .map((t) => t.trim())
+                      .filter(Boolean);
+                    if (!existingTags.includes(trimmed)) {
+                      setSelectedTags([...existingTags, trimmed].join(", "));
+                    }
+                  } else {
+                    setSelectedTags(trimmed);
+                  }
+                  setTagInput("");
+                  setShowTagSuggestions(false);
+                }
+              }}
               className="bg-gray-800 border border-gray-700 text-white w-full rounded-md pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
             />
+            {/* Tag Suggestions Dropdown */}
+            {showTagSuggestions && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
+                {loadingTagSuggestions ? (
+                  <div className="px-4 py-3 text-sm text-gray-400 text-center">
+                    Loading tags...
+                  </div>
+                ) : tagSuggestions.length > 0 ? (
+                  <div className="py-1">
+                    {tagSuggestions.map((tag) => (
+                      <button
+                        key={tag.tag_id}
+                        type="button"
+                        onClick={() => {
+                          const tagName = tag.tag_name || tag.name || "";
+                          if (selectedTags) {
+                            // Add to existing tags (comma-separated)
+                            const existingTags = selectedTags
+                              .split(",")
+                              .map((t) => t.trim())
+                              .filter(Boolean);
+                            if (!existingTags.includes(tagName)) {
+                              setSelectedTags(
+                                [...existingTags, tagName].join(", ")
+                              );
+                            }
+                          } else {
+                            setSelectedTags(tagName);
+                          }
+                          setTagInput("");
+                          setShowTagSuggestions(false);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors flex items-center justify-between"
+                      >
+                        <span>#{tag.tag_name || tag.name}</span>
+                        <span className="text-xs text-gray-500 ml-2">
+                          {tag.tag_type || "tag"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : tagInput.trim() === "" ? (
+                  <div className="px-4 py-3 text-sm text-gray-400 text-center">
+                    No tags available. Start typing to search or create tags
+                    when editing a lick.
+                  </div>
+                ) : (
+                  <div className="px-4 py-3 text-sm text-gray-400 text-center">
+                    No tags found matching "{tagInput}"
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+          {/* Selected Tags Display */}
+          {selectedTags && (
+            <div className="flex flex-wrap gap-2 items-center">
+              {selectedTags.split(",").map((tag, idx) => {
+                const trimmed = tag.trim();
+                if (!trimmed) return null;
+                return (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-orange-500/20 border border-orange-500/30 text-orange-300"
+                  >
+                    #{trimmed}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const tags = selectedTags
+                          .split(",")
+                          .map((t) => t.trim())
+                          .filter(Boolean);
+                        tags.splice(idx, 1);
+                        setSelectedTags(tags.join(", "));
+                      }}
+                      className="text-orange-300 hover:text-orange-200 transition-colors"
+                      aria-label={`Remove ${trimmed}`}
+                    >
+                      <FaTimes size={10} />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Results Count */}

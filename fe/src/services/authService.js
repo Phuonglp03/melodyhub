@@ -135,7 +135,10 @@ export const register = async (userData) => {
     return response.data;
   } catch (error) {
     console.error('Register error:', error);
-    const errorMessage = error.response?.data?.message || 'Đăng ký thất bại';
+    const errorMessage =
+      error.response?.data?.message ||
+      error.message ||
+      'Đăng ký thất bại';
     throw new Error(errorMessage);
   }
 };

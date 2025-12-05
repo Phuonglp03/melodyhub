@@ -24,7 +24,6 @@ import { Dropdown, Button, Modal, Input, Form, Badge, Avatar, message } from 'an
 import { 
   MoreOutlined, 
   SendOutlined, 
-  SmileOutlined, 
   UserOutlined, 
   ClockCircleOutlined, 
   SettingOutlined, 
@@ -600,18 +599,6 @@ const LiveStreamLive = () => {
                     paddingRight: '30px',
                     cursor: chatBanned ? 'not-allowed' : 'text'
                   }}
-                />
-                <SmileOutlined 
-                  onClick={() => !chatBanned && setShowEmojiPicker(!showEmojiPicker)}
-                  style={{ 
-                    position: 'absolute', 
-                    right: '10px', 
-                    top: '50%', 
-                    transform: 'translateY(-50%)', 
-                    color: chatBanned ? '#444' : '#adadb8', 
-                    cursor: chatBanned ? 'not-allowed' : 'pointer', 
-                    fontSize: '16px' 
-                  }} 
                 />
               </div>
               <Button 
