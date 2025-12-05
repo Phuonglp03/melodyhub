@@ -1038,7 +1038,7 @@ const NewsFeed = () => {
         style={{ marginBottom: 16, background: '#0f0f10', borderColor: '#1f1f1f' }} 
         title={
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ color: '#fff', fontWeight: 700 }}>Người liên hệ</Text>
+            <Text style={{ color: '#fff', fontWeight: 700 }}>Người đang theo dõi</Text>
             <Button type="text" icon={<MoreOutlined />} style={{ color: '#9ca3af', padding: 0 }} />
           </div>
         }
@@ -1049,35 +1049,56 @@ const NewsFeed = () => {
           </div>
         ) : followingUsers.length === 0 ? (
           <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-            Chưa có người liên hệ
+            Chưa có người theo dõi
           </div>
         ) : (
           <List
             dataSource={followingUsers}
             renderItem={(user) => {
               const userId = user.id || user._id || user.userId;
+              
+              const handleChatClick = async (e) => {
+                e.stopPropagation();
+                try {
+                  const conversation = await ensureConversationWith(userId);
+                  if (conversation && conversation._id) {
+                    window.dispatchEvent(new CustomEvent('openChatWindow', { 
+                      detail: { conversation } 
+                    }));
+                  } else {
+                    message.error('Không thể tạo cuộc trò chuyện');
+                  }
+                } catch (error) {
+                  console.error('Error opening chat:', error);
+                  message.error(error.message || 'Không thể mở chat');
+                }
+              };
+
+              const handleNameClick = (e) => {
+                e.stopPropagation();
+                if (userId) {
+                  navigate(`/users/${userId}/newfeeds`);
+                }
+              };
+
               return (
                 <List.Item
                   style={{ 
                     padding: '8px 0', 
-                    cursor: 'pointer',
                     borderBottom: '1px solid #1f1f1f'
                   }}
-                  onClick={async () => {
-                    try {
-                      const conversation = await ensureConversationWith(userId);
-                      if (conversation && conversation._id) {
-                        window.dispatchEvent(new CustomEvent('openChatWindow', { 
-                          detail: { conversation } 
-                        }));
-                      } else {
-                        message.error('Không thể tạo cuộc trò chuyện');
-                      }
-                    } catch (error) {
-                      console.error('Error opening chat:', error);
-                      message.error(error.message || 'Không thể mở chat');
-                    }
-                  }}
+                  actions={[
+                    <Button
+                      key="chat"
+                      type="text"
+                      icon={<MessageOutlined />}
+                      onClick={handleChatClick}
+                      style={{ 
+                        color: '#9ca3af',
+                        padding: '4px 8px'
+                      }}
+                    />
+                  ]}
                 >
                   <List.Item.Meta
                     avatar={
@@ -1089,7 +1110,10 @@ const NewsFeed = () => {
                       />
                     }
                     title={
-                      <Text style={{ color: '#fff', fontWeight: 500 }}>
+                      <Text 
+                        style={{ color: '#fff', fontWeight: 500, cursor: 'pointer' }}
+                        onClick={handleNameClick}
+                      >
                         {user.displayName || user.username || 'Người dùng'}
                       </Text>
                     }
@@ -2004,7 +2028,7 @@ const NewsFeed = () => {
               style={{ borderRadius: 999, background: '#1890ff', padding: '0 22px', height: 44 }}
               onClick={(e) => { e.stopPropagation(); handleModalOpen(); }}
             >
-              Post
+              Đăng Bài
             </Button>
           </div>
 
@@ -2259,7 +2283,7 @@ const NewsFeed = () => {
                           color: '#fff',
                         }}
                       >
-                        {isFollowing ? 'Đang theo dõi' : 'Follow'}
+                        {isFollowing ? 'Đang theo dõi' : 'Theo dõi'}
                       </Button>
                     );
                   })()}
@@ -2574,7 +2598,7 @@ const NewsFeed = () => {
                         color: '#fff',
                       }}
                     >
-                      {userIdToFollowing[user.id] ? 'Đang theo dõi' : 'Follow'}
+                      {userIdToFollowing[user.id] ? 'Đang theo dõi' : 'Theo dõi'}
                     </Button>
                   ]
                 }

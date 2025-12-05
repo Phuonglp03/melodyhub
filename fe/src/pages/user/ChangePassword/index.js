@@ -36,7 +36,7 @@ const ChangePasswordPage = () => {
             block
             onClick={() => navigate('/profile')}
           >
-            Back to Profile
+            Trở lại Hồ sơ
           </Button>
           <Card
             style={{ background: '#0f0f10', borderColor: '#1f1f1f', padding: 0 }}
@@ -44,13 +44,13 @@ const ChangePasswordPage = () => {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <KeyOutlined style={{ fontSize: 20, color: '#fbbf24' }} />
-              <div style={{ color: '#fbbf24', fontWeight: 600 }}>Change Password</div>
+              <div style={{ color: '#fbbf24', fontWeight: 600 }}>Thay đổi mật khẩu</div>
             </div>
           </Card>
         </div>
         <div className="profile-settings-content">
           <Title level={2} style={{ color: '#fff', marginBottom: 16 }}>
-            Change Password
+            Thay đổi mật khẩu
           </Title>
           <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>
             <Text style={{ color: '#9ca3af' }}>

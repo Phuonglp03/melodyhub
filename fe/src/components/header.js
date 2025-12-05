@@ -583,7 +583,7 @@ const AppHeader = () => {
                     }
                   }}
                 >
-                  Xem tất cả trong Messenger
+                  Xem tất cả 
                 </button>
               </div>
             </div>

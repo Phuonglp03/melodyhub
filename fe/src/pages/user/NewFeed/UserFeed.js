@@ -26,6 +26,7 @@ import {
   DeleteOutlined, 
   FlagOutlined,
   MenuOutlined,
+  UserOutlined,
 } from "@ant-design/icons";
 import { listPostsByUser, createPost, getPostById, updatePost, deletePost, deletePostComment } from "../../../services/user/post";
 import {
@@ -36,7 +37,7 @@ import {
   getAllPostComments,
   getPostLikes,
 } from "../../../services/user/post";
-import { getProfileById, followUser, unfollowUser, uploadMyCoverPhoto } from "../../../services/user/profile";
+import { getProfileById, followUser, unfollowUser, uploadMyCoverPhoto, getFollowersList, getUserFollowingList } from "../../../services/user/profile";
 import { onPostCommentNew, offPostCommentNew, onPostArchived, offPostArchived, joinRoom } from "../../../services/user/socketService";
 import {
   getMyLicks,
@@ -334,6 +335,12 @@ const UserFeed = () => {
   const [playingLickId, setPlayingLickId] = useState(null);
   const playlistAudioRef = React.useRef(null);
   const isOwnProfile = !!currentUserId && userId && (currentUserId.toString() === userId.toString());
+  const [followersModalOpen, setFollowersModalOpen] = useState(false);
+  const [followingModalOpen, setFollowingModalOpen] = useState(false);
+  const [followersList, setFollowersList] = useState([]);
+  const [followingList, setFollowingList] = useState([]);
+  const [followersLoading, setFollowersLoading] = useState(false);
+  const [followingLoading, setFollowingLoading] = useState(false);
   const getAuthorId = (post) => {
     if (!post) return '';
     const user = post?.userId;
@@ -401,6 +408,44 @@ const UserFeed = () => {
       }
     } finally {
       setFollowLoading(false);
+    }
+  };
+
+  const fetchFollowers = async () => {
+    if (!userId) return;
+    try {
+      setFollowersLoading(true);
+      const res = await getFollowersList(userId);
+      if (res?.success && Array.isArray(res.data)) {
+        setFollowersList(res.data);
+      } else {
+        setFollowersList([]);
+      }
+    } catch (error) {
+      console.error("Error fetching followers:", error);
+      message.error("Không thể tải danh sách người theo dõi");
+      setFollowersList([]);
+    } finally {
+      setFollowersLoading(false);
+    }
+  };
+
+  const fetchFollowing = async () => {
+    if (!userId) return;
+    try {
+      setFollowingLoading(true);
+      const res = await getUserFollowingList(userId);
+      if (res?.success && Array.isArray(res.data)) {
+        setFollowingList(res.data);
+      } else {
+        setFollowingList([]);
+      }
+    } catch (error) {
+      console.error("Error fetching following:", error);
+      message.error("Không thể tải danh sách đang theo dõi");
+      setFollowingList([]);
+    } finally {
+      setFollowingLoading(false);
     }
   };
 
@@ -662,7 +707,7 @@ const UserFeed = () => {
   const sidebarContent = (
     <Card style={{ background: "#0f0f10", borderColor: "#1f1f1f" }}>
       <div style={{ color: "#fff", fontWeight: 700, marginBottom: 12 }}>
-        Find Me On
+        Liên hệ với tôi
       </div>
       {profile?.links && Array.isArray(profile.links) && profile.links.length > 0 ? (
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
@@ -699,7 +744,7 @@ const UserFeed = () => {
         </Space>
       ) : (
         <div style={{ color: "#9ca3af", fontSize: 14 }}>
-          No links available
+          Chưa có liên kết nào được thêm vào.
         </div>
       )}
     </Card>
@@ -1756,20 +1801,60 @@ const UserFeed = () => {
                   gap: 12,
                 }}
               >
-                <div style={{ textAlign: "center" }}>
+                <div 
+                  style={{ 
+                    textAlign: "center", 
+                    cursor: "pointer",
+                    transition: "opacity 0.2s"
+                  }}
+                  onClick={() => {
+                    if (userId && profile?.followersCount > 0) {
+                      setFollowersModalOpen(true);
+                      fetchFollowers();
+                    }
+                  }}
+                  onMouseEnter={(e) => {
+                    if (profile?.followersCount > 0) {
+                      e.currentTarget.style.opacity = "0.7";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.opacity = "1";
+                  }}
+                >
                   <div style={{ color: "#fff", fontWeight: 800, fontSize: 16 }}>
                     {profile?.followersCount ?? 0}
                   </div>
                   <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 4 }}>
-                    Followers
+                    Người theo dõi
                   </div>
                 </div>
-                <div style={{ textAlign: "center" }}>
+                <div 
+                  style={{ 
+                    textAlign: "center", 
+                    cursor: "pointer",
+                    transition: "opacity 0.2s"
+                  }}
+                  onClick={() => {
+                    if (userId && profile?.followingCount > 0) {
+                      setFollowingModalOpen(true);
+                      fetchFollowing();
+                    }
+                  }}
+                  onMouseEnter={(e) => {
+                    if (profile?.followingCount > 0) {
+                      e.currentTarget.style.opacity = "0.7";
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.opacity = "1";
+                  }}
+                >
                   <div style={{ color: "#fff", fontWeight: 800, fontSize: 16 }}>
                     {profile?.followingCount ?? 0}
                   </div>
                   <div style={{ color: "#9ca3af", fontSize: 12, marginTop: 4 }}>
-                    Following
+                    Đang theo dõi
                   </div>
                 </div>
               </div>
@@ -1825,14 +1910,14 @@ const UserFeed = () => {
                   style={{ borderRadius: 999, background: "#1890ff", padding: "0 22px", height: 44 }}
                   onClick={(e) => { e.stopPropagation(); handleModalOpen(); }}
                 >
-                  Post
+                  Đăng bài
                 </Button>
               </div>
             )}
 
             <div className="profile-tabs">
               {[
-                { key: "activity", label: "Activity" },
+                { key: "activity", label: "Hoạt động" },
                 { key: "licks", label: "Licks" },
                 { key: "projects", label: "Projects" },
                 { key: "playlists", label: "Playlists" },
@@ -3873,6 +3958,170 @@ const UserFeed = () => {
             </>
           )}
         </div>
+      </Modal>
+
+      {/* Followers Modal */}
+      <Modal
+        title={<span style={{ color: '#fff', fontSize: 18, fontWeight: 600 }}>Người theo dõi</span>}
+        open={followersModalOpen}
+        onCancel={() => setFollowersModalOpen(false)}
+        footer={null}
+        width={450}
+        style={{ top: 20 }}
+        styles={{
+          content: { background: '#0f0f10', padding: '20px' },
+          header: { background: '#0f0f10', borderBottom: '1px solid #1f1f1f', paddingBottom: 16 }
+        }}
+      >
+        {followersLoading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+            <Spin />
+          </div>
+        ) : followersList.length === 0 ? (
+          <Empty description={<span style={{ color: '#9ca3af' }}>Chưa có người theo dõi</span>} />
+        ) : (
+          <List
+            dataSource={followersList}
+            renderItem={(user) => {
+              const isCurrentUser = currentUserId && user.id && user.id.toString() === currentUserId.toString();
+              return (
+                <List.Item
+                  style={{ 
+                    padding: '16px 0', 
+                    borderBottom: '1px solid #1f1f1f', 
+                    cursor: 'pointer',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#1a1a1a';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                  onClick={() => {
+                    setFollowersModalOpen(false);
+                    navigate(`/users/${user.id}/newfeeds`);
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                    <Avatar 
+                      src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined} 
+                      icon={<UserOutlined />}
+                      size={48}
+                      style={{ background: '#2db7f5', marginRight: 12 }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ 
+                        color: '#fff', 
+                        fontWeight: 600, 
+                        fontSize: 15,
+                        marginBottom: 4,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {user.displayName || user.username || 'Người dùng'}
+                      </div>
+                      {user.displayName && user.username && (
+                        <div style={{ 
+                          color: '#9ca3af', 
+                          fontSize: 13,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          @{user.username}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </List.Item>
+              );
+            }}
+          />
+        )}
+      </Modal>
+
+      {/* Following Modal */}
+      <Modal
+        title={<span style={{ color: '#fff', fontSize: 18, fontWeight: 600 }}>Đang theo dõi</span>}
+        open={followingModalOpen}
+        onCancel={() => setFollowingModalOpen(false)}
+        footer={null}
+        width={450}
+        style={{ top: 20 }}
+        styles={{
+          content: { background: '#0f0f10', padding: '20px' },
+          header: { background: '#0f0f10', borderBottom: '1px solid #1f1f1f', paddingBottom: 16 }
+        }}
+      >
+        {followingLoading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+            <Spin />
+          </div>
+        ) : followingList.length === 0 ? (
+          <Empty description={<span style={{ color: '#9ca3af' }}>Chưa theo dõi ai</span>} />
+        ) : (
+          <List
+            dataSource={followingList}
+            renderItem={(user) => {
+              const isCurrentUser = currentUserId && user.id && user.id.toString() === currentUserId.toString();
+              return (
+                <List.Item
+                  style={{ 
+                    padding: '16px 0', 
+                    borderBottom: '1px solid #1f1f1f', 
+                    cursor: 'pointer',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#1a1a1a';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                  onClick={() => {
+                    setFollowingModalOpen(false);
+                    navigate(`/users/${user.id}/newfeeds`);
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                    <Avatar 
+                      src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined} 
+                      icon={<UserOutlined />}
+                      size={48}
+                      style={{ background: '#2db7f5', marginRight: 12 }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ 
+                        color: '#fff', 
+                        fontWeight: 600, 
+                        fontSize: 15,
+                        marginBottom: 4,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {user.displayName || user.username || 'Người dùng'}
+                      </div>
+                      {user.displayName && user.username && (
+                        <div style={{ 
+                          color: '#9ca3af', 
+                          fontSize: 13,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          @{user.username}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </List.Item>
+              );
+            }}
+          />
+        )}
       </Modal>
     </>
   );

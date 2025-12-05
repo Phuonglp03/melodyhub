@@ -268,7 +268,6 @@ const Register = () => {
               <Form.Item
                 label={<span className="form-label">Địa chỉ chi tiết</span>}
                 name="addressLine"
-                rules={[{ required: true, message: 'Please input your detailed address!' }]}
               >
                 <Input 
                   placeholder="House number, street name, etc."
@@ -279,7 +278,6 @@ const Register = () => {
               <Form.Item
                 label={<span className="form-label">Thành phố</span>}
                 name="province"
-                rules={[{ required: true, message: 'Please select your province/city!' }]}
               >
                 <Select
                   placeholder="Select province/city"
@@ -298,7 +296,6 @@ const Register = () => {
               <Form.Item
                 label={<span className="form-label">Quận huyện </span>}
                 name="district"
-                rules={[{ required: true, message: 'Please select your district!' }]}
               >
                 <Select
                   placeholder="Select district"
@@ -318,7 +315,6 @@ const Register = () => {
               <Form.Item
                 label={<span className="form-label">Xã/ phường</span>}
                 name="ward"
-                rules={[{ required: true, message: 'Please select your ward!' }]}
               >
                 <Select
                   placeholder="Select ward"
