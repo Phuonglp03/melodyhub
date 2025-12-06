@@ -272,6 +272,10 @@ const NewsFeed = () => {
   const [postIdToLiked, setPostIdToLiked] = useState({}); // postId -> boolean
   const [postIdToCommentInput, setPostIdToCommentInput] = useState({}); // postId -> string
   const [modalPost, setModalPost] = useState(null);
+  const [replyingToCommentId, setReplyingToCommentId] = useState(null); // commentId being replied to
+  const [replyTexts, setReplyTexts] = useState({}); // commentId -> reply text
+  const [commentReplies, setCommentReplies] = useState({}); // commentId -> replies[]
+  const [loadingReplies, setLoadingReplies] = useState({}); // commentId -> boolean
   const [userIdToFollowing, setUserIdToFollowing] = useState({}); // userId -> boolean
   const [userIdToFollowLoading, setUserIdToFollowLoading] = useState({}); // userId -> boolean
   const [suggestions, setSuggestions] = useState([]);
@@ -668,13 +672,35 @@ const NewsFeed = () => {
   const openComment = async (postId, postOverride = null) => {
     setCommentPostId(postId);
     setCommentText('');
+    setReplyingToCommentId(null);
+    setReplyTexts({});
     const p = postOverride || items.find((it) => it._id === postId) || null;
     setModalPost(p);
     setCommentOpen(true);
-    // Fetch tất cả comments để hiển thị trong modal (không giới hạn 3)
+    // Fetch tất cả top-level comments để hiển thị trong modal (không giới hạn 3)
     try {
-      const all = await getAllPostComments(postId);
-      setPostIdToComments((prev) => ({ ...prev, [postId]: Array.isArray(all) ? sortCommentsDesc(all) : [] }));
+      const all = await getAllPostComments(postId); // Get top-level comments (no parentCommentId)
+      const topLevelComments = Array.isArray(all) ? all.filter(c => !c.parentCommentId) : [];
+      setPostIdToComments((prev) => ({ ...prev, [postId]: sortCommentsDesc(topLevelComments) }));
+      
+      // Fetch replies for each comment
+      if (topLevelComments.length > 0) {
+        const repliesPromises = topLevelComments.map(async (comment) => {
+          try {
+            const replies = await getAllPostComments(postId, { parentCommentId: comment._id });
+            return { commentId: comment._id, replies: Array.isArray(replies) ? replies : [] };
+          } catch (e) {
+            console.warn(`Failed to fetch replies for comment ${comment._id}:`, e);
+            return { commentId: comment._id, replies: [] };
+          }
+        });
+        const repliesResults = await Promise.all(repliesPromises);
+        const repliesMap = {};
+        repliesResults.forEach(({ commentId, replies }) => {
+          repliesMap[commentId] = sortCommentsDesc(replies);
+        });
+        setCommentReplies(repliesMap);
+      }
     } catch (e) {
       // Nếu fetch thất bại, vẫn giữ comments hiện có
       console.warn('Failed to fetch all comments for modal:', e);
@@ -707,15 +733,55 @@ const NewsFeed = () => {
       setCommentSubmitting(true);
       await createPostComment(commentPostId, { comment: commentText.trim() });
       message.success('Đã gửi bình luận');
-      setCommentOpen(false);
       setCommentText('');
-      // refresh comments and counts
-      const all = await getAllPostComments(commentPostId);
-      setPostIdToComments((prev) => ({ ...prev, [commentPostId]: all }));
+      // Không cần refresh manual vì realtime event sẽ tự động cập nhật
+      // Chỉ refresh stats để đảm bảo số lượng chính xác
       const statsRes = await getPostStats(commentPostId);
       setPostIdToStats((prev) => ({ ...prev, [commentPostId]: statsRes?.data || prev[commentPostId] }));
     } catch (e) {
       message.error(e.message || 'Không thể gửi bình luận');
+    } finally {
+      setCommentSubmitting(false);
+    }
+  };
+
+  const startReply = (commentId) => {
+    setReplyingToCommentId(commentId);
+    setReplyTexts((prev) => ({ ...prev, [commentId]: '' }));
+  };
+
+  const cancelReply = (commentId) => {
+    if (replyingToCommentId === commentId) {
+      setReplyingToCommentId(null);
+    }
+    setReplyTexts((prev) => {
+      const next = { ...prev };
+      delete next[commentId];
+      return next;
+    });
+  };
+
+  const submitReply = async (commentId) => {
+    const replyText = (replyTexts[commentId] || '').trim();
+    if (!replyText) {
+      message.warning('Vui lòng nhập phản hồi');
+      return;
+    }
+    try {
+      setCommentSubmitting(true);
+      await createPostComment(commentPostId, { 
+        comment: replyText,
+        parentCommentId: commentId 
+      });
+      message.success('Đã gửi phản hồi');
+      cancelReply(commentId);
+      
+      // Không cần refresh manual vì realtime event sẽ tự động cập nhật
+      // Chỉ refresh stats để đảm bảo số lượng chính xác
+      const statsRes = await getPostStats(commentPostId);
+      setPostIdToStats((prev) => ({ ...prev, [commentPostId]: statsRes?.data || prev[commentPostId] }));
+    } catch (e) {
+      message.error(e.message || 'Không thể gửi phản hồi');
     } finally {
       setCommentSubmitting(false);
     }
@@ -745,10 +811,22 @@ const NewsFeed = () => {
     try {
       setDeletingCommentId(commentId);
       await deletePostComment(postId, commentId);
+      
+      // Xóa khỏi top-level comments
       setPostIdToComments((prev) => {
         const list = Array.isArray(prev[postId]) ? prev[postId] : [];
         return { ...prev, [postId]: list.filter((c) => c._id !== commentId) };
       });
+      
+      // Xóa khỏi replies nếu là reply
+      setCommentReplies((prev) => {
+        const newReplies = { ...prev };
+        Object.keys(newReplies).forEach((parentId) => {
+          newReplies[parentId] = (newReplies[parentId] || []).filter((r) => r._id !== commentId);
+        });
+        return newReplies;
+      });
+      
       setPostIdToStats((prev) => {
         const current = prev[postId] || { likesCount: 0, commentsCount: 0 };
         const nextComments = Math.max((current.commentsCount || 1) - 1, 0);
@@ -1223,12 +1301,31 @@ const NewsFeed = () => {
         const cur = prev[postId] || { likesCount: 0, commentsCount: 0 };
         return { ...prev, [postId]: { ...cur, commentsCount: (cur.commentsCount || 0) + 1 } };
       });
-      // Cập nhật danh sách comment và chỉ giữ lại 3 comment gần nhất
+      
+      // Nếu là reply (có parentCommentId), thêm vào danh sách replies
+      if (comment.parentCommentId) {
+        setCommentReplies((prev) => {
+          const parentId = comment.parentCommentId;
+          const existingReplies = prev[parentId] || [];
+          // Kiểm tra duplicate trước khi thêm
+          const exists = existingReplies.some(r => r._id === comment._id);
+          if (exists) return prev;
+          return {
+            ...prev,
+            [parentId]: sortCommentsDesc([comment, ...existingReplies])
+          };
+        });
+      } else {
+        // Nếu là top-level comment, cập nhật danh sách comment và chỉ giữ lại 3 comment gần nhất
       setPostIdToComments((prev) => {
         const cur = Array.isArray(prev[postId]) ? prev[postId] : [];
+          // Kiểm tra duplicate trước khi thêm
+          const exists = cur.some(c => c._id === comment._id);
+          if (exists) return prev;
         // Thêm comment mới vào đầu danh sách và giới hạn 3 comment gần nhất
         return { ...prev, [postId]: limitToNewest3([comment, ...cur]) };
       });
+      }
     };
     onPostCommentNew(handler);
     return () => {
@@ -1299,11 +1396,38 @@ const NewsFeed = () => {
       if (!newComment.createdAt) {
         newComment.createdAt = new Date().toISOString();
       }
-      // Trong modal, hiển thị tất cả comments (không giới hạn 3)
+      
+      // Nếu là reply (có parentCommentId), chỉ thêm vào danh sách replies, KHÔNG thêm vào top-level comments
+      if (newComment.parentCommentId) {
+        setCommentReplies((prev) => {
+          const parentId = newComment.parentCommentId;
+          const existingReplies = prev[parentId] || [];
+          // Kiểm tra duplicate trước khi thêm
+          const exists = existingReplies.some(r => r._id === newComment._id);
+          if (exists) return prev;
+          return {
+            ...prev,
+            [parentId]: sortCommentsDesc([newComment, ...existingReplies])
+          };
+        });
+        // Đảm bảo reply không có trong top-level comments (phòng trường hợp lỗi)
       setPostIdToComments((prev) => {
         const cur = prev[commentPostId] || [];
+          // Loại bỏ reply nếu có trong top-level comments
+          const filtered = cur.filter(c => c._id !== newComment._id);
+          return { ...prev, [commentPostId]: filtered };
+        });
+      } else {
+        // Nếu là top-level comment, thêm vào danh sách comments
+        setPostIdToComments((prev) => {
+          const cur = prev[commentPostId] || [];
+          // Kiểm tra duplicate trước khi thêm
+          const exists = cur.some(c => c._id === newComment._id);
+          if (exists) return prev;
         return { ...prev, [commentPostId]: sortCommentsDesc([newComment, ...cur]) };
       });
+      }
+      
       setPostIdToStats((prev) => {
         const cur = prev[commentPostId] || { likesCount: 0, commentsCount: 0 };
         return { ...prev, [commentPostId]: { ...cur, commentsCount: (cur.commentsCount || 0) + 1 } };
@@ -2481,7 +2605,11 @@ const NewsFeed = () => {
                     const canDelete = canDeleteComment(c, post);
                     return (
                       <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                        <Avatar size={28} style={{ background: '#555' }}>
+                        <Avatar 
+                          size={28} 
+                          src={c?.userId?.avatarUrl && typeof c?.userId?.avatarUrl === 'string' && c?.userId?.avatarUrl.trim() !== '' ? c.userId.avatarUrl : undefined}
+                          style={{ background: '#555' }}
+                        >
                           {c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}
                         </Avatar>
                         <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb', flex: 1 }}>
@@ -2645,7 +2773,11 @@ const NewsFeed = () => {
         {modalPost && (
           <div>
             <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-              <Avatar size={40} style={{ background: '#2db7f5' }}>
+              <Avatar 
+                size={40} 
+                src={modalPost?.userId?.avatarUrl && typeof modalPost?.userId?.avatarUrl === 'string' && modalPost?.userId?.avatarUrl.trim() !== '' ? modalPost.userId.avatarUrl : undefined}
+                style={{ background: '#2db7f5' }}
+              >
                 {modalPost?.userId?.displayName?.[0] || modalPost?.userId?.username?.[0] || 'U'}
               </Avatar>
               <div>
@@ -2731,11 +2863,19 @@ const NewsFeed = () => {
 
             {/* comments list */}
             <div style={{ marginTop: 12, maxHeight: 360, overflowY: 'auto' }}>
-              {(postIdToComments[commentPostId] || []).map((c) => {
+              {(postIdToComments[commentPostId] || []).filter(c => !c.parentCommentId).map((c) => {
                 const canDelete = canDeleteComment(c, modalPost);
+                const replies = commentReplies[c._id] || [];
+                const isReplying = replyingToCommentId === c._id;
+                const replyText = replyTexts[c._id] || '';
                 return (
-                  <div key={c._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                    <Avatar size={28} style={{ background: '#555' }}>
+                  <div key={c._id} style={{ marginBottom: 12 }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Avatar 
+                        size={28} 
+                        src={c?.userId?.avatarUrl && typeof c?.userId?.avatarUrl === 'string' && c?.userId?.avatarUrl.trim() !== '' ? c.userId.avatarUrl : undefined}
+                        style={{ background: '#555' }}
+                      >
                       {c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}
                     </Avatar>
                     <div style={{ background: '#151515', border: '1px solid #232323', borderRadius: 10, padding: '6px 10px', color: '#e5e7eb', flex: 1 }}>
@@ -2757,8 +2897,89 @@ const NewsFeed = () => {
                           </Dropdown>
                         )}
                       </div>
-                      <div>{c.comment}</div>
+                        <div style={{ marginTop: 4, marginBottom: 6 }}>{c.comment}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+                          <Button
+                            type="text"
+                            size="small"
+                            onClick={() => isReplying ? cancelReply(c._id) : startReply(c._id)}
+                            style={{ color: '#9ca3af', padding: 0, height: 'auto', fontSize: 12 }}
+                          >
+                            {isReplying ? 'Hủy' : 'Phản hồi'}
+                          </Button>
+                          {replies.length > 0 && (
+                            <span style={{ color: '#9ca3af', fontSize: 12 }}>
+                              {replies.length} phản hồi
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
+                    
+                    {/* Reply input */}
+                    {isReplying && (
+                      <div style={{ marginLeft: 36, marginTop: 8, marginBottom: 8 }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <Input
+                            placeholder="Nhập phản hồi..."
+                            value={replyText}
+                            onChange={(e) => setReplyTexts((prev) => ({ ...prev, [c._id]: e.target.value }))}
+                            style={{ background: '#0f0f10', color: '#e5e7eb', borderColor: '#303030', borderRadius: 8, flex: 1 }}
+                            onPressEnter={() => submitReply(c._id)}
+                          />
+                          <Button
+                            type="primary"
+                            size="small"
+                            loading={commentSubmitting}
+                            onClick={() => submitReply(c._id)}
+                            style={{ background: '#7c3aed', borderColor: '#7c3aed', borderRadius: 8 }}
+                          >
+                            Gửi
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Replies list */}
+                    {replies.length > 0 && (
+                      <div style={{ marginLeft: 36, marginTop: 8 }}>
+                        {replies.map((reply) => {
+                          const canDeleteReply = canDeleteComment(reply, modalPost);
+                          return (
+                            <div key={reply._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                              <Avatar 
+                                size={24} 
+                                src={reply?.userId?.avatarUrl && typeof reply?.userId?.avatarUrl === 'string' && reply?.userId?.avatarUrl.trim() !== '' ? reply.userId.avatarUrl : undefined}
+                                style={{ background: '#555' }}
+                              >
+                                {reply?.userId?.displayName?.[0] || reply?.userId?.username?.[0] || 'U'}
+                              </Avatar>
+                              <div style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '6px 10px', color: '#e5e7eb', flex: 1 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                  <div style={{ fontWeight: 600, fontSize: 13 }}>
+                                    {reply?.userId?.displayName || reply?.userId?.username || 'Người dùng'}
+                                  </div>
+                                  {canDeleteReply && (
+                                    <Dropdown
+                                      trigger={['click']}
+                                      menu={buildCommentMenuProps(commentPostId, reply._id)}
+                                    >
+                                      <Button
+                                        type="text"
+                                        icon={<MoreOutlined />}
+                                        loading={deletingCommentId === reply._id}
+                                        style={{ color: '#9ca3af', padding: 0, fontSize: 12 }}
+                                      />
+                                    </Dropdown>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: 13, marginTop: 2 }}>{reply.comment}</div>
+                    </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2770,6 +2991,7 @@ const NewsFeed = () => {
                 placeholder="Nhập bình luận của bạn..."
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
+                onPressEnter={submitComment}
                 style={{ background: '#0f0f10', color: '#e5e7eb', borderColor: '#303030', height: 44, borderRadius: 22, flex: 1 }}
               />
               <Button type="primary" loading={commentSubmitting} onClick={submitComment} style={{ background: '#7c3aed', borderColor: '#7c3aed', borderRadius: 22, padding: '0 20px', height: 44 }}>Gửi</Button>
