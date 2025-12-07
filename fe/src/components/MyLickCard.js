@@ -22,6 +22,7 @@ import { getProfileById } from "../services/user/profile";
 
 const MyLickCard = ({
   lick,
+
   onEdit,
   onDelete,
   onClick,
@@ -83,7 +84,6 @@ const MyLickCard = ({
   const initialWaveform = waveformData || lick.waveformData || [];
   const [waveform, setWaveform] = useState(initialWaveform);
 
-
   // Lazy hydrate waveform from details if missing in list payload (same as LickCard)
   useEffect(() => {
     let aborted = false;
@@ -129,7 +129,7 @@ const MyLickCard = ({
       if (waveform && waveform.length > 0) return;
       try {
         if (!effectiveId) return;
-        
+
         // Try to get lick details
         const res = await getLickById(effectiveId);
         const wf = res?.data?.waveformData || [];
@@ -137,17 +137,17 @@ const MyLickCard = ({
           setWaveform(wf);
           return;
         }
-        
+
         // Fallback: derive from audio URL
         const playRes = await playLickAudio(effectiveId);
         const url = playRes?.data?.audio_url;
         if (url) await computeWaveFromAudio(url);
       } catch (e) {
         // Handle 404 or other errors gracefully
-        if (e.message?.includes('404')) {
+        if (e.message?.includes("404")) {
           console.warn(`Lick ${effectiveId} not found in database`);
         } else {
-          console.warn('Failed to load lick waveform:', e.message);
+          console.warn("Failed to load lick waveform:", e.message);
         }
         // Keep placeholder UI - don't throw error
       }
@@ -157,7 +157,6 @@ const MyLickCard = ({
       aborted = true;
     };
   }, [effectiveId, waveform]);
-
 
   // Format date
   const formatDate = (dateString) => {

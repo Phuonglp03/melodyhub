@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { Modal, Input, Button, Tag } from "antd";
 import {
   FaSearch,
   FaPlus,
@@ -68,6 +69,10 @@ const MyLicksPage = () => {
   const [tagLookup, setTagLookup] = useState({});
   const [tagLibraryLoaded, setTagLibraryLoaded] = useState(false);
   const [sharingLickId, setSharingLickId] = useState(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareLick, setShareLick] = useState(null);
+  const [shareText, setShareText] = useState("");
+  const [sharing, setSharing] = useState(false);
 
   // Delete confirmation modal
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -353,35 +358,80 @@ const MyLicksPage = () => {
     setConfirmOpen(true);
   };
 
-  const handleShare = async (lickId) => {
+  const handleShare = (lickId) => {
     const lick = licks.find((l) => l.lick_id === lickId);
-    if (!lick || sharingLickId) return;
+    if (!lick || sharing) return;
     if (!lick.is_public) {
       alert("Only public licks can be shared to your feed.");
       return;
     }
+
+    const title = lick.title || "My new lick";
+    const defaultText = `🎸 ${title}`;
+
+    setShareLick(lick);
+    setShareText(defaultText);
+    setShareModalOpen(true);
+  };
+
+  const handleCloseShareModal = () => {
+    if (!sharing) {
+      setShareModalOpen(false);
+      setShareLick(null);
+      setShareText("");
+    }
+  };
+
+  const handleConfirmShare = async () => {
+    if (!shareLick?.lick_id) return;
+
     try {
-      setSharingLickId(lickId);
+      setSharing(true);
+      setSharingLickId(shareLick.lick_id);
+
+      // Generate lick preview URL
       const origin =
         typeof window !== "undefined" ? window.location.origin : "";
-      const shareUrl = origin
-        ? `${origin}/licks/${lickId}`
-        : `/licks/${lickId}`;
-      const title = lick.title || "My new lick";
-      const textContent = `🎸 ${title}\n${shareUrl}`;
-      const MAX_POST_TEXT_LENGTH = 300;
-      if (textContent.length > MAX_POST_TEXT_LENGTH) {
-        alert(
-          `Nội dung không được vượt quá ${MAX_POST_TEXT_LENGTH} ký tự (hiện tại: ${textContent.length})`
-        );
-        return;
-      }
-      await createPostApi({ postType: "status_update", textContent });
-      alert("Shared to your feed!"); // replace with toast if available
+      const previewUrl = origin
+        ? `${origin}/licks/${shareLick.lick_id}`
+        : `/licks/${shareLick.lick_id}`;
+
+      console.log('(NO $) [DEBUG][shareLick] Sharing with linkPreview:', {
+        lickId: shareLick.lick_id,
+        previewUrl,
+        title: shareLick.title,
+        linkPreview: {
+          url: previewUrl,
+          title: shareLick.title || "Lick Preview",
+          description: shareLick.description || "",
+        }
+      });
+
+      const response = await createPostApi({
+        postType: "status_update",
+        textContent: shareText,
+        linkPreview: {
+          url: previewUrl,
+          title: shareLick.title || "Lick Preview",
+          description: shareLick.description || "",
+        },
+      });
+
+      console.log('(NO $) [DEBUG][shareLick] Post created response:', {
+        response,
+        hasLinkPreview: !!response?.data?.linkPreview,
+        linkPreviewUrl: response?.data?.linkPreview?.url
+      });
+
+      alert("Shared to your feed!");
+      setShareModalOpen(false);
+      setShareLick(null);
+      setShareText("");
     } catch (err) {
       console.error("Error sharing lick:", err);
       alert(err?.message || "Failed to share lick");
     } finally {
+      setSharing(false);
       setSharingLickId(null);
     }
   };
@@ -875,7 +925,7 @@ const MyLicksPage = () => {
               onEdit={handleEdit}
               onDelete={handleDelete}
               onShare={handleShare}
-              shareLoading={sharingLickId === lick.lick_id}
+              shareLoading={sharing && shareLick?.lick_id === lick.lick_id}
             />
           ))}
         </div>
@@ -1273,6 +1323,156 @@ const MyLicksPage = () => {
           </div>
         </div>
       )}
+
+      {/* Share Lick Modal */}
+      <Modal
+        open={shareModalOpen}
+        title={
+          <span style={{ color: "#fff", fontWeight: 600 }}>Chia sẻ lick</span>
+        }
+        onCancel={handleCloseShareModal}
+        footer={
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <Button
+              shape="round"
+              onClick={handleCloseShareModal}
+              disabled={sharing}
+              style={{
+                height: 44,
+                borderRadius: 22,
+                padding: 0,
+                width: 108,
+                background: "#1f1f1f",
+                color: "#e5e7eb",
+                borderColor: "#303030",
+              }}
+            >
+              Hủy
+            </Button>
+            <Button
+              shape="round"
+              type="primary"
+              loading={sharing}
+              onClick={handleConfirmShare}
+              disabled={sharing || !shareText.trim()}
+              style={{
+                height: 44,
+                borderRadius: 22,
+                padding: 0,
+                width: 108,
+                background: "#7c3aed",
+                borderColor: "#7c3aed",
+              }}
+            >
+              Chia sẻ
+            </Button>
+          </div>
+        }
+        styles={{
+          content: { background: "#0f0f10" },
+          header: {
+            background: "#0f0f10",
+            borderBottom: "1px solid #1f1f1f",
+          },
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <Input.TextArea
+            placeholder="Chia sẻ điều gì đó..."
+            autoSize={{ minRows: 6, maxRows: 16 }}
+            value={shareText}
+            onChange={(e) => setShareText(e.target.value)}
+            maxLength={300}
+            showCount
+            style={{
+              background: "#1a1a1a",
+              color: "#e5e7eb",
+              borderColor: "#3a3a3a",
+            }}
+          />
+
+          {/* Lick Preview Link Section */}
+          {shareLick && (
+            <div
+              style={{
+                background: "#141414",
+                border: "1px solid #262626",
+                borderRadius: 16,
+                padding: "18px 20px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 16,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  marginBottom: 4,
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      color: "#f8fafc",
+                      fontWeight: 600,
+                      fontSize: 16,
+                      marginBottom: 6,
+                    }}
+                  >
+                    Link preview lick
+                  </div>
+                  <div
+                    style={{
+                      color: "#9ca3af",
+                      fontSize: 13,
+                      lineHeight: "1.5",
+                    }}
+                  >
+                    Link này sẽ hiển thị preview của lick trong bài đăng.
+                  </div>
+                </div>
+                <Tag
+                  color="#1f1f1f"
+                  style={{
+                    borderRadius: 999,
+                    color: "#9ca3af",
+                    border: "none",
+                    marginLeft: 12,
+                  }}
+                >
+                  Tự động
+                </Tag>
+              </div>
+              <Input
+                value={
+                  typeof window !== "undefined"
+                    ? `${window.location.origin}/licks/${shareLick.lick_id}`
+                    : `/licks/${shareLick.lick_id}`
+                }
+                readOnly
+                style={{
+                  width: "100%",
+                  backgroundColor: "#1a1a1a",
+                  border: "1px solid #3a3a3a",
+                  borderRadius: 8,
+                  color: "#9ca3af",
+                  cursor: "text",
+                }}
+                onFocus={(e) => e.target.select()}
+              />
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 };

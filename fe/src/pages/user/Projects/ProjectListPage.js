@@ -174,7 +174,18 @@ const ProjectListPage = () => {
       // Generate project preview URL
       const previewUrl = `${window.location.origin}/projects/${shareProject._id}`;
 
-      await createPostApi({
+      console.log('(NO $) [DEBUG][shareProject] Sharing with linkPreview:', {
+        projectId: shareProject._id,
+        previewUrl,
+        title: shareProject.title,
+        linkPreview: {
+          url: previewUrl,
+          title: shareProject.title || "Project Preview",
+          description: shareProject.description || "",
+        }
+      });
+
+      const response = await createPostApi({
         postType: "status_update",
         textContent: shareText,
         linkPreview: {
@@ -182,6 +193,12 @@ const ProjectListPage = () => {
           title: shareProject.title || "Project Preview",
           description: shareProject.description || "",
         },
+      });
+
+      console.log('(NO $) [DEBUG][shareProject] Post created response:', {
+        response,
+        hasLinkPreview: !!response?.data?.linkPreview,
+        linkPreviewUrl: response?.data?.linkPreview?.url
       });
 
       alert("Shared project to your feed.");
