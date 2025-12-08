@@ -1,0 +1,9 @@
+# Ignore Vitest test files
+**/*.vitest.test.js
+**/*.vitest.test.jsx
+**/LickCommunityPage.test.js
+**/ProjectListPage.test.js
+**/UserFeed.test.js
+**/projectHelpers.test.js
+**/timelineHelpers.test.js
+
