@@ -306,19 +306,19 @@ const ProfilePage = () => {
         <div className="profile-settings-sider">
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Button icon={<ArrowLeftOutlined />} style={{ height: 44 }} block onClick={handleBackToProfile}>
-              Back to Profile
+              Trở lại trang cá nhân 
             </Button>
             <Card style={{ background: '#0f0f10', borderColor: '#1f1f1f', padding: 0 }} bodyStyle={{ padding: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16, background: '#151515', borderRadius: 8 }}>
                 <UserOutlined style={{ fontSize: 20 }} />
-                <div style={{ fontWeight: 600, color: '#e5e7eb' }}>Profile</div>
+                <div style={{ fontWeight: 600, color: '#e5e7eb' }}>Hồ sơ</div>
               </div>
               <div
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16, cursor: 'pointer' }}
                 onClick={() => navigate('/change-password')}
               >
                 <KeyOutlined style={{ fontSize: 20, color: '#fbbf24' }} />
-                <div style={{ color: '#fbbf24', fontWeight: 600 }}>Change Password</div>
+                <div style={{ color: '#fbbf24', fontWeight: 600 }}>Thay đổi mật khẩu</div>
               </div>
               <div 
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 16, cursor: 'pointer' }}
@@ -331,7 +331,7 @@ const ProfilePage = () => {
           </Space>
         </div>
         <div className="profile-settings-content">
-          <Title level={2} style={{ color: '#fff', marginBottom: 16 }}>Profile Settings</Title>
+          <Title level={2} style={{ color: '#fff', marginBottom: 16 }}>Hồ sơ</Title>
           <Card loading={loading} style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>
             {/* Cover Photo Section */}
             <div style={{ marginBottom: 24 }}>
@@ -404,20 +404,20 @@ const ProfilePage = () => {
         <Form form={form} layout="vertical" onFinish={onFinish} className="profile-settings-form">
           {/** common input style for consistency */}
           {(() => {})()}
-          <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Name</Text>} name="displayName" rules={[{ required: true, message: 'Vui lòng nhập tên' }]}> 
+          <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Tên hiển thị</Text>} name="displayName" rules={[{ required: true, message: 'Vui lòng nhập tên' }]}> 
             <Input placeholder="Tran Trong Quy( K17 HL )" style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
           </Form.Item>
 
-          <Form.Item label={<span style={{ color: '#e5e7eb', fontWeight: 700 }}>Username <InfoCircleOutlined style={{ color: '#9ca3af' }} /></span>} name="username">
+          {/* <Form.Item label={<span style={{ color: '#e5e7eb', fontWeight: 700 }}>Username <InfoCircleOutlined style={{ color: '#9ca3af' }} /></span>} name="username">
             <Input disabled style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
-          </Form.Item>
+          </Form.Item> */}
 
-          <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Location</Text>} name="location">
+          <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Địa chỉ </Text>} name="location">
             <Input placeholder="Search City" style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
           </Form.Item>
 
           <Form.Item
-            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Address Line</Text>}
+            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Địa chỉ cụ thể</Text>}
             name="addressLine"
           >
             <Input
@@ -427,7 +427,7 @@ const ProfilePage = () => {
           </Form.Item>
 
           <Form.Item
-            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Province / City</Text>}
+            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Thành phố</Text>}
             name="province"
           >
             <Select
@@ -445,7 +445,7 @@ const ProfilePage = () => {
           </Form.Item>
 
           <Form.Item
-            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>District</Text>}
+            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Quận huyện</Text>}
             name="district"
           >
             <Select
@@ -464,7 +464,7 @@ const ProfilePage = () => {
           </Form.Item>
 
           <Form.Item
-            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Ward</Text>}
+            label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Xã/ phường</Text>}
             name="ward"
           >
             <Select
@@ -482,7 +482,7 @@ const ProfilePage = () => {
             />
           </Form.Item>
 
-          <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Gender</Text>} name="gender">
+          <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Giới tính</Text>} name="gender">
             <Select
               options={[
                 { value: 'male', label: 'Male' },
@@ -497,7 +497,7 @@ const ProfilePage = () => {
           <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Email</Text>} name="email">
             <Input disabled placeholder="Search City" style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
           </Form.Item>
-
+{/* 
           <div style={{ color: '#e5e7eb', fontWeight: 700, marginBottom: 8 }}>About</div>
           <div style={{ position: 'relative' }}>
             <Form.Item name="bio" style={{ marginBottom: 0 }}>
@@ -505,9 +505,9 @@ const ProfilePage = () => {
             </Form.Item>
             <div style={{ position: 'absolute', right: 8, top: -24, color: '#9ca3af' }}>{aboutCount}/250</div>
             <SmileOutlined style={{ position: 'absolute', right: 12, bottom: 10, color: '#9ca3af' }} />
-          </div>
+          </div> */}
 
-          <Title level={4} style={{ color: '#fff', marginTop: 16 }}>Links</Title>
+          <Title level={4} style={{ color: '#fff', marginTop: 16 }}>Liên hệ</Title>
           <Form.List name="links">
             {(fields, { add, remove }) => (
               <>
@@ -532,7 +532,7 @@ const ProfilePage = () => {
             )}
           </Form.List>
 
-          <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Avatar</Text>}> 
+          <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Ảnh đại diện</Text>}> 
             <Upload
               showUploadList={false}
               accept="image/*"
@@ -562,7 +562,7 @@ const ProfilePage = () => {
                 loading={uploadingAvatar && saving} 
                 style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }}
               >
-                Upload avatar
+                Tải lên ảnh đại diện mới
               </Button>
             </Upload>
             {pendingAvatarFile && (
@@ -579,8 +579,8 @@ const ProfilePage = () => {
           </Form.Item>
 
           <div style={{ display: 'flex', gap: 8 }}>
-            <Button type="primary" htmlType="submit" loading={saving}>Save changes</Button>
-            <Button onClick={load}>Reset</Button>
+            <Button type="primary" htmlType="submit" loading={saving}>Thay đổi</Button>
+            {/* <Button onClick={load}>Reset</Button> */}
           </div>
         </Form>
         </div>

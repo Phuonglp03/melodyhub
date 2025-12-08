@@ -225,7 +225,18 @@ export const resetPassword = async (token, email, newPassword) => {
     const response = await api.post('/auth/reset-password', { token, email, newPassword });
     return response.data;
   } catch (error) {
-    throw error.response?.data || { message: 'Đặt lại mật khẩu thất bại' };
+    // Extract error message from response
+    const errorData = error.response?.data;
+    if (errorData) {
+      // If there are validation errors, show them
+      if (errorData.errors && Array.isArray(errorData.errors) && errorData.errors.length > 0) {
+        const firstError = errorData.errors[0];
+        throw new Error(firstError.msg || firstError.message || errorData.message || 'Đặt lại mật khẩu thất bại');
+      }
+      // Otherwise use the main message
+      throw new Error(errorData.message || 'Đặt lại mật khẩu thất bại');
+    }
+    throw new Error(error.message || 'Đặt lại mật khẩu thất bại');
   }
 };
 

@@ -371,6 +371,10 @@ const NewsFeed = () => {
   const [postIdToLiked, setPostIdToLiked] = useState({}); // postId -> boolean
   const [postIdToCommentInput, setPostIdToCommentInput] = useState({}); // postId -> string
   const [modalPost, setModalPost] = useState(null);
+  const [replyingToCommentId, setReplyingToCommentId] = useState(null); // commentId being replied to
+  const [replyTexts, setReplyTexts] = useState({}); // commentId -> reply text
+  const [commentReplies, setCommentReplies] = useState({}); // commentId -> replies[]
+  const [loadingReplies, setLoadingReplies] = useState({}); // commentId -> boolean
   const [userIdToFollowing, setUserIdToFollowing] = useState({}); // userId -> boolean
   const [userIdToFollowLoading, setUserIdToFollowLoading] = useState({}); // userId -> boolean
   const [suggestions, setSuggestions] = useState([]);
@@ -883,17 +887,36 @@ const NewsFeed = () => {
 
   const openComment = async (postId, postOverride = null) => {
     setCommentPostId(postId);
-    setCommentText("");
+    setCommentText('');
+    setReplyingToCommentId(null);
+    setReplyTexts({});
     const p = postOverride || items.find((it) => it._id === postId) || null;
     setModalPost(p);
     setCommentOpen(true);
-    // Fetch tất cả comments để hiển thị trong modal (không giới hạn 3)
+    // Fetch tất cả top-level comments để hiển thị trong modal (không giới hạn 3)
     try {
-      const all = await getAllPostComments(postId);
-      setPostIdToComments((prev) => ({
-        ...prev,
-        [postId]: Array.isArray(all) ? sortCommentsDesc(all) : [],
-      }));
+      const all = await getAllPostComments(postId); // Get top-level comments (no parentCommentId)
+      const topLevelComments = Array.isArray(all) ? all.filter(c => !c.parentCommentId) : [];
+      setPostIdToComments((prev) => ({ ...prev, [postId]: sortCommentsDesc(topLevelComments) }));
+      
+      // Fetch replies for each comment
+      if (topLevelComments.length > 0) {
+        const repliesPromises = topLevelComments.map(async (comment) => {
+          try {
+            const replies = await getAllPostComments(postId, { parentCommentId: comment._id });
+            return { commentId: comment._id, replies: Array.isArray(replies) ? replies : [] };
+          } catch (e) {
+            console.warn(`Failed to fetch replies for comment ${comment._id}:`, e);
+            return { commentId: comment._id, replies: [] };
+          }
+        });
+        const repliesResults = await Promise.all(repliesPromises);
+        const repliesMap = {};
+        repliesResults.forEach(({ commentId, replies }) => {
+          repliesMap[commentId] = sortCommentsDesc(replies);
+        });
+        setCommentReplies(repliesMap);
+      }
     } catch (e) {
       // Nếu fetch thất bại, vẫn giữ comments hiện có
       console.warn("Failed to fetch all comments for modal:", e);
@@ -925,12 +948,10 @@ const NewsFeed = () => {
     try {
       setCommentSubmitting(true);
       await createPostComment(commentPostId, { comment: commentText.trim() });
-      message.success("Đã gửi bình luận");
-      setCommentOpen(false);
-      setCommentText("");
-      // refresh comments and counts
-      const all = await getAllPostComments(commentPostId);
-      setPostIdToComments((prev) => ({ ...prev, [commentPostId]: all }));
+      message.success('Đã gửi bình luận');
+      setCommentText('');
+      // Không cần refresh manual vì realtime event sẽ tự động cập nhật
+      // Chỉ refresh stats để đảm bảo số lượng chính xác
       const statsRes = await getPostStats(commentPostId);
       setPostIdToStats((prev) => ({
         ...prev,
@@ -938,6 +959,48 @@ const NewsFeed = () => {
       }));
     } catch (e) {
       message.error(e.message || "Không thể gửi bình luận");
+    } finally {
+      setCommentSubmitting(false);
+    }
+  };
+
+  const startReply = (commentId) => {
+    setReplyingToCommentId(commentId);
+    setReplyTexts((prev) => ({ ...prev, [commentId]: '' }));
+  };
+
+  const cancelReply = (commentId) => {
+    if (replyingToCommentId === commentId) {
+      setReplyingToCommentId(null);
+    }
+    setReplyTexts((prev) => {
+      const next = { ...prev };
+      delete next[commentId];
+      return next;
+    });
+  };
+
+  const submitReply = async (commentId) => {
+    const replyText = (replyTexts[commentId] || '').trim();
+    if (!replyText) {
+      message.warning('Vui lòng nhập phản hồi');
+      return;
+    }
+    try {
+      setCommentSubmitting(true);
+      await createPostComment(commentPostId, { 
+        comment: replyText,
+        parentCommentId: commentId 
+      });
+      message.success('Đã gửi phản hồi');
+      cancelReply(commentId);
+      
+      // Không cần refresh manual vì realtime event sẽ tự động cập nhật
+      // Chỉ refresh stats để đảm bảo số lượng chính xác
+      const statsRes = await getPostStats(commentPostId);
+      setPostIdToStats((prev) => ({ ...prev, [commentPostId]: statsRes?.data || prev[commentPostId] }));
+    } catch (e) {
+      message.error(e.message || 'Không thể gửi phản hồi');
     } finally {
       setCommentSubmitting(false);
     }
@@ -973,10 +1036,22 @@ const NewsFeed = () => {
     try {
       setDeletingCommentId(commentId);
       await deletePostComment(postId, commentId);
+      
+      // Xóa khỏi top-level comments
       setPostIdToComments((prev) => {
         const list = Array.isArray(prev[postId]) ? prev[postId] : [];
         return { ...prev, [postId]: list.filter((c) => c._id !== commentId) };
       });
+      
+      // Xóa khỏi replies nếu là reply
+      setCommentReplies((prev) => {
+        const newReplies = { ...prev };
+        Object.keys(newReplies).forEach((parentId) => {
+          newReplies[parentId] = (newReplies[parentId] || []).filter((r) => r._id !== commentId);
+        });
+        return newReplies;
+      });
+      
       setPostIdToStats((prev) => {
         const current = prev[postId] || { likesCount: 0, commentsCount: 0 };
         const nextComments = Math.max((current.commentsCount || 1) - 1, 0);
@@ -1307,21 +1382,9 @@ const NewsFeed = () => {
           borderColor: "#1f1f1f",
         }}
         title={
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: 700 }}>
-              Người liên hệ
-            </Text>
-            <Button
-              type="text"
-              icon={<MoreOutlined />}
-              style={{ color: "#9ca3af", padding: 0 }}
-            />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ color: '#fff', fontWeight: 700 }}>Người đang theo dõi</Text>
+            <Button type="text" icon={<MoreOutlined />} style={{ color: '#9ca3af', padding: 0 }} />
           </div>
         }
       >
@@ -1332,45 +1395,57 @@ const NewsFeed = () => {
             <Spin />
           </div>
         ) : followingUsers.length === 0 ? (
-          <div
-            style={{
-              padding: 16,
-              textAlign: "center",
-              color: "#9ca3af",
-              fontSize: 13,
-            }}
-          >
-            Chưa có người liên hệ
+          <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+            Chưa có người theo dõi
           </div>
         ) : (
           <List
             dataSource={followingUsers}
             renderItem={(user) => {
               const userId = user.id || user._id || user.userId;
+              
+              const handleChatClick = async (e) => {
+                e.stopPropagation();
+                try {
+                  const conversation = await ensureConversationWith(userId);
+                  if (conversation && conversation._id) {
+                    window.dispatchEvent(new CustomEvent('openChatWindow', { 
+                      detail: { conversation } 
+                    }));
+                  } else {
+                    message.error('Không thể tạo cuộc trò chuyện');
+                  }
+                } catch (error) {
+                  console.error('Error opening chat:', error);
+                  message.error(error.message || 'Không thể mở chat');
+                }
+              };
+
+              const handleNameClick = (e) => {
+                e.stopPropagation();
+                if (userId) {
+                  navigate(`/users/${userId}/newfeeds`);
+                }
+              };
+
               return (
                 <List.Item
-                  style={{
-                    padding: "8px 0",
-                    cursor: "pointer",
-                    borderBottom: "1px solid #1f1f1f",
+                  style={{ 
+                    padding: '8px 0', 
+                    borderBottom: '1px solid #1f1f1f'
                   }}
-                  onClick={async () => {
-                    try {
-                      const conversation = await ensureConversationWith(userId);
-                      if (conversation && conversation._id) {
-                        window.dispatchEvent(
-                          new CustomEvent("openChatWindow", {
-                            detail: { conversation },
-                          })
-                        );
-                      } else {
-                        message.error("Không thể tạo cuộc trò chuyện");
-                      }
-                    } catch (error) {
-                      console.error("Error opening chat:", error);
-                      message.error(error.message || "Không thể mở chat");
-                    }
-                  }}
+                  actions={[
+                    <Button
+                      key="chat"
+                      type="text"
+                      icon={<MessageOutlined />}
+                      onClick={handleChatClick}
+                      style={{ 
+                        color: '#9ca3af',
+                        padding: '4px 8px'
+                      }}
+                    />
+                  ]}
                 >
                   <List.Item.Meta
                     avatar={
@@ -1388,8 +1463,11 @@ const NewsFeed = () => {
                       />
                     }
                     title={
-                      <Text style={{ color: "#fff", fontWeight: 500 }}>
-                        {user.displayName || user.username || "Người dùng"}
+                      <Text 
+                        style={{ color: '#fff', fontWeight: 500, cursor: 'pointer' }}
+                        onClick={handleNameClick}
+                      >
+                        {user.displayName || user.username || 'Người dùng'}
                       </Text>
                     }
                     description={
@@ -1535,12 +1613,31 @@ const NewsFeed = () => {
           [postId]: { ...cur, commentsCount: (cur.commentsCount || 0) + 1 },
         };
       });
-      // Cập nhật danh sách comment và chỉ giữ lại 3 comment gần nhất
+      
+      // Nếu là reply (có parentCommentId), thêm vào danh sách replies
+      if (comment.parentCommentId) {
+        setCommentReplies((prev) => {
+          const parentId = comment.parentCommentId;
+          const existingReplies = prev[parentId] || [];
+          // Kiểm tra duplicate trước khi thêm
+          const exists = existingReplies.some(r => r._id === comment._id);
+          if (exists) return prev;
+          return {
+            ...prev,
+            [parentId]: sortCommentsDesc([comment, ...existingReplies])
+          };
+        });
+      } else {
+        // Nếu là top-level comment, cập nhật danh sách comment và chỉ giữ lại 3 comment gần nhất
       setPostIdToComments((prev) => {
         const cur = Array.isArray(prev[postId]) ? prev[postId] : [];
+          // Kiểm tra duplicate trước khi thêm
+          const exists = cur.some(c => c._id === comment._id);
+          if (exists) return prev;
         // Thêm comment mới vào đầu danh sách và giới hạn 3 comment gần nhất
         return { ...prev, [postId]: limitToNewest3([comment, ...cur]) };
       });
+      }
     };
     onPostCommentNew(handler);
     return () => {
@@ -1621,14 +1718,38 @@ const NewsFeed = () => {
       if (!newComment.createdAt) {
         newComment.createdAt = new Date().toISOString();
       }
-      // Trong modal, hiển thị tất cả comments (không giới hạn 3)
-      setPostIdToComments((prev) => {
-        const cur = prev[commentPostId] || [];
-        return {
-          ...prev,
-          [commentPostId]: sortCommentsDesc([newComment, ...cur]),
-        };
-      });
+      
+      // Nếu là reply (có parentCommentId), chỉ thêm vào danh sách replies, KHÔNG thêm vào top-level comments
+      if (newComment.parentCommentId) {
+        setCommentReplies((prev) => {
+          const parentId = newComment.parentCommentId;
+          const existingReplies = prev[parentId] || [];
+          // Kiểm tra duplicate trước khi thêm
+          const exists = existingReplies.some(r => r._id === newComment._id);
+          if (exists) return prev;
+          return {
+            ...prev,
+            [parentId]: sortCommentsDesc([newComment, ...existingReplies])
+          };
+        });
+        // Đảm bảo reply không có trong top-level comments (phòng trường hợp lỗi)
+        setPostIdToComments((prev) => {
+          const cur = prev[commentPostId] || [];
+          // Loại bỏ reply nếu có trong top-level comments
+          const filtered = cur.filter(c => c._id !== newComment._id);
+          return { ...prev, [commentPostId]: filtered };
+        });
+      } else {
+        // Nếu là top-level comment, thêm vào danh sách comments
+        setPostIdToComments((prev) => {
+          const cur = prev[commentPostId] || [];
+          // Kiểm tra duplicate trước khi thêm
+          const exists = cur.some(c => c._id === newComment._id);
+          if (exists) return prev;
+          return { ...prev, [commentPostId]: sortCommentsDesc([newComment, ...cur]) };
+        });
+      }
+      
       setPostIdToStats((prev) => {
         const cur = prev[commentPostId] || { likesCount: 0, commentsCount: 0 };
         return {
@@ -2388,20 +2509,217 @@ const NewsFeed = () => {
               msOverflowStyle: "none", // IE and Edge
             }}
           >
-            <div
-              className="composer-card"
-              style={{
-                marginBottom: 20,
-                background: "#0f0f10",
-                border: "1px solid #1f1f1f",
-                borderRadius: 8,
-                padding: "20px 24px",
-                display: "flex",
-                alignItems: "center",
-                gap: 16,
-              }}
-              onClick={handleModalOpen}
-            >
+            <div className="composer-card" style={{ 
+              marginBottom: 20, 
+              background: '#0f0f10', 
+              border: '1px solid #1f1f1f',
+              borderRadius: 8,
+              padding: '20px 24px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 16
+            }}             onClick={handleModalOpen}>
+              {(() => {
+                // Get user data with fallback to localStorage
+                const user = currentUser || (() => {
+                  try {
+                    const raw = localStorage.getItem('user');
+                    if (raw) {
+                      const obj = JSON.parse(raw);
+                      return obj?.user || obj;
+                    }
+                  } catch {}
+                  return null;
+                })();
+                
+                const avatarUrl = user?.avatarUrl || user?.avatar_url;
+                const displayName = user?.displayName || user?.username || '';
+                const initial = displayName ? displayName[0].toUpperCase() : 'U';
+                
+                // Only use src if avatarUrl is a valid non-empty string
+                const validAvatarUrl = avatarUrl && typeof avatarUrl === 'string' && avatarUrl.trim() !== '' && avatarUrl !== '' 
+                  ? avatarUrl.trim() 
+                  : null;
+                
+                console.log('[NewsFeed] Avatar render:', { 
+                  hasUser: !!user, 
+                  avatarUrl, 
+                  validAvatarUrl, 
+                  displayName, 
+                  initial 
+                });
+                
+                return (
+                  <Avatar 
+                    size={40} 
+                    src={validAvatarUrl || undefined}
+                    
+                  >
+                    {initial}
+                  </Avatar>
+                );
+              })()}
+              <Input.TextArea 
+                className="composer-input"
+                placeholder="Có gì mới ?" 
+                autoSize={{ minRows: 2, maxRows: 8 }}
+                style={{ 
+                  flex: 1,
+                  background: '#fff',
+                  border: 'none',
+                  borderRadius: 10,
+                  minHeight: 56,
+                  fontSize: 16
+                }}
+                readOnly
+              />
+              <Button
+                className="composer-action-btn"
+                type="primary"
+                size="large"
+                style={{ borderRadius: 999, background: '#1890ff', padding: '0 22px', height: 44 }}
+                onClick={(e) => { e.stopPropagation(); handleModalOpen(); }}
+              >
+                Đăng Bài
+              </Button>
+            </div>
+
+            {isInitialLoading && (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+                <Spin />
+              </div>
+            )}
+            {!loading && error && (
+              <Card style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
+                <Text style={{ color: '#fff' }}>{error}</Text>
+              </Card>
+            )}
+            {!isInitialLoading && !error && items.length === 0 && (
+              <Empty description={<span style={{ color: '#9ca3af' }}>Chưa có bài đăng</span>} />
+            )}
+            {items.map((post) => (
+            <Card key={post._id} style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                <Space align="start" size={14}>
+                    <div
+                    role="button"
+                    onClick={() => {
+                      const uid = getAuthorId(post);
+                      if (uid) navigate(`/users/${uid}/newfeeds`);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <Avatar 
+                      size={40} 
+                      src={post?.userId?.avatarUrl && typeof post?.userId?.avatarUrl === 'string' && post?.userId?.avatarUrl.trim() !== '' ? post.userId.avatarUrl : undefined} 
+                      style={{ background: '#2db7f5' }}
+                    >
+                      {post?.userId?.displayName?.[0] || post?.userId?.username?.[0] || 'U'}
+                    </Avatar>
+                  </div>
+                  <div>
+                    <Space style={{ marginBottom: 4 }}>
+                      <span
+                        onClick={() => {
+                          const uid = getAuthorId(post);
+                          if (uid) navigate(`/users/${uid}/newfeeds`);
+                        }}
+                        style={{ color: '#fff', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}
+                      >
+                        {post?.userId?.displayName || post?.userId?.username || 'Người dùng'}
+                      </span>
+                      <Text type="secondary" style={{ color: '#9ca3af', fontSize: 13 }}>
+                        {formatTime(post?.createdAt)}
+                      </Text>
+                    </Space>
+                  </div>
+                </Space>
+                <Space>
+                  {(() => {
+                    const uid = getAuthorId(post);
+                    const isFollowing = !!userIdToFollowing[uid];
+                    const loading = !!userIdToFollowLoading[uid];
+                    if (uid && currentUserId && uid.toString() === currentUserId.toString()) return null;
+                    return (
+                      <Button
+                        size="middle"
+                        loading={loading}
+                        onClick={() => toggleFollow(uid)}
+                        style={{
+                          background: isFollowing ? '#111' : '#333',
+                          borderColor: isFollowing ? '#444' : '#333',
+                          color: '#fff',
+                        }}
+                      >
+                        {isFollowing ? 'Đang theo dõi' : 'Theo dõi'}
+                      </Button>
+                    );
+                  })()}
+                  {currentUserId && (() => {
+                    const uid = getAuthorId(post);
+                    const isOwnPost = uid && currentUserId && uid.toString() === currentUserId.toString();
+                    
+                    if (isOwnPost) {
+                      // Menu for own posts: Edit and Hide
+                      return (
+                        <Dropdown
+                          menu={{
+                            items: [
+                              {
+                                key: 'edit',
+                                label: 'Chỉnh sửa bài post',
+                                icon: <EditOutlined />,
+                                onClick: () => openEditModal(post),
+                              },
+                              {
+                                key: 'hide',
+                                label: 'Ẩn bài post',
+                                icon: <DeleteOutlined />,
+                                danger: true,
+                                loading: deletingPostId === post._id,
+                                onClick: () => handleHidePost(post._id),
+                              },
+                            ],
+                          }}
+                          trigger={['click']}
+                        >
+                          <Button
+                            type="text"
+                            icon={<MoreOutlined />}
+                            style={{ color: '#9ca3af' }}
+                            loading={deletingPostId === post._id}
+                          />
+                        </Dropdown>
+                      );
+                    }
+                    
+                    // Menu for other users' posts: Report
+                    return (
+                      <Dropdown
+                        menu={{
+                          items: [
+                            {
+                              key: 'report',
+                              label: postIdToReported[post._id] ? 'Đã báo cáo' : 'Báo cáo bài viết',
+                              icon: <FlagOutlined />,
+                              disabled: postIdToReported[post._id],
+                              onClick: () => openReportModal(post._id),
+                            },
+                          ],
+                        }}
+                        trigger={['click']}
+                      >
+                        <Button
+                          type="text"
+                          icon={<MoreOutlined />}
+                          style={{ color: '#9ca3af' }}
+                        />
+                      </Dropdown>
+                    );
+                  })()}
+                </Space>
+              </div>
+              {/* Chỉ hiển thị text, nhưng ẩn các dòng chỉ chứa URL (để không lộ link thô) */}
               {(() => {
                 // Get user data with fallback to localStorage
                 const user =
@@ -3566,54 +3884,35 @@ const NewsFeed = () => {
                 user.id.toString() === currentUserId.toString();
               return (
                 <List.Item
-                  style={{
-                    padding: "12px 0",
-                    borderBottom: "1px solid #1f1f1f",
-                  }}
+                  style={{ padding: '12px 0', borderBottom: '1px solid #1f1f1f' }}
                   actions={
-                    isCurrentUser
-                      ? null
-                      : [
-                          <Button
-                            key="follow"
-                            size="small"
-                            type={
-                              userIdToFollowing[user.id] ? "default" : "primary"
-                            }
-                            loading={!!userIdToFollowLoading[user.id]}
-                            onClick={() => toggleFollow(user.id)}
-                            style={{
-                              background: userIdToFollowing[user.id]
-                                ? "#111"
-                                : "#7c3aed",
-                              borderColor: userIdToFollowing[user.id]
-                                ? "#444"
-                                : "#7c3aed",
-                              color: "#fff",
-                            }}
-                          >
-                            {userIdToFollowing[user.id]
-                              ? "Đang theo dõi"
-                              : "Follow"}
-                          </Button>,
-                        ]
+                    isCurrentUser ? null : [
+                      <Button
+                        key="follow"
+                        size="small"
+                        type={userIdToFollowing[user.id] ? 'default' : 'primary'}
+                        loading={!!userIdToFollowLoading[user.id]}
+                        onClick={() => toggleFollow(user.id)}
+                        style={{
+                          background: userIdToFollowing[user.id] ? '#111' : '#7c3aed',
+                          borderColor: userIdToFollowing[user.id] ? '#444' : '#7c3aed',
+                          color: '#fff',
+                        }}
+                      >
+                        {userIdToFollowing[user.id] ? 'Đang theo dõi' : 'Theo dõi'}
+                      </Button>
+                    ]
                   }
                 >
                   <List.Item.Meta
                     avatar={
                       <Avatar
                         size={40}
-                        src={
-                          user.avatarUrl &&
-                          typeof user.avatarUrl === "string" &&
-                          user.avatarUrl.trim() !== ""
-                            ? user.avatarUrl
-                            : undefined
-                        }
-                        style={{ background: "#2db7f5", cursor: "pointer" }}
+                        src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined}
+                        style={{ background: '#2db7f5', cursor: 'pointer' }}
                         onClick={() => navigate(`/users/${user.id}/newfeeds`)}
                       >
-                        {user.displayName?.[0] || user.username?.[0] || "U"}
+                        {user.displayName?.[0] || user.username?.[0] || 'U'}
                       </Avatar>
                     }
                     title={
@@ -3650,11 +3949,13 @@ const NewsFeed = () => {
       >
         {modalPost && (
           <div>
-            <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-              <Avatar size={40} style={{ background: "#2db7f5" }}>
-                {modalPost?.userId?.displayName?.[0] ||
-                  modalPost?.userId?.username?.[0] ||
-                  "U"}
+            <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+              <Avatar 
+                size={40} 
+                src={modalPost?.userId?.avatarUrl && typeof modalPost?.userId?.avatarUrl === 'string' && modalPost?.userId?.avatarUrl.trim() !== '' ? modalPost.userId.avatarUrl : undefined}
+                style={{ background: '#2db7f5' }}
+              >
+                {modalPost?.userId?.displayName?.[0] || modalPost?.userId?.username?.[0] || 'U'}
               </Avatar>
               <div>
                 <div style={{ color: "#fff", fontWeight: 600 }}>
@@ -3806,19 +4107,22 @@ const NewsFeed = () => {
             </div>
 
             {/* comments list */}
-            <div style={{ marginTop: 12, maxHeight: 360, overflowY: "auto" }}>
-              {(postIdToComments[commentPostId] || []).map((c) => {
+            <div style={{ marginTop: 12, maxHeight: 360, overflowY: 'auto' }}>
+              {(postIdToComments[commentPostId] || []).filter(c => !c.parentCommentId).map((c) => {
                 const canDelete = canDeleteComment(c, modalPost);
+                const replies = commentReplies[c._id] || [];
+                const isReplying = replyingToCommentId === c._id;
+                const replyText = replyTexts[c._id] || '';
                 return (
-                  <div
-                    key={c._id}
-                    style={{ display: "flex", gap: 8, marginBottom: 8 }}
-                  >
-                    <Avatar size={28} style={{ background: "#555" }}>
-                      {c?.userId?.displayName?.[0] ||
-                        c?.userId?.username?.[0] ||
-                        "U"}
-                    </Avatar>
+                  <div key={c._id} style={{ marginBottom: 12 }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Avatar 
+                        size={28} 
+                        src={c?.userId?.avatarUrl && typeof c?.userId?.avatarUrl === 'string' && c?.userId?.avatarUrl.trim() !== '' ? c.userId.avatarUrl : undefined}
+                        style={{ background: '#555' }}
+                      >
+                      {c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}
+                      </Avatar>
                     <div
                       style={{
                         background: "#151515",
@@ -3856,8 +4160,89 @@ const NewsFeed = () => {
                           </Dropdown>
                         )}
                       </div>
-                      <div>{c.comment}</div>
+                        <div style={{ marginTop: 4, marginBottom: 6 }}>{c.comment}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+                          <Button
+                            type="text"
+                            size="small"
+                            onClick={() => isReplying ? cancelReply(c._id) : startReply(c._id)}
+                            style={{ color: '#9ca3af', padding: 0, height: 'auto', fontSize: 12 }}
+                          >
+                            {isReplying ? 'Hủy' : 'Phản hồi'}
+                          </Button>
+                          {replies.length > 0 && (
+                            <span style={{ color: '#9ca3af', fontSize: 12 }}>
+                              {replies.length} phản hồi
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
+                    
+                    {/* Reply input */}
+                    {isReplying && (
+                      <div style={{ marginLeft: 36, marginTop: 8, marginBottom: 8 }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <Input
+                            placeholder="Nhập phản hồi..."
+                            value={replyText}
+                            onChange={(e) => setReplyTexts((prev) => ({ ...prev, [c._id]: e.target.value }))}
+                            style={{ background: '#0f0f10', color: '#e5e7eb', borderColor: '#303030', borderRadius: 8, flex: 1 }}
+                            onPressEnter={() => submitReply(c._id)}
+                          />
+                          <Button
+                            type="primary"
+                            size="small"
+                            loading={commentSubmitting}
+                            onClick={() => submitReply(c._id)}
+                            style={{ background: '#7c3aed', borderColor: '#7c3aed', borderRadius: 8 }}
+                          >
+                            Gửi
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Replies list */}
+                    {replies.length > 0 && (
+                      <div style={{ marginLeft: 36, marginTop: 8 }}>
+                        {replies.map((reply) => {
+                          const canDeleteReply = canDeleteComment(reply, modalPost);
+                          return (
+                            <div key={reply._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                              <Avatar 
+                                size={24} 
+                                src={reply?.userId?.avatarUrl && typeof reply?.userId?.avatarUrl === 'string' && reply?.userId?.avatarUrl.trim() !== '' ? reply.userId.avatarUrl : undefined}
+                                style={{ background: '#555' }}
+                              >
+                                {reply?.userId?.displayName?.[0] || reply?.userId?.username?.[0] || 'U'}
+                              </Avatar>
+                              <div style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '6px 10px', color: '#e5e7eb', flex: 1 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                  <div style={{ fontWeight: 600, fontSize: 13 }}>
+                                    {reply?.userId?.displayName || reply?.userId?.username || 'Người dùng'}
+                                  </div>
+                                  {canDeleteReply && (
+                                    <Dropdown
+                                      trigger={['click']}
+                                      menu={buildCommentMenuProps(commentPostId, reply._id)}
+                                    >
+                                      <Button
+                                        type="text"
+                                        icon={<MoreOutlined />}
+                                        loading={deletingCommentId === reply._id}
+                                        style={{ color: '#9ca3af', padding: 0, fontSize: 12 }}
+                                      />
+                                    </Dropdown>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: 13, marginTop: 2 }}>{reply.comment}</div>
+                    </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -3876,14 +4261,8 @@ const NewsFeed = () => {
                 placeholder="Nhập bình luận của bạn..."
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
-                style={{
-                  background: "#0f0f10",
-                  color: "#e5e7eb",
-                  borderColor: "#303030",
-                  height: 44,
-                  borderRadius: 22,
-                  flex: 1,
-                }}
+                onPressEnter={submitComment}
+                style={{ background: '#0f0f10', color: '#e5e7eb', borderColor: '#303030', height: 44, borderRadius: 22, flex: 1 }}
               />
               <Button
                 type="primary"

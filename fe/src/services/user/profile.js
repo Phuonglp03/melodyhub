@@ -109,6 +109,18 @@ export const getFollowingList = async (search = '', limit = 50) => {
   return res.data;
 };
 
+export const getFollowersList = async (userId, search = '', limit = 50) => {
+  if (!userId) throw new Error('userId is required');
+  const res = await api.get(`/users/${userId}/followers`, { params: { search, limit } });
+  return res.data;
+};
+
+export const getUserFollowingList = async (userId, search = '', limit = 50) => {
+  if (!userId) throw new Error('userId is required');
+  const res = await api.get(`/users/${userId}/following`, { params: { search, limit } });
+  return res.data;
+};
+
 export const searchUsers = async (query, limit = 10) => {
   const q = (query || '').trim();
   if (!q) {

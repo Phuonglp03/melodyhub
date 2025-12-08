@@ -20,15 +20,27 @@ const ResetPassword = () => {
     const tokenParam = searchParams.get('token');
     const emailParam = searchParams.get('email');
 
+    console.log('Reset password URL params:', { 
+      tokenParam: tokenParam ? tokenParam.substring(0, 8) + '...' : 'missing',
+      tokenLength: tokenParam?.length,
+      emailParam: emailParam || 'missing',
+      fullURL: window.location.href
+    });
+
     if (!tokenParam || !emailParam) {
       // Báo lỗi ngay nếu thiếu tham số
+      console.error('Missing token or email in URL');
       messageApi.error('Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn');
       setValidToken(false);
       return;
     }
 
-    setToken(tokenParam);
-    setEmail(emailParam);
+    // Decode URL-encoded values
+    const decodedToken = decodeURIComponent(tokenParam);
+    const decodedEmail = decodeURIComponent(emailParam);
+
+    setToken(decodedToken);
+    setEmail(decodedEmail);
     setValidToken(true);
     // Việc kiểm tra token có hợp lệ/hết hạn sẽ do backend xử lý khi submit form.
   }, [searchParams, messageApi]);
@@ -36,6 +48,14 @@ const ResetPassword = () => {
   const onFinish = async (values) => {
     setLoading(true);
     try {
+      console.log('Submitting reset password:', {
+        tokenLength: token?.length,
+        tokenPreview: token ? token.substring(0, 8) + '...' : 'missing',
+        email: email,
+        hasNewPassword: !!values.newPassword,
+        newPasswordLength: values.newPassword?.length
+      });
+
       // Gọi API đặt lại mật khẩu
       await resetPasswordRequest(token, email, values.newPassword);
       
@@ -47,6 +67,11 @@ const ResetPassword = () => {
       }, 2000);
     } catch (error) {
       console.error('Error resetting password:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
       messageApi.error(error.message || 'Có lỗi xảy ra, vui lòng thử lại.');
     } finally {
       setLoading(false);
