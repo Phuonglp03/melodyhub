@@ -887,7 +887,7 @@ const NewsFeed = () => {
 
   const openComment = async (postId, postOverride = null) => {
     setCommentPostId(postId);
-    setCommentText('');
+    setCommentText("");
     setReplyingToCommentId(null);
     setReplyTexts({});
     const p = postOverride || items.find((it) => it._id === postId) || null;
@@ -896,17 +896,30 @@ const NewsFeed = () => {
     // Fetch tất cả top-level comments để hiển thị trong modal (không giới hạn 3)
     try {
       const all = await getAllPostComments(postId); // Get top-level comments (no parentCommentId)
-      const topLevelComments = Array.isArray(all) ? all.filter(c => !c.parentCommentId) : [];
-      setPostIdToComments((prev) => ({ ...prev, [postId]: sortCommentsDesc(topLevelComments) }));
-      
+      const topLevelComments = Array.isArray(all)
+        ? all.filter((c) => !c.parentCommentId)
+        : [];
+      setPostIdToComments((prev) => ({
+        ...prev,
+        [postId]: sortCommentsDesc(topLevelComments),
+      }));
+
       // Fetch replies for each comment
       if (topLevelComments.length > 0) {
         const repliesPromises = topLevelComments.map(async (comment) => {
           try {
-            const replies = await getAllPostComments(postId, { parentCommentId: comment._id });
-            return { commentId: comment._id, replies: Array.isArray(replies) ? replies : [] };
+            const replies = await getAllPostComments(postId, {
+              parentCommentId: comment._id,
+            });
+            return {
+              commentId: comment._id,
+              replies: Array.isArray(replies) ? replies : [],
+            };
           } catch (e) {
-            console.warn(`Failed to fetch replies for comment ${comment._id}:`, e);
+            console.warn(
+              `Failed to fetch replies for comment ${comment._id}:`,
+              e
+            );
             return { commentId: comment._id, replies: [] };
           }
         });
@@ -948,8 +961,8 @@ const NewsFeed = () => {
     try {
       setCommentSubmitting(true);
       await createPostComment(commentPostId, { comment: commentText.trim() });
-      message.success('Đã gửi bình luận');
-      setCommentText('');
+      message.success("Đã gửi bình luận");
+      setCommentText("");
       // Không cần refresh manual vì realtime event sẽ tự động cập nhật
       // Chỉ refresh stats để đảm bảo số lượng chính xác
       const statsRes = await getPostStats(commentPostId);
@@ -966,7 +979,7 @@ const NewsFeed = () => {
 
   const startReply = (commentId) => {
     setReplyingToCommentId(commentId);
-    setReplyTexts((prev) => ({ ...prev, [commentId]: '' }));
+    setReplyTexts((prev) => ({ ...prev, [commentId]: "" }));
   };
 
   const cancelReply = (commentId) => {
@@ -981,26 +994,29 @@ const NewsFeed = () => {
   };
 
   const submitReply = async (commentId) => {
-    const replyText = (replyTexts[commentId] || '').trim();
+    const replyText = (replyTexts[commentId] || "").trim();
     if (!replyText) {
-      message.warning('Vui lòng nhập phản hồi');
+      message.warning("Vui lòng nhập phản hồi");
       return;
     }
     try {
       setCommentSubmitting(true);
-      await createPostComment(commentPostId, { 
+      await createPostComment(commentPostId, {
         comment: replyText,
-        parentCommentId: commentId 
+        parentCommentId: commentId,
       });
-      message.success('Đã gửi phản hồi');
+      message.success("Đã gửi phản hồi");
       cancelReply(commentId);
-      
+
       // Không cần refresh manual vì realtime event sẽ tự động cập nhật
       // Chỉ refresh stats để đảm bảo số lượng chính xác
       const statsRes = await getPostStats(commentPostId);
-      setPostIdToStats((prev) => ({ ...prev, [commentPostId]: statsRes?.data || prev[commentPostId] }));
+      setPostIdToStats((prev) => ({
+        ...prev,
+        [commentPostId]: statsRes?.data || prev[commentPostId],
+      }));
     } catch (e) {
-      message.error(e.message || 'Không thể gửi phản hồi');
+      message.error(e.message || "Không thể gửi phản hồi");
     } finally {
       setCommentSubmitting(false);
     }
@@ -1036,22 +1052,24 @@ const NewsFeed = () => {
     try {
       setDeletingCommentId(commentId);
       await deletePostComment(postId, commentId);
-      
+
       // Xóa khỏi top-level comments
       setPostIdToComments((prev) => {
         const list = Array.isArray(prev[postId]) ? prev[postId] : [];
         return { ...prev, [postId]: list.filter((c) => c._id !== commentId) };
       });
-      
+
       // Xóa khỏi replies nếu là reply
       setCommentReplies((prev) => {
         const newReplies = { ...prev };
         Object.keys(newReplies).forEach((parentId) => {
-          newReplies[parentId] = (newReplies[parentId] || []).filter((r) => r._id !== commentId);
+          newReplies[parentId] = (newReplies[parentId] || []).filter(
+            (r) => r._id !== commentId
+          );
         });
         return newReplies;
       });
-      
+
       setPostIdToStats((prev) => {
         const current = prev[postId] || { likesCount: 0, commentsCount: 0 };
         const nextComments = Math.max((current.commentsCount || 1) - 1, 0);
@@ -1382,9 +1400,21 @@ const NewsFeed = () => {
           borderColor: "#1f1f1f",
         }}
         title={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ color: '#fff', fontWeight: 700 }}>Người đang theo dõi</Text>
-            <Button type="text" icon={<MoreOutlined />} style={{ color: '#9ca3af', padding: 0 }} />
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <Text style={{ color: "#fff", fontWeight: 700 }}>
+              Người đang theo dõi
+            </Text>
+            <Button
+              type="text"
+              icon={<MoreOutlined />}
+              style={{ color: "#9ca3af", padding: 0 }}
+            />
           </div>
         }
       >
@@ -1395,7 +1425,14 @@ const NewsFeed = () => {
             <Spin />
           </div>
         ) : followingUsers.length === 0 ? (
-          <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+          <div
+            style={{
+              padding: 16,
+              textAlign: "center",
+              color: "#9ca3af",
+              fontSize: 13,
+            }}
+          >
             Chưa có người theo dõi
           </div>
         ) : (
@@ -1403,21 +1440,23 @@ const NewsFeed = () => {
             dataSource={followingUsers}
             renderItem={(user) => {
               const userId = user.id || user._id || user.userId;
-              
+
               const handleChatClick = async (e) => {
                 e.stopPropagation();
                 try {
                   const conversation = await ensureConversationWith(userId);
                   if (conversation && conversation._id) {
-                    window.dispatchEvent(new CustomEvent('openChatWindow', { 
-                      detail: { conversation } 
-                    }));
+                    window.dispatchEvent(
+                      new CustomEvent("openChatWindow", {
+                        detail: { conversation },
+                      })
+                    );
                   } else {
-                    message.error('Không thể tạo cuộc trò chuyện');
+                    message.error("Không thể tạo cuộc trò chuyện");
                   }
                 } catch (error) {
-                  console.error('Error opening chat:', error);
-                  message.error(error.message || 'Không thể mở chat');
+                  console.error("Error opening chat:", error);
+                  message.error(error.message || "Không thể mở chat");
                 }
               };
 
@@ -1430,9 +1469,9 @@ const NewsFeed = () => {
 
               return (
                 <List.Item
-                  style={{ 
-                    padding: '8px 0', 
-                    borderBottom: '1px solid #1f1f1f'
+                  style={{
+                    padding: "8px 0",
+                    borderBottom: "1px solid #1f1f1f",
                   }}
                   actions={[
                     <Button
@@ -1440,11 +1479,11 @@ const NewsFeed = () => {
                       type="text"
                       icon={<MessageOutlined />}
                       onClick={handleChatClick}
-                      style={{ 
-                        color: '#9ca3af',
-                        padding: '4px 8px'
+                      style={{
+                        color: "#9ca3af",
+                        padding: "4px 8px",
                       }}
-                    />
+                    />,
                   ]}
                 >
                   <List.Item.Meta
@@ -1463,11 +1502,15 @@ const NewsFeed = () => {
                       />
                     }
                     title={
-                      <Text 
-                        style={{ color: '#fff', fontWeight: 500, cursor: 'pointer' }}
+                      <Text
+                        style={{
+                          color: "#fff",
+                          fontWeight: 500,
+                          cursor: "pointer",
+                        }}
                         onClick={handleNameClick}
                       >
-                        {user.displayName || user.username || 'Người dùng'}
+                        {user.displayName || user.username || "Người dùng"}
                       </Text>
                     }
                     description={
@@ -1613,30 +1656,30 @@ const NewsFeed = () => {
           [postId]: { ...cur, commentsCount: (cur.commentsCount || 0) + 1 },
         };
       });
-      
+
       // Nếu là reply (có parentCommentId), thêm vào danh sách replies
       if (comment.parentCommentId) {
         setCommentReplies((prev) => {
           const parentId = comment.parentCommentId;
           const existingReplies = prev[parentId] || [];
           // Kiểm tra duplicate trước khi thêm
-          const exists = existingReplies.some(r => r._id === comment._id);
+          const exists = existingReplies.some((r) => r._id === comment._id);
           if (exists) return prev;
           return {
             ...prev,
-            [parentId]: sortCommentsDesc([comment, ...existingReplies])
+            [parentId]: sortCommentsDesc([comment, ...existingReplies]),
           };
         });
       } else {
         // Nếu là top-level comment, cập nhật danh sách comment và chỉ giữ lại 3 comment gần nhất
-      setPostIdToComments((prev) => {
-        const cur = Array.isArray(prev[postId]) ? prev[postId] : [];
+        setPostIdToComments((prev) => {
+          const cur = Array.isArray(prev[postId]) ? prev[postId] : [];
           // Kiểm tra duplicate trước khi thêm
-          const exists = cur.some(c => c._id === comment._id);
+          const exists = cur.some((c) => c._id === comment._id);
           if (exists) return prev;
-        // Thêm comment mới vào đầu danh sách và giới hạn 3 comment gần nhất
-        return { ...prev, [postId]: limitToNewest3([comment, ...cur]) };
-      });
+          // Thêm comment mới vào đầu danh sách và giới hạn 3 comment gần nhất
+          return { ...prev, [postId]: limitToNewest3([comment, ...cur]) };
+        });
       }
     };
     onPostCommentNew(handler);
@@ -1718,25 +1761,25 @@ const NewsFeed = () => {
       if (!newComment.createdAt) {
         newComment.createdAt = new Date().toISOString();
       }
-      
+
       // Nếu là reply (có parentCommentId), chỉ thêm vào danh sách replies, KHÔNG thêm vào top-level comments
       if (newComment.parentCommentId) {
         setCommentReplies((prev) => {
           const parentId = newComment.parentCommentId;
           const existingReplies = prev[parentId] || [];
           // Kiểm tra duplicate trước khi thêm
-          const exists = existingReplies.some(r => r._id === newComment._id);
+          const exists = existingReplies.some((r) => r._id === newComment._id);
           if (exists) return prev;
           return {
             ...prev,
-            [parentId]: sortCommentsDesc([newComment, ...existingReplies])
+            [parentId]: sortCommentsDesc([newComment, ...existingReplies]),
           };
         });
         // Đảm bảo reply không có trong top-level comments (phòng trường hợp lỗi)
         setPostIdToComments((prev) => {
           const cur = prev[commentPostId] || [];
           // Loại bỏ reply nếu có trong top-level comments
-          const filtered = cur.filter(c => c._id !== newComment._id);
+          const filtered = cur.filter((c) => c._id !== newComment._id);
           return { ...prev, [commentPostId]: filtered };
         });
       } else {
@@ -1744,12 +1787,15 @@ const NewsFeed = () => {
         setPostIdToComments((prev) => {
           const cur = prev[commentPostId] || [];
           // Kiểm tra duplicate trước khi thêm
-          const exists = cur.some(c => c._id === newComment._id);
+          const exists = cur.some((c) => c._id === newComment._id);
           if (exists) return prev;
-          return { ...prev, [commentPostId]: sortCommentsDesc([newComment, ...cur]) };
+          return {
+            ...prev,
+            [commentPostId]: sortCommentsDesc([newComment, ...cur]),
+          };
         });
       }
-      
+
       setPostIdToStats((prev) => {
         const cur = prev[commentPostId] || { likesCount: 0, commentsCount: 0 };
         return {
@@ -2509,217 +2555,20 @@ const NewsFeed = () => {
               msOverflowStyle: "none", // IE and Edge
             }}
           >
-            <div className="composer-card" style={{ 
-              marginBottom: 20, 
-              background: '#0f0f10', 
-              border: '1px solid #1f1f1f',
-              borderRadius: 8,
-              padding: '20px 24px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 16
-            }}             onClick={handleModalOpen}>
-              {(() => {
-                // Get user data with fallback to localStorage
-                const user = currentUser || (() => {
-                  try {
-                    const raw = localStorage.getItem('user');
-                    if (raw) {
-                      const obj = JSON.parse(raw);
-                      return obj?.user || obj;
-                    }
-                  } catch {}
-                  return null;
-                })();
-                
-                const avatarUrl = user?.avatarUrl || user?.avatar_url;
-                const displayName = user?.displayName || user?.username || '';
-                const initial = displayName ? displayName[0].toUpperCase() : 'U';
-                
-                // Only use src if avatarUrl is a valid non-empty string
-                const validAvatarUrl = avatarUrl && typeof avatarUrl === 'string' && avatarUrl.trim() !== '' && avatarUrl !== '' 
-                  ? avatarUrl.trim() 
-                  : null;
-                
-                console.log('[NewsFeed] Avatar render:', { 
-                  hasUser: !!user, 
-                  avatarUrl, 
-                  validAvatarUrl, 
-                  displayName, 
-                  initial 
-                });
-                
-                return (
-                  <Avatar 
-                    size={40} 
-                    src={validAvatarUrl || undefined}
-                    
-                  >
-                    {initial}
-                  </Avatar>
-                );
-              })()}
-              <Input.TextArea 
-                className="composer-input"
-                placeholder="Có gì mới ?" 
-                autoSize={{ minRows: 2, maxRows: 8 }}
-                style={{ 
-                  flex: 1,
-                  background: '#fff',
-                  border: 'none',
-                  borderRadius: 10,
-                  minHeight: 56,
-                  fontSize: 16
-                }}
-                readOnly
-              />
-              <Button
-                className="composer-action-btn"
-                type="primary"
-                size="large"
-                style={{ borderRadius: 999, background: '#1890ff', padding: '0 22px', height: 44 }}
-                onClick={(e) => { e.stopPropagation(); handleModalOpen(); }}
-              >
-                Đăng Bài
-              </Button>
-            </div>
-
-            {isInitialLoading && (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
-                <Spin />
-              </div>
-            )}
-            {!loading && error && (
-              <Card style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
-                <Text style={{ color: '#fff' }}>{error}</Text>
-              </Card>
-            )}
-            {!isInitialLoading && !error && items.length === 0 && (
-              <Empty description={<span style={{ color: '#9ca3af' }}>Chưa có bài đăng</span>} />
-            )}
-            {items.map((post) => (
-            <Card key={post._id} style={{ marginBottom: 20, background: '#0f0f10', borderColor: '#1f1f1f' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                <Space align="start" size={14}>
-                    <div
-                    role="button"
-                    onClick={() => {
-                      const uid = getAuthorId(post);
-                      if (uid) navigate(`/users/${uid}/newfeeds`);
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <Avatar 
-                      size={40} 
-                      src={post?.userId?.avatarUrl && typeof post?.userId?.avatarUrl === 'string' && post?.userId?.avatarUrl.trim() !== '' ? post.userId.avatarUrl : undefined} 
-                      style={{ background: '#2db7f5' }}
-                    >
-                      {post?.userId?.displayName?.[0] || post?.userId?.username?.[0] || 'U'}
-                    </Avatar>
-                  </div>
-                  <div>
-                    <Space style={{ marginBottom: 4 }}>
-                      <span
-                        onClick={() => {
-                          const uid = getAuthorId(post);
-                          if (uid) navigate(`/users/${uid}/newfeeds`);
-                        }}
-                        style={{ color: '#fff', fontSize: 16, fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        {post?.userId?.displayName || post?.userId?.username || 'Người dùng'}
-                      </span>
-                      <Text type="secondary" style={{ color: '#9ca3af', fontSize: 13 }}>
-                        {formatTime(post?.createdAt)}
-                      </Text>
-                    </Space>
-                  </div>
-                </Space>
-                <Space>
-                  {(() => {
-                    const uid = getAuthorId(post);
-                    const isFollowing = !!userIdToFollowing[uid];
-                    const loading = !!userIdToFollowLoading[uid];
-                    if (uid && currentUserId && uid.toString() === currentUserId.toString()) return null;
-                    return (
-                      <Button
-                        size="middle"
-                        loading={loading}
-                        onClick={() => toggleFollow(uid)}
-                        style={{
-                          background: isFollowing ? '#111' : '#333',
-                          borderColor: isFollowing ? '#444' : '#333',
-                          color: '#fff',
-                        }}
-                      >
-                        {isFollowing ? 'Đang theo dõi' : 'Theo dõi'}
-                      </Button>
-                    );
-                  })()}
-                  {currentUserId && (() => {
-                    const uid = getAuthorId(post);
-                    const isOwnPost = uid && currentUserId && uid.toString() === currentUserId.toString();
-                    
-                    if (isOwnPost) {
-                      // Menu for own posts: Edit and Hide
-                      return (
-                        <Dropdown
-                          menu={{
-                            items: [
-                              {
-                                key: 'edit',
-                                label: 'Chỉnh sửa bài post',
-                                icon: <EditOutlined />,
-                                onClick: () => openEditModal(post),
-                              },
-                              {
-                                key: 'hide',
-                                label: 'Ẩn bài post',
-                                icon: <DeleteOutlined />,
-                                danger: true,
-                                loading: deletingPostId === post._id,
-                                onClick: () => handleHidePost(post._id),
-                              },
-                            ],
-                          }}
-                          trigger={['click']}
-                        >
-                          <Button
-                            type="text"
-                            icon={<MoreOutlined />}
-                            style={{ color: '#9ca3af' }}
-                            loading={deletingPostId === post._id}
-                          />
-                        </Dropdown>
-                      );
-                    }
-                    
-                    // Menu for other users' posts: Report
-                    return (
-                      <Dropdown
-                        menu={{
-                          items: [
-                            {
-                              key: 'report',
-                              label: postIdToReported[post._id] ? 'Đã báo cáo' : 'Báo cáo bài viết',
-                              icon: <FlagOutlined />,
-                              disabled: postIdToReported[post._id],
-                              onClick: () => openReportModal(post._id),
-                            },
-                          ],
-                        }}
-                        trigger={['click']}
-                      >
-                        <Button
-                          type="text"
-                          icon={<MoreOutlined />}
-                          style={{ color: '#9ca3af' }}
-                        />
-                      </Dropdown>
-                    );
-                  })()}
-                </Space>
-              </div>
-              {/* Chỉ hiển thị text, nhưng ẩn các dòng chỉ chứa URL (để không lộ link thô) */}
+            <div
+              className="composer-card"
+              style={{
+                marginBottom: 20,
+                background: "#0f0f10",
+                border: "1px solid #1f1f1f",
+                borderRadius: 8,
+                padding: "20px 24px",
+                display: "flex",
+                alignItems: "center",
+                gap: 16,
+              }}
+              onClick={handleModalOpen}
+            >
               {(() => {
                 // Get user data with fallback to localStorage
                 const user =
@@ -2793,252 +2642,47 @@ const NewsFeed = () => {
                   handleModalOpen();
                 }}
               >
-                Post
+                Đăng Bài
               </Button>
             </div>
 
-            <Modal
-              open={isModalOpen}
-              title={
-                <span style={{ color: "#fff", fontWeight: 600 }}>
-                  Tạo bài đăng
-                </span>
-              }
-              onCancel={handleModalClose}
-              footer={
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    alignItems: "center",
-                    gap: 12,
-                  }}
-                >
-                  <Button
-                    shape="round"
-                    onClick={handleModalClose}
-                    style={{
-                      height: 44,
-                      borderRadius: 22,
-                      padding: 0,
-                      width: 108,
-                      background: "#1f1f1f",
-                      color: "#e5e7eb",
-                      borderColor: "#303030",
-                    }}
-                  >
-                    Hủy
-                  </Button>
-                  <Button
-                    shape="round"
-                    loading={posting}
-                    onClick={handleCreatePost}
-                    style={{
-                      height: 44,
-                      borderRadius: 22,
-                      padding: 0,
-                      width: 108,
-                      background: "#7c3aed",
-                      borderColor: "#7c3aed",
-                    }}
-                  >
-                    Đăng
-                  </Button>
-                </div>
-              }
-              styles={{
-                content: { background: "#0f0f10" },
-                header: {
-                  background: "#0f0f10",
-                  borderBottom: "1px solid #1f1f1f",
-                },
-              }}
-            >
+            {isInitialLoading && (
               <div
-                style={{ display: "flex", flexDirection: "column", gap: 16 }}
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  padding: 24,
+                }}
               >
-                <div
+                <Spin />
+              </div>
+            )}
+            {!loading && error && (
+              <Card
+                style={{
+                  marginBottom: 20,
+                  background: "#0f0f10",
+                  borderColor: "#1f1f1f",
+                }}
+              >
+                <Text style={{ color: "#fff" }}>{error}</Text>
+              </Card>
+            )}
+            {!isInitialLoading && !error && items.length === 0 && (
+              <Empty
+                description={
+                  <span style={{ color: "#9ca3af" }}>Chưa có bài đăng</span>
+                }
+              />
+            )}
+            <>
+              {items.map((post) => (
+                <Card
+                  key={post._id}
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <Space size={12} align="center">
-                    <Avatar
-                      size={48}
-                      src={
-                        composerAvatarUrl &&
-                        typeof composerAvatarUrl === "string" &&
-                        composerAvatarUrl.trim() !== ""
-                          ? composerAvatarUrl
-                          : undefined
-                      }
-                      style={{ background: "#7c3aed" }}
-                    >
-                      {composerInitial}
-                    </Avatar>
-                    <div>
-                      <Text style={{ color: "#fff", fontWeight: 600 }}>
-                        {composerDisplayName}
-                      </Text>
-                      <div style={{ color: "#9ca3af", fontSize: 13 }}>
-                        Sẵn sàng chia sẻ cảm hứng với cộng đồng
-                      </div>
-                    </div>
-                  </Space>
-                  <Tag
-                    color="#7c3aed"
-                    style={{
-                      borderRadius: 999,
-                      margin: 0,
-                      color: "#fff",
-                      border: "none",
-                    }}
-                  >
-                    Bài viết mới
-                  </Tag>
-                </div>
-
-                <div
-                  style={{
-                    ...composerSectionStyle,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 12,
-                  }}
-                >
-                  <Input.TextArea
-                    placeholder="Chia sẻ điều gì đó..."
-                    autoSize={{ minRows: 4, maxRows: 10 }}
-                    value={newText}
-                    onChange={(e) => setNewText(e.target.value)}
-                    allowClear
-                    style={{
-                      background: "#0b0b0f",
-                      border: "1px solid #222",
-                      borderRadius: 14,
-                      padding: 16,
-                      color: "#f8fafc",
-                      fontSize: 16,
-                      boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.02)",
-                    }}
-                  />
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <span style={{ color: "#9ca3af", fontSize: 13 }}>
-                      Bạn có thể chèn link lick hoặc video để auto preview
-                    </span>
-                    <span style={{ color: "#fff", fontWeight: 600 }}>
-                      {usedChars}/{maxChars}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      height: 6,
-                      width: "100%",
-                      background: "#1f1f1f",
-                      borderRadius: 999,
-                    }}
-                  >
-                    <div
-                      style={{
-                        height: "100%",
-                        width: `${charPercent}%`,
-                        background: charPercent > 80 ? "#f97316" : "#7c3aed",
-                        borderRadius: 999,
-                        transition: "width 0.2s ease",
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    ...composerSectionStyle,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 12,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <div>
-                      <div style={composerLabelStyle}>Đính kèm lick</div>
-                      <div style={composerHintStyle}>
-                        Chỉ hiển thị các lick đang active trong tài khoản. Chỉ
-                        chọn 1 trong 3: Project, Lick, hoặc Link.
-                      </div>
-                    </div>
-                    <Tag
-                      color="#1f1f1f"
-                      style={{
-                        borderRadius: 999,
-                        color: "#9ca3af",
-                        border: "none",
-                      }}
-                    >
-                      Tùy chọn
-                    </Tag>
-                  </div>
-                  <Select
-                    mode="multiple"
-                    placeholder="Tìm và chọn 1 lick để đính kèm..."
-                    value={selectedLickIds}
-                    onChange={(values) => {
-                      const next = Array.isArray(values)
-                        ? values.slice(0, 1)
-                        : [];
-                      setSelectedLickIds(next);
-                      if (next.length > 0) {
-                        setLinkPreview(null);
-                        setSelectedProjectId(null);
-                      }
-                    }}
-                    loading={loadingLicks}
-                    style={{
-                      width: "100%",
-                      backgroundColor: "#1a1a1a",
-                      border: "1px solid #3a3a3a",
-                      borderRadius: 8,
-                    }}
-                    options={availableLicks}
-                    notFoundContent={
-                      loadingLicks ? (
-                        <Spin size="small" />
-                      ) : (
-                        <Empty description="Không có lick active nào" />
-                      )
-                    }
-                    filterOption={(input, option) =>
-                      (option?.label ?? "")
-                        .toLowerCase()
-                        .includes(input.toLowerCase())
-                    }
-                    popupClassName="dark-select-dropdown"
-                    allowClear
-                    disabled={!!extractFirstUrl(newText) || !!selectedProjectId}
-                  />
-                </div>
-
-                <div
-                  className="composer-section"
-                  style={{
-                    ...composerSectionStyle,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 16,
-                    border: "1px solid #2a2a2a",
+                    marginBottom: 20,
+                    background: "#0f0f10",
+                    borderColor: "#1f1f1f",
                   }}
                 >
                   <div
@@ -3046,157 +2690,645 @@ const NewsFeed = () => {
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "flex-start",
-                      marginBottom: 4,
+                      marginBottom: 12,
                     }}
                   >
-                    <div style={{ flex: 1 }}>
+                    <Space align="start" size={14}>
                       <div
-                        style={{
-                          ...composerLabelStyle,
-                          marginBottom: 6,
-                          fontSize: 16,
+                        role="button"
+                        onClick={() => {
+                          const uid = getAuthorId(post);
+                          if (uid) navigate(`/users/${uid}/newfeeds`);
                         }}
+                        style={{ cursor: "pointer" }}
                       >
-                        Chọn project
+                        <Avatar
+                          size={40}
+                          src={
+                            post?.userId?.avatarUrl &&
+                            typeof post?.userId?.avatarUrl === "string" &&
+                            post?.userId?.avatarUrl.trim() !== ""
+                              ? post.userId.avatarUrl
+                              : undefined
+                          }
+                          style={{ background: "#2db7f5" }}
+                        >
+                          {post?.userId?.displayName?.[0] ||
+                            post?.userId?.username?.[0] ||
+                            "U"}
+                        </Avatar>
                       </div>
-                      <div style={{ ...composerHintStyle, lineHeight: "1.5" }}>
-                        Chỉ hiển thị các project có trạng thái active. Chỉ chọn
-                        1 trong 3: Project, Lick, hoặc Link.
+                      <div>
+                        <Space style={{ marginBottom: 4 }}>
+                          <span
+                            onClick={() => {
+                              const uid = getAuthorId(post);
+                              if (uid) navigate(`/users/${uid}/newfeeds`);
+                            }}
+                            style={{
+                              color: "#fff",
+                              fontSize: 16,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {post?.userId?.displayName ||
+                              post?.userId?.username ||
+                              "Người dùng"}
+                          </span>
+                          <Text
+                            type="secondary"
+                            style={{ color: "#9ca3af", fontSize: 13 }}
+                          >
+                            {formatTime(post?.createdAt)}
+                          </Text>
+                        </Space>
                       </div>
-                    </div>
-                    <Tag
-                      color="#1f1f1f"
+                    </Space>
+                    <Space>
+                      {(() => {
+                        const uid = getAuthorId(post);
+                        const isFollowing = !!userIdToFollowing[uid];
+                        const loading = !!userIdToFollowLoading[uid];
+                        if (
+                          uid &&
+                          currentUserId &&
+                          uid.toString() === currentUserId.toString()
+                        )
+                          return null;
+                        return (
+                          <Button
+                            size="middle"
+                            loading={loading}
+                            onClick={() => toggleFollow(uid)}
+                            style={{
+                              background: isFollowing ? "#111" : "#333",
+                              borderColor: isFollowing ? "#444" : "#333",
+                              color: "#fff",
+                            }}
+                          >
+                            {isFollowing ? "Đang theo dõi" : "Theo dõi"}
+                          </Button>
+                        );
+                      })()}
+                      {currentUserId &&
+                        (() => {
+                          const uid = getAuthorId(post);
+                          const isOwnPost =
+                            uid &&
+                            currentUserId &&
+                            uid.toString() === currentUserId.toString();
+
+                          if (isOwnPost) {
+                            // Menu for own posts: Edit and Hide
+                            return (
+                              <Dropdown
+                                menu={{
+                                  items: [
+                                    {
+                                      key: "edit",
+                                      label: "Chỉnh sửa bài post",
+                                      icon: <EditOutlined />,
+                                      onClick: () => openEditModal(post),
+                                    },
+                                    {
+                                      key: "hide",
+                                      label: "Ẩn bài post",
+                                      icon: <DeleteOutlined />,
+                                      danger: true,
+                                      loading: deletingPostId === post._id,
+                                      onClick: () => handleHidePost(post._id),
+                                    },
+                                  ],
+                                }}
+                                trigger={["click"]}
+                              >
+                                <Button
+                                  type="text"
+                                  icon={<MoreOutlined />}
+                                  style={{ color: "#9ca3af" }}
+                                  loading={deletingPostId === post._id}
+                                />
+                              </Dropdown>
+                            );
+                          }
+
+                          // Menu for other users' posts: Report
+                          return (
+                            <Dropdown
+                              menu={{
+                                items: [
+                                  {
+                                    key: "report",
+                                    label: postIdToReported[post._id]
+                                      ? "Đã báo cáo"
+                                      : "Báo cáo bài viết",
+                                    icon: <FlagOutlined />,
+                                    disabled: postIdToReported[post._id],
+                                    onClick: () => openReportModal(post._id),
+                                  },
+                                ],
+                              }}
+                              trigger={["click"]}
+                            >
+                              <Button
+                                type="text"
+                                icon={<MoreOutlined />}
+                                style={{ color: "#9ca3af" }}
+                              />
+                            </Dropdown>
+                          );
+                        })()}
+                    </Space>
+                  </div>
+
+                  {/* Added wrapper div for body content */}
+                  <div>
+                    {/* Chỉ hiển thị text, nhưng ẩn các dòng chỉ chứa URL (để không lộ link thô) */}
+                    {(() => {
+                      // Get user data with fallback to localStorage
+                      const user =
+                        currentUser ||
+                        (() => {
+                          try {
+                            const raw = localStorage.getItem("user");
+                            if (raw) {
+                              const obj = JSON.parse(raw);
+                              return obj?.user || obj;
+                            }
+                          } catch {}
+                          return null;
+                        })();
+
+                      const avatarUrl = user?.avatarUrl || user?.avatar_url;
+                      const displayName =
+                        user?.displayName || user?.username || "";
+                      const initial = displayName
+                        ? displayName[0].toUpperCase()
+                        : "U";
+
+                      // Only use src if avatarUrl is a valid non-empty string
+                      const validAvatarUrl =
+                        avatarUrl &&
+                        typeof avatarUrl === "string" &&
+                        avatarUrl.trim() !== "" &&
+                        avatarUrl !== ""
+                          ? avatarUrl.trim()
+                          : null;
+
+                      console.log("[NewsFeed] Avatar render:", {
+                        hasUser: !!user,
+                        avatarUrl,
+                        validAvatarUrl,
+                        displayName,
+                        initial,
+                      });
+
+                      return (
+                        <Avatar size={40} src={validAvatarUrl || undefined}>
+                          {initial}
+                        </Avatar>
+                      );
+                    })()}
+                    <Input.TextArea
+                      className="composer-input"
+                      placeholder="Có gì mới ?"
+                      autoSize={{ minRows: 2, maxRows: 8 }}
+                      style={{
+                        flex: 1,
+                        background: "#fff",
+                        border: "none",
+                        borderRadius: 10,
+                        minHeight: 56,
+                        fontSize: 16,
+                      }}
+                      readOnly
+                    />
+                    <Button
+                      className="composer-action-btn"
+                      type="primary"
+                      size="large"
                       style={{
                         borderRadius: 999,
-                        color: "#9ca3af",
-                        border: "none",
-                        marginLeft: 12,
+                        background: "#1890ff",
+                        padding: "0 22px",
+                        height: 44,
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleModalOpen();
                       }}
                     >
-                      Tùy chọn
+                      Post
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+
+              <Modal
+                open={isModalOpen}
+                title={
+                  <span style={{ color: "#fff", fontWeight: 600 }}>
+                    Tạo bài đăng
+                  </span>
+                }
+                onCancel={handleModalClose}
+                footer={
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <Button
+                      shape="round"
+                      onClick={handleModalClose}
+                      style={{
+                        height: 44,
+                        borderRadius: 22,
+                        padding: 0,
+                        width: 108,
+                        background: "#1f1f1f",
+                        color: "#e5e7eb",
+                        borderColor: "#303030",
+                      }}
+                    >
+                      Hủy
+                    </Button>
+                    <Button
+                      shape="round"
+                      loading={posting}
+                      onClick={handleCreatePost}
+                      style={{
+                        height: 44,
+                        borderRadius: 22,
+                        padding: 0,
+                        width: 108,
+                        background: "#7c3aed",
+                        borderColor: "#7c3aed",
+                      }}
+                    >
+                      Đăng
+                    </Button>
+                  </div>
+                }
+                styles={{
+                  content: { background: "#0f0f10" },
+                  header: {
+                    background: "#0f0f10",
+                    borderBottom: "1px solid #1f1f1f",
+                  },
+                }}
+              >
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 16 }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Space size={12} align="center">
+                      <Avatar
+                        size={48}
+                        src={
+                          composerAvatarUrl &&
+                          typeof composerAvatarUrl === "string" &&
+                          composerAvatarUrl.trim() !== ""
+                            ? composerAvatarUrl
+                            : undefined
+                        }
+                        style={{ background: "#7c3aed" }}
+                      >
+                        {composerInitial}
+                      </Avatar>
+                      <div>
+                        <Text style={{ color: "#fff", fontWeight: 600 }}>
+                          {composerDisplayName}
+                        </Text>
+                        <div style={{ color: "#9ca3af", fontSize: 13 }}>
+                          Sẵn sàng chia sẻ cảm hứng với cộng đồng
+                        </div>
+                      </div>
+                    </Space>
+                    <Tag
+                      color="#7c3aed"
+                      style={{
+                        borderRadius: 999,
+                        margin: 0,
+                        color: "#fff",
+                        border: "none",
+                      }}
+                    >
+                      Bài viết mới
                     </Tag>
                   </div>
-                  <Select
-                    placeholder="Chọn project để đính kèm..."
-                    value={selectedProjectId}
-                    onChange={(value) => {
-                      setSelectedProjectId(value);
-                      if (value) {
-                        setSelectedLickIds([]);
-                        setLinkPreview(null);
-                      }
-                    }}
-                    loading={loadingProjects}
-                    style={{
-                      width: "100%",
-                      backgroundColor: "#1a1a1a",
-                      border: "1px solid #3a3a3a",
-                      borderRadius: 8,
-                    }}
-                    options={availableProjects}
-                    notFoundContent={
-                      loadingProjects ? (
-                        <Spin size="small" />
-                      ) : (
-                        <Empty description="Không có project active nào" />
-                      )
-                    }
-                    filterOption={(input, option) =>
-                      (option?.label ?? "")
-                        .toLowerCase()
-                        .includes(input.toLowerCase())
-                    }
-                    popupClassName="dark-select-dropdown"
-                    allowClear
-                    disabled={
-                      selectedLickIds.length > 0 || !!extractFirstUrl(newText)
-                    }
-                  />
-                </div>
 
-                {extractFirstUrl(newText) && selectedLickIds.length === 0 && (
                   <div
                     style={{
                       ...composerSectionStyle,
-                      border: "1px solid #303030",
-                      background: "#111",
-                      color: "#e5e7eb",
                       display: "flex",
                       flexDirection: "column",
                       gap: 12,
                     }}
                   >
-                    {linkLoading ? (
-                      <Text style={{ color: "#bfbfbf" }}>
-                        Đang tải preview…
-                      </Text>
-                    ) : (
+                    <Input.TextArea
+                      placeholder="Chia sẻ điều gì đó..."
+                      autoSize={{ minRows: 4, maxRows: 10 }}
+                      value={newText}
+                      onChange={(e) => setNewText(e.target.value)}
+                      allowClear
+                      style={{
+                        background: "#0b0b0f",
+                        border: "1px solid #222",
+                        borderRadius: 14,
+                        padding: 16,
+                        color: "#f8fafc",
+                        fontSize: 16,
+                        boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.02)",
+                      }}
+                    />
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ color: "#9ca3af", fontSize: 13 }}>
+                        Bạn có thể chèn link lick hoặc video để auto preview
+                      </span>
+                      <span style={{ color: "#fff", fontWeight: 600 }}>
+                        {usedChars}/{maxChars}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        height: 6,
+                        width: "100%",
+                        background: "#1f1f1f",
+                        borderRadius: 999,
+                      }}
+                    >
                       <div
                         style={{
-                          display: "flex",
-                          gap: 12,
-                          alignItems: "center",
+                          height: "100%",
+                          width: `${charPercent}%`,
+                          background: charPercent > 80 ? "#f97316" : "#7c3aed",
+                          borderRadius: 999,
+                          transition: "width 0.2s ease",
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      ...composerSectionStyle,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div>
+                        <div style={composerLabelStyle}>Đính kèm lick</div>
+                        <div style={composerHintStyle}>
+                          Chỉ hiển thị các lick đang active trong tài khoản. Chỉ
+                          chọn 1 trong 3: Project, Lick, hoặc Link.
+                        </div>
+                      </div>
+                      <Tag
+                        color="#1f1f1f"
+                        style={{
+                          borderRadius: 999,
+                          color: "#9ca3af",
+                          border: "none",
                         }}
                       >
-                        {linkPreview?.thumbnailUrl ? (
-                          <img
-                            src={linkPreview.thumbnailUrl}
-                            alt="preview"
-                            style={{
-                              width: 64,
-                              height: 64,
-                              objectFit: "cover",
-                              borderRadius: 10,
-                            }}
-                          />
+                        Tùy chọn
+                      </Tag>
+                    </div>
+                    <Select
+                      mode="multiple"
+                      placeholder="Tìm và chọn 1 lick để đính kèm..."
+                      value={selectedLickIds}
+                      onChange={(values) => {
+                        const next = Array.isArray(values)
+                          ? values.slice(0, 1)
+                          : [];
+                        setSelectedLickIds(next);
+                        if (next.length > 0) {
+                          setLinkPreview(null);
+                          setSelectedProjectId(null);
+                        }
+                      }}
+                      loading={loadingLicks}
+                      style={{
+                        width: "100%",
+                        backgroundColor: "#1a1a1a",
+                        border: "1px solid #3a3a3a",
+                        borderRadius: 8,
+                      }}
+                      options={availableLicks}
+                      notFoundContent={
+                        loadingLicks ? (
+                          <Spin size="small" />
                         ) : (
-                          <div
-                            style={{
-                              width: 64,
-                              height: 64,
-                              borderRadius: 10,
-                              background: "#1f1f1f",
-                            }}
-                          />
-                        )}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div
-                            style={{
-                              fontWeight: 600,
-                              color: "#fff",
-                              marginBottom: 4,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {linkPreview?.title || extractFirstUrl(newText)}
-                          </div>
-                          <div
-                            style={{
-                              color: "#9ca3af",
-                              fontSize: 12,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {extractFirstUrl(newText)}
-                          </div>
-                        </div>
-                        <Button
-                          size="small"
-                          onClick={() => setLinkPreview(null)}
-                        >
-                          Ẩn
-                        </Button>
-                      </div>
-                    )}
+                          <Empty description="Không có lick active nào" />
+                        )
+                      }
+                      filterOption={(input, option) =>
+                        (option?.label ?? "")
+                          .toLowerCase()
+                          .includes(input.toLowerCase())
+                      }
+                      popupClassName="dark-select-dropdown"
+                      allowClear
+                      disabled={
+                        !!extractFirstUrl(newText) || !!selectedProjectId
+                      }
+                    />
                   </div>
-                )}
-              </div>
-            </Modal>
 
+                  <div
+                    className="composer-section"
+                    style={{
+                      ...composerSectionStyle,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 16,
+                      border: "1px solid #2a2a2a",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div
+                          style={{
+                            ...composerLabelStyle,
+                            marginBottom: 6,
+                            fontSize: 16,
+                          }}
+                        >
+                          Chọn project
+                        </div>
+                        <div
+                          style={{ ...composerHintStyle, lineHeight: "1.5" }}
+                        >
+                          Chỉ hiển thị các project có trạng thái active. Chỉ
+                          chọn 1 trong 3: Project, Lick, hoặc Link.
+                        </div>
+                      </div>
+                      <Tag
+                        color="#1f1f1f"
+                        style={{
+                          borderRadius: 999,
+                          color: "#9ca3af",
+                          border: "none",
+                          marginLeft: 12,
+                        }}
+                      >
+                        Tùy chọn
+                      </Tag>
+                    </div>
+                    <Select
+                      placeholder="Chọn project để đính kèm..."
+                      value={selectedProjectId}
+                      onChange={(value) => {
+                        setSelectedProjectId(value);
+                        if (value) {
+                          setSelectedLickIds([]);
+                          setLinkPreview(null);
+                        }
+                      }}
+                      loading={loadingProjects}
+                      style={{
+                        width: "100%",
+                        backgroundColor: "#1a1a1a",
+                        border: "1px solid #3a3a3a",
+                        borderRadius: 8,
+                      }}
+                      options={availableProjects}
+                      notFoundContent={
+                        loadingProjects ? (
+                          <Spin size="small" />
+                        ) : (
+                          <Empty description="Không có project active nào" />
+                        )
+                      }
+                      filterOption={(input, option) =>
+                        (option?.label ?? "")
+                          .toLowerCase()
+                          .includes(input.toLowerCase())
+                      }
+                      popupClassName="dark-select-dropdown"
+                      allowClear
+                      disabled={
+                        selectedLickIds.length > 0 || !!extractFirstUrl(newText)
+                      }
+                    />
+                  </div>
+
+                  {extractFirstUrl(newText) && selectedLickIds.length === 0 && (
+                    <div
+                      style={{
+                        ...composerSectionStyle,
+                        border: "1px solid #303030",
+                        background: "#111",
+                        color: "#e5e7eb",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 12,
+                      }}
+                    >
+                      {linkLoading ? (
+                        <Text style={{ color: "#bfbfbf" }}>
+                          Đang tải preview…
+                        </Text>
+                      ) : (
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 12,
+                            alignItems: "center",
+                          }}
+                        >
+                          {linkPreview?.thumbnailUrl ? (
+                            <img
+                              src={linkPreview.thumbnailUrl}
+                              alt="preview"
+                              style={{
+                                width: 64,
+                                height: 64,
+                                objectFit: "cover",
+                                borderRadius: 10,
+                              }}
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                width: 64,
+                                height: 64,
+                                borderRadius: 10,
+                                background: "#1f1f1f",
+                              }}
+                            />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontWeight: 600,
+                                color: "#fff",
+                                marginBottom: 4,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {linkPreview?.title || extractFirstUrl(newText)}
+                            </div>
+                            <div
+                              style={{
+                                color: "#9ca3af",
+                                fontSize: 12,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {extractFirstUrl(newText)}
+                            </div>
+                          </div>
+                          <Button
+                            size="small"
+                            onClick={() => setLinkPreview(null)}
+                          >
+                            Ẩn
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Modal>
+            </>
             {isMobileSidebar && (
               <Button
                 block
@@ -3884,35 +4016,54 @@ const NewsFeed = () => {
                 user.id.toString() === currentUserId.toString();
               return (
                 <List.Item
-                  style={{ padding: '12px 0', borderBottom: '1px solid #1f1f1f' }}
+                  style={{
+                    padding: "12px 0",
+                    borderBottom: "1px solid #1f1f1f",
+                  }}
                   actions={
-                    isCurrentUser ? null : [
-                      <Button
-                        key="follow"
-                        size="small"
-                        type={userIdToFollowing[user.id] ? 'default' : 'primary'}
-                        loading={!!userIdToFollowLoading[user.id]}
-                        onClick={() => toggleFollow(user.id)}
-                        style={{
-                          background: userIdToFollowing[user.id] ? '#111' : '#7c3aed',
-                          borderColor: userIdToFollowing[user.id] ? '#444' : '#7c3aed',
-                          color: '#fff',
-                        }}
-                      >
-                        {userIdToFollowing[user.id] ? 'Đang theo dõi' : 'Theo dõi'}
-                      </Button>
-                    ]
+                    isCurrentUser
+                      ? null
+                      : [
+                          <Button
+                            key="follow"
+                            size="small"
+                            type={
+                              userIdToFollowing[user.id] ? "default" : "primary"
+                            }
+                            loading={!!userIdToFollowLoading[user.id]}
+                            onClick={() => toggleFollow(user.id)}
+                            style={{
+                              background: userIdToFollowing[user.id]
+                                ? "#111"
+                                : "#7c3aed",
+                              borderColor: userIdToFollowing[user.id]
+                                ? "#444"
+                                : "#7c3aed",
+                              color: "#fff",
+                            }}
+                          >
+                            {userIdToFollowing[user.id]
+                              ? "Đang theo dõi"
+                              : "Theo dõi"}
+                          </Button>,
+                        ]
                   }
                 >
                   <List.Item.Meta
                     avatar={
                       <Avatar
                         size={40}
-                        src={user.avatarUrl && typeof user.avatarUrl === 'string' && user.avatarUrl.trim() !== '' ? user.avatarUrl : undefined}
-                        style={{ background: '#2db7f5', cursor: 'pointer' }}
+                        src={
+                          user.avatarUrl &&
+                          typeof user.avatarUrl === "string" &&
+                          user.avatarUrl.trim() !== ""
+                            ? user.avatarUrl
+                            : undefined
+                        }
+                        style={{ background: "#2db7f5", cursor: "pointer" }}
                         onClick={() => navigate(`/users/${user.id}/newfeeds`)}
                       >
-                        {user.displayName?.[0] || user.username?.[0] || 'U'}
+                        {user.displayName?.[0] || user.username?.[0] || "U"}
                       </Avatar>
                     }
                     title={
@@ -3949,13 +4100,21 @@ const NewsFeed = () => {
       >
         {modalPost && (
           <div>
-            <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-              <Avatar 
-                size={40} 
-                src={modalPost?.userId?.avatarUrl && typeof modalPost?.userId?.avatarUrl === 'string' && modalPost?.userId?.avatarUrl.trim() !== '' ? modalPost.userId.avatarUrl : undefined}
-                style={{ background: '#2db7f5' }}
+            <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+              <Avatar
+                size={40}
+                src={
+                  modalPost?.userId?.avatarUrl &&
+                  typeof modalPost?.userId?.avatarUrl === "string" &&
+                  modalPost?.userId?.avatarUrl.trim() !== ""
+                    ? modalPost.userId.avatarUrl
+                    : undefined
+                }
+                style={{ background: "#2db7f5" }}
               >
-                {modalPost?.userId?.displayName?.[0] || modalPost?.userId?.username?.[0] || 'U'}
+                {modalPost?.userId?.displayName?.[0] ||
+                  modalPost?.userId?.username?.[0] ||
+                  "U"}
               </Avatar>
               <div>
                 <div style={{ color: "#fff", fontWeight: 600 }}>
@@ -4107,145 +4266,253 @@ const NewsFeed = () => {
             </div>
 
             {/* comments list */}
-            <div style={{ marginTop: 12, maxHeight: 360, overflowY: 'auto' }}>
-              {(postIdToComments[commentPostId] || []).filter(c => !c.parentCommentId).map((c) => {
-                const canDelete = canDeleteComment(c, modalPost);
-                const replies = commentReplies[c._id] || [];
-                const isReplying = replyingToCommentId === c._id;
-                const replyText = replyTexts[c._id] || '';
-                return (
-                  <div key={c._id} style={{ marginBottom: 12 }}>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <Avatar 
-                        size={28} 
-                        src={c?.userId?.avatarUrl && typeof c?.userId?.avatarUrl === 'string' && c?.userId?.avatarUrl.trim() !== '' ? c.userId.avatarUrl : undefined}
-                        style={{ background: '#555' }}
-                      >
-                      {c?.userId?.displayName?.[0] || c?.userId?.username?.[0] || 'U'}
-                      </Avatar>
-                    <div
-                      style={{
-                        background: "#151515",
-                        border: "1px solid #232323",
-                        borderRadius: 10,
-                        padding: "6px 10px",
-                        color: "#e5e7eb",
-                        flex: 1,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <div style={{ fontWeight: 600 }}>
-                          {c?.userId?.displayName ||
-                            c?.userId?.username ||
-                            "Người dùng"}
-                        </div>
-                        {canDelete && (
-                          <Dropdown
-                            trigger={["click"]}
-                            menu={buildCommentMenuProps(commentPostId, c._id)}
+            <div style={{ marginTop: 12, maxHeight: 360, overflowY: "auto" }}>
+              {(postIdToComments[commentPostId] || [])
+                .filter((c) => !c.parentCommentId)
+                .map((c) => {
+                  const canDelete = canDeleteComment(c, modalPost);
+                  const replies = commentReplies[c._id] || [];
+                  const isReplying = replyingToCommentId === c._id;
+                  const replyText = replyTexts[c._id] || "";
+                  return (
+                    <div key={c._id} style={{ marginBottom: 12 }}>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <Avatar
+                          size={28}
+                          src={
+                            c?.userId?.avatarUrl &&
+                            typeof c?.userId?.avatarUrl === "string" &&
+                            c?.userId?.avatarUrl.trim() !== ""
+                              ? c.userId.avatarUrl
+                              : undefined
+                          }
+                          style={{ background: "#555" }}
+                        >
+                          {c?.userId?.displayName?.[0] ||
+                            c?.userId?.username?.[0] ||
+                            "U"}
+                        </Avatar>
+                        <div
+                          style={{
+                            background: "#151515",
+                            border: "1px solid #232323",
+                            borderRadius: 10,
+                            padding: "6px 10px",
+                            color: "#e5e7eb",
+                            flex: 1,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              gap: 8,
+                            }}
+                          >
+                            <div style={{ fontWeight: 600 }}>
+                              {c?.userId?.displayName ||
+                                c?.userId?.username ||
+                                "Người dùng"}
+                            </div>
+                            {canDelete && (
+                              <Dropdown
+                                trigger={["click"]}
+                                menu={buildCommentMenuProps(
+                                  commentPostId,
+                                  c._id
+                                )}
+                              >
+                                <Button
+                                  type="text"
+                                  icon={<MoreOutlined />}
+                                  loading={deletingCommentId === c._id}
+                                  style={{ color: "#9ca3af", padding: 0 }}
+                                />
+                              </Dropdown>
+                            )}
+                          </div>
+                          <div style={{ marginTop: 4, marginBottom: 6 }}>
+                            {c.comment}
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 12,
+                              marginTop: 4,
+                            }}
                           >
                             <Button
                               type="text"
-                              icon={<MoreOutlined />}
-                              loading={deletingCommentId === c._id}
-                              style={{ color: "#9ca3af", padding: 0 }}
+                              size="small"
+                              onClick={() =>
+                                isReplying
+                                  ? cancelReply(c._id)
+                                  : startReply(c._id)
+                              }
+                              style={{
+                                color: "#9ca3af",
+                                padding: 0,
+                                height: "auto",
+                                fontSize: 12,
+                              }}
+                            >
+                              {isReplying ? "Hủy" : "Phản hồi"}
+                            </Button>
+                            {replies.length > 0 && (
+                              <span style={{ color: "#9ca3af", fontSize: 12 }}>
+                                {replies.length} phản hồi
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Reply input */}
+                      {isReplying && (
+                        <div
+                          style={{
+                            marginLeft: 36,
+                            marginTop: 8,
+                            marginBottom: 8,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "center",
+                            }}
+                          >
+                            <Input
+                              placeholder="Nhập phản hồi..."
+                              value={replyText}
+                              onChange={(e) =>
+                                setReplyTexts((prev) => ({
+                                  ...prev,
+                                  [c._id]: e.target.value,
+                                }))
+                              }
+                              style={{
+                                background: "#0f0f10",
+                                color: "#e5e7eb",
+                                borderColor: "#303030",
+                                borderRadius: 8,
+                                flex: 1,
+                              }}
+                              onPressEnter={() => submitReply(c._id)}
                             />
-                          </Dropdown>
-                        )}
-                      </div>
-                        <div style={{ marginTop: 4, marginBottom: 6 }}>{c.comment}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
-                          <Button
-                            type="text"
-                            size="small"
-                            onClick={() => isReplying ? cancelReply(c._id) : startReply(c._id)}
-                            style={{ color: '#9ca3af', padding: 0, height: 'auto', fontSize: 12 }}
-                          >
-                            {isReplying ? 'Hủy' : 'Phản hồi'}
-                          </Button>
-                          {replies.length > 0 && (
-                            <span style={{ color: '#9ca3af', fontSize: 12 }}>
-                              {replies.length} phản hồi
-                            </span>
-                          )}
+                            <Button
+                              type="primary"
+                              size="small"
+                              loading={commentSubmitting}
+                              onClick={() => submitReply(c._id)}
+                              style={{
+                                background: "#7c3aed",
+                                borderColor: "#7c3aed",
+                                borderRadius: 8,
+                              }}
+                            >
+                              Gửi
+                            </Button>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                    
-                    {/* Reply input */}
-                    {isReplying && (
-                      <div style={{ marginLeft: 36, marginTop: 8, marginBottom: 8 }}>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <Input
-                            placeholder="Nhập phản hồi..."
-                            value={replyText}
-                            onChange={(e) => setReplyTexts((prev) => ({ ...prev, [c._id]: e.target.value }))}
-                            style={{ background: '#0f0f10', color: '#e5e7eb', borderColor: '#303030', borderRadius: 8, flex: 1 }}
-                            onPressEnter={() => submitReply(c._id)}
-                          />
-                          <Button
-                            type="primary"
-                            size="small"
-                            loading={commentSubmitting}
-                            onClick={() => submitReply(c._id)}
-                            style={{ background: '#7c3aed', borderColor: '#7c3aed', borderRadius: 8 }}
-                          >
-                            Gửi
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Replies list */}
-                    {replies.length > 0 && (
-                      <div style={{ marginLeft: 36, marginTop: 8 }}>
-                        {replies.map((reply) => {
-                          const canDeleteReply = canDeleteComment(reply, modalPost);
-                          return (
-                            <div key={reply._id} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                              <Avatar 
-                                size={24} 
-                                src={reply?.userId?.avatarUrl && typeof reply?.userId?.avatarUrl === 'string' && reply?.userId?.avatarUrl.trim() !== '' ? reply.userId.avatarUrl : undefined}
-                                style={{ background: '#555' }}
+                      )}
+
+                      {/* Replies list */}
+                      {replies.length > 0 && (
+                        <div style={{ marginLeft: 36, marginTop: 8 }}>
+                          {replies.map((reply) => {
+                            const canDeleteReply = canDeleteComment(
+                              reply,
+                              modalPost
+                            );
+                            return (
+                              <div
+                                key={reply._id}
+                                style={{
+                                  display: "flex",
+                                  gap: 8,
+                                  marginBottom: 8,
+                                }}
                               >
-                                {reply?.userId?.displayName?.[0] || reply?.userId?.username?.[0] || 'U'}
-                              </Avatar>
-                              <div style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '6px 10px', color: '#e5e7eb', flex: 1 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                                  <div style={{ fontWeight: 600, fontSize: 13 }}>
-                                    {reply?.userId?.displayName || reply?.userId?.username || 'Người dùng'}
-                                  </div>
-                                  {canDeleteReply && (
-                                    <Dropdown
-                                      trigger={['click']}
-                                      menu={buildCommentMenuProps(commentPostId, reply._id)}
+                                <Avatar
+                                  size={24}
+                                  src={
+                                    reply?.userId?.avatarUrl &&
+                                    typeof reply?.userId?.avatarUrl ===
+                                      "string" &&
+                                    reply?.userId?.avatarUrl.trim() !== ""
+                                      ? reply.userId.avatarUrl
+                                      : undefined
+                                  }
+                                  style={{ background: "#555" }}
+                                >
+                                  {reply?.userId?.displayName?.[0] ||
+                                    reply?.userId?.username?.[0] ||
+                                    "U"}
+                                </Avatar>
+                                <div
+                                  style={{
+                                    background: "#1a1a1a",
+                                    border: "1px solid #2a2a2a",
+                                    borderRadius: 8,
+                                    padding: "6px 10px",
+                                    color: "#e5e7eb",
+                                    flex: 1,
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      alignItems: "center",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    <div
+                                      style={{ fontWeight: 600, fontSize: 13 }}
                                     >
-                                      <Button
-                                        type="text"
-                                        icon={<MoreOutlined />}
-                                        loading={deletingCommentId === reply._id}
-                                        style={{ color: '#9ca3af', padding: 0, fontSize: 12 }}
-                                      />
-                                    </Dropdown>
-                                  )}
+                                      {reply?.userId?.displayName ||
+                                        reply?.userId?.username ||
+                                        "Người dùng"}
+                                    </div>
+                                    {canDeleteReply && (
+                                      <Dropdown
+                                        trigger={["click"]}
+                                        menu={buildCommentMenuProps(
+                                          commentPostId,
+                                          reply._id
+                                        )}
+                                      >
+                                        <Button
+                                          type="text"
+                                          icon={<MoreOutlined />}
+                                          loading={
+                                            deletingCommentId === reply._id
+                                          }
+                                          style={{
+                                            color: "#9ca3af",
+                                            padding: 0,
+                                            fontSize: 12,
+                                          }}
+                                        />
+                                      </Dropdown>
+                                    )}
+                                  </div>
+                                  <div style={{ fontSize: 13, marginTop: 2 }}>
+                                    {reply.comment}
+                                  </div>
                                 </div>
-                                <div style={{ fontSize: 13, marginTop: 2 }}>{reply.comment}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
 
             {/* input */}
@@ -4262,7 +4529,14 @@ const NewsFeed = () => {
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
                 onPressEnter={submitComment}
-                style={{ background: '#0f0f10', color: '#e5e7eb', borderColor: '#303030', height: 44, borderRadius: 22, flex: 1 }}
+                style={{
+                  background: "#0f0f10",
+                  color: "#e5e7eb",
+                  borderColor: "#303030",
+                  height: 44,
+                  borderRadius: 22,
+                  flex: 1,
+                }}
               />
               <Button
                 type="primary"
