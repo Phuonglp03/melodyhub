@@ -247,20 +247,6 @@ export default function InviteCollaboratorModal({
     return userId && currentUserId && String(userId) === String(currentUserId);
   };
 
-  // Debug logging to diagnose collaborator display issues
-  console.log("[DEBUG] Collaborator display (NO $):", {
-    allCollaboratorsCount: allCollaborators.length,
-    currentUserId,
-    allCollaborators: allCollaborators.map((c) => ({
-      userId: c.userId?._id || c.userId || c._id,
-      hasUser: !!c.user,
-      userDisplayName: c.user?.displayName || c.user?.username,
-      role: c.role,
-      status: c.status,
-      isCurrentUser: isCurrentUser(c),
-    })),
-  });
-
   if (!isOpen) return null;
 
   return (

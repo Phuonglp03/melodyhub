@@ -2,7 +2,7 @@
 // Phase 2: Frontend Middleware - The Sync Bridge
 // For ProjectDetailPage only
 import { useEffect, useRef, useCallback } from "react";
-import { getSocket } from "../services/user/socketService";
+import { getSocket, initSocket } from "../services/user/socketService";
 import { fetchCollabState } from "../services/user/collabService";
 import { collabChannel } from "../utils/collabChannel";
 import { nanoid } from "nanoid";
@@ -270,7 +270,23 @@ export const useProjectCollaboration = (projectId, user) => {
       return;
     }
 
-    const socket = getSocket();
+    // Make sure socket is initialized with the current user so realtime works
+    let socket = getSocket();
+    if (!socket) {
+      initSocket(resolvedUserId);
+      socket = getSocket();
+    } else if (
+      resolvedUserId &&
+      socket.io?.opts?.query?.userId &&
+      String(socket.io.opts.query.userId) !== String(resolvedUserId)
+    ) {
+      // Re-init if the existing socket was created for another user
+      initSocket(resolvedUserId);
+      socket = getSocket();
+    } else if (socket && !socket.connected) {
+      // If socket exists but got disconnected, try reconnecting
+      socket.connect();
+    }
     if (!socket) {
       console.warn("[Collaboration] Socket not available");
       if (COLLAB_DEBUG) {
@@ -337,29 +353,33 @@ export const useProjectCollaboration = (projectId, user) => {
           collabOpId: payload?.collabOpId,
         });
       }
-      if (!payload?.version) return;
+      // Some servers (COLLAB_V2 disabled) may not send version.
+      // If missing, just apply with a synthetic increment to keep flow alive.
+      const incomingVersion =
+        typeof payload?.version === "number"
+          ? payload.version
+          : versionRef.current + 1;
       const currentVersion = versionRef.current;
-      if (payload.version <= currentVersion) return;
+      if (incomingVersion <= currentVersion) return;
 
       // Only resync if version gap is significant (>1)
-      // Small gaps can be handled by normal update flow
-      if (payload.version > currentVersion + 1) {
+      if (incomingVersion > currentVersion + 1) {
         if (COLLAB_DEBUG) {
           console.warn(
             "[Collaboration] Version gap detected, requesting resync",
             currentVersion,
-            payload.version
+            incomingVersion
           );
           recordDebugEvent("recv:project:update:gap", {
             currentVersion,
-            incomingVersion: payload.version,
+            incomingVersion,
           });
         }
         performResync();
         return;
       }
 
-      versionRef.current = payload.version;
+      versionRef.current = incomingVersion;
       if (payload.senderId === resolvedUserId) return;
       applyRemotePayload(payload);
     });

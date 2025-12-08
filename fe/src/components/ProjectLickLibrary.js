@@ -216,25 +216,6 @@ function LickRow({ lick, onTogglePlay, isPlaying, onQuickAdd }) {
   const displayAuthorName = resolvedAuthor || lick.authorName;
   const displayAvatar = resolvedAvatar || lick.avatarUrl;
 
-  // Debug: Log if title or author is missing
-  if (!lick.title || lick.title === "Untitled Lick") {
-    console.log("Missing title for lick:", {
-      id: lick.id,
-      title: lick.title,
-      originalTitle: lick.original?.title,
-      key: lick.key,
-      style: lick.style,
-    });
-  }
-  if (!displayAuthorName || displayAuthorName === "Unknown") {
-    console.log("Missing author for lick:", {
-      id: lick.id,
-      authorName: lick.authorName,
-      displayAuthorName,
-      creatorUserId: lick.creatorUserId,
-    });
-  }
-
   return (
     <div
       ref={dragRef}
