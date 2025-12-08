@@ -130,6 +130,103 @@ export const onChatUnbanned = (callback) => {
   safeOn('chat-unbanned', callback);
 };
 
+// ---- Admin Livestream Realtime Events ----
+// Khi có livestream mới bắt đầu (global event)
+export const onStreamStarted = (callback) => {
+  console.log("[Socket] listen stream-started");
+  const socket = getSocket();
+  if (socket) {
+    const wrappedCallback = (payload) => {
+      console.log("[Socket] Received stream-started event:", payload);
+      callback(payload);
+    };
+    socket.on("stream-started", wrappedCallback);
+    if (!socket._streamStartedCallbacks) {
+      socket._streamStartedCallbacks = [];
+    }
+    socket._streamStartedCallbacks.push({ original: callback, wrapped: wrappedCallback });
+  }
+};
+export const offStreamStarted = (callback) => {
+  console.log("[Socket] off stream-started");
+  const socket = getSocket();
+  if (socket && socket._streamStartedCallbacks) {
+    const found = socket._streamStartedCallbacks.find(cb => cb.original === callback);
+    if (found) {
+      socket.off("stream-started", found.wrapped);
+      socket._streamStartedCallbacks = socket._streamStartedCallbacks.filter(cb => cb !== found);
+    } else {
+      socket.off("stream-started", callback);
+    }
+  } else if (socket) {
+    socket.off("stream-started", callback);
+  }
+};
+
+// Khi livestream kết thúc (global event)
+export const onGlobalStreamEnded = (callback) => {
+  console.log("[Socket] listen stream-ended (global)");
+  const socket = getSocket();
+  if (socket) {
+    const wrappedCallback = (payload) => {
+      console.log("[Socket] Received stream-ended (global) event:", payload);
+      callback(payload);
+    };
+    socket.on("stream-ended", wrappedCallback);
+    if (!socket._globalStreamEndedCallbacks) {
+      socket._globalStreamEndedCallbacks = [];
+    }
+    socket._globalStreamEndedCallbacks.push({ original: callback, wrapped: wrappedCallback });
+  }
+};
+export const offGlobalStreamEnded = (callback) => {
+  console.log("[Socket] off stream-ended (global)");
+  const socket = getSocket();
+  if (socket && socket._globalStreamEndedCallbacks) {
+    const found = socket._globalStreamEndedCallbacks.find(cb => cb.original === callback);
+    if (found) {
+      socket.off("stream-ended", found.wrapped);
+      socket._globalStreamEndedCallbacks = socket._globalStreamEndedCallbacks.filter(cb => cb !== found);
+    } else {
+      socket.off("stream-ended", callback);
+    }
+  } else if (socket) {
+    socket.off("stream-ended", callback);
+  }
+};
+
+// Khi có báo cáo livestream mới (cho admin)
+export const onNewLivestreamReport = (callback) => {
+  console.log("[Socket] listen new:livestream-report");
+  const socket = getSocket();
+  if (socket) {
+    const wrappedCallback = (payload) => {
+      console.log("[Socket] Received new:livestream-report event:", payload);
+      callback(payload);
+    };
+    socket.on("new:livestream-report", wrappedCallback);
+    if (!socket._newLivestreamReportCallbacks) {
+      socket._newLivestreamReportCallbacks = [];
+    }
+    socket._newLivestreamReportCallbacks.push({ original: callback, wrapped: wrappedCallback });
+  }
+};
+export const offNewLivestreamReport = (callback) => {
+  console.log("[Socket] off new:livestream-report");
+  const socket = getSocket();
+  if (socket && socket._newLivestreamReportCallbacks) {
+    const found = socket._newLivestreamReportCallbacks.find(cb => cb.original === callback);
+    if (found) {
+      socket.off("new:livestream-report", found.wrapped);
+      socket._newLivestreamReportCallbacks = socket._newLivestreamReportCallbacks.filter(cb => cb !== found);
+    } else {
+      socket.off("new:livestream-report", callback);
+    }
+  } else if (socket) {
+    socket.off("new:livestream-report", callback);
+  }
+};
+
 // ---- Posts / Comments realtime ----
 export const onPostCommentNew = (callback) => {
   getSocket()?.on("post:comment:new", callback);

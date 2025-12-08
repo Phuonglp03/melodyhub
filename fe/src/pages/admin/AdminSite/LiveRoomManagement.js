@@ -1,6 +1,19 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Search, Video, Clock, Users, Ban, StopCircle, Eye, Calendar, Shield, AlertTriangle, RefreshCw, ExternalLink, CheckCircle, XCircle, Flag, UserX, UserCheck, User } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Search, Video, Clock, Users, Ban, StopCircle, Eye, Calendar, Shield, AlertTriangle, RefreshCw, ExternalLink, CheckCircle, XCircle, Flag, UserX, UserCheck, User, X, Wifi } from 'lucide-react';
 import { livestreamAdminService } from '../../../services/admin/livestreamAdminService';
+import videojs from 'video.js';
+import '../../../../node_modules/video.js/dist/video-js.css';
+import LiveVideo from '../../../components/LiveVideo';
+import {
+  initSocket,
+  getSocket,
+  onStreamStarted,
+  offStreamStarted,
+  onGlobalStreamEnded,
+  offGlobalStreamEnded,
+  onNewLivestreamReport,
+  offNewLivestreamReport
+} from '../../../services/user/socketService';
 
 const LiveRoomManagement = () => {
   const [activeTab, setActiveTab] = useState('live');
@@ -19,6 +32,16 @@ const LiveRoomManagement = () => {
   const [banTarget, setBanTarget] = useState(null);
   const [banReason, setBanReason] = useState('Vi phạm quy định cộng đồng');
   const [customBanReason, setCustomBanReason] = useState('');
+
+  // Live stream modal state
+  const [showLiveModal, setShowLiveModal] = useState(false);
+  const [liveModalRoom, setLiveModalRoom] = useState(null);
+  const [playbackUrl, setPlaybackUrl] = useState(null);
+  const videoRef = useRef(null);
+  const playerRef = useRef(null);
+  
+  // Socket connection status
+  const [socketConnected, setSocketConnected] = useState(false);
 
   // Fetch active livestreams (all rooms with status 'live')
   const fetchActiveLivestreams = useCallback(async () => {
@@ -64,6 +87,82 @@ const LiveRoomManagement = () => {
     };
     loadData();
   }, [fetchActiveLivestreams, fetchReports, fetchBannedUsers]);
+
+  // Socket connection for real-time updates
+  useEffect(() => {
+    // Initialize socket
+    initSocket();
+    
+    // Check socket connection
+    const socket = getSocket();
+    if (socket) {
+      setSocketConnected(socket.connected);
+      
+      socket.on('connect', () => {
+        console.log('[Admin LiveRoom] Socket connected');
+        setSocketConnected(true);
+      });
+      
+      socket.on('disconnect', () => {
+        console.log('[Admin LiveRoom] Socket disconnected');
+        setSocketConnected(false);
+      });
+    }
+
+    // Handler when new livestream starts
+    const handleStreamStarted = (newRoom) => {
+      console.log('[Admin LiveRoom] New stream started:', newRoom);
+      setActiveLivestreams(prev => {
+        // Check if already exists
+        const exists = prev.some(r => r._id === newRoom._id);
+        if (exists) {
+          // Update existing
+          return prev.map(r => r._id === newRoom._id ? { ...r, ...newRoom, currentViewers: 0 } : r);
+        }
+        // Add new stream to beginning
+        return [{ ...newRoom, currentViewers: 0 }, ...prev];
+      });
+    };
+
+    // Handler when livestream ends
+    const handleStreamEnded = (data) => {
+      console.log('[Admin LiveRoom] Stream ended:', data);
+      const { roomId } = data;
+      // Remove from active livestreams
+      setActiveLivestreams(prev => prev.filter(r => r._id !== roomId));
+    };
+
+    // Handler when new livestream report is created
+    const handleNewLivestreamReport = (data) => {
+      console.log('[Admin LiveRoom] New livestream report:', data);
+      const { report } = data;
+      
+      // Add to reports list if not already exists
+      setReports(prev => {
+        const exists = prev.some(r => r._id === report._id);
+        if (exists) return prev;
+        // Add to beginning of list
+        return [report, ...prev];
+      });
+    };
+
+    // Register event listeners
+    onStreamStarted(handleStreamStarted);
+    onGlobalStreamEnded(handleStreamEnded);
+    onNewLivestreamReport(handleNewLivestreamReport);
+
+    // Cleanup
+    return () => {
+      offStreamStarted(handleStreamStarted);
+      offGlobalStreamEnded(handleStreamEnded);
+      offNewLivestreamReport(handleNewLivestreamReport);
+      
+      if (socket) {
+        socket.off('connect');
+        socket.off('disconnect');
+      }
+    };
+  }, []);
 
   // Refresh data
   const handleRefresh = async () => {
@@ -187,9 +286,146 @@ const LiveRoomManagement = () => {
     }
   };
 
-  const handleWatchLive = (roomId) => {
-    window.open(`/live/${roomId}`, '_blank');
+  const handleWatchLive = (room) => {
+    // Lấy playbackUrl từ room object (đã được backend trả về)
+    const hlsUrl = room.playbackUrls?.hls || 
+      (room.streamKey ? `${process.env.REACT_APP_MEDIA_SERVER_HTTP_URL || 'http://localhost:8000'}/live/${room.streamKey}/index.m3u8` : null);
+    
+    if (!hlsUrl) {
+      alert('Không thể lấy URL phát livestream. Vui lòng thử lại.');
+      return;
+    }
+    
+    setLiveModalRoom(room);
+    setPlaybackUrl(hlsUrl);
+    setShowLiveModal(true);
   };
+
+  // Cleanup video player khi modal đóng
+  useEffect(() => {
+    if (!showLiveModal && playerRef.current) {
+      try {
+        playerRef.current.dispose();
+        playerRef.current = null;
+      } catch (e) {
+        console.error('[Video.js] Dispose error:', e);
+      }
+      setPlaybackUrl(null);
+      setLiveModalRoom(null);
+    }
+  }, [showLiveModal]);
+
+  // Initialize video player khi modal mở và có playbackUrl
+  useEffect(() => {
+    if (!showLiveModal || !playbackUrl || !videoRef.current || playerRef.current) {
+      return;
+    }
+
+    const initializePlayer = () => {
+      if (!videoRef.current) return;
+
+      try {
+        const player = videojs(videoRef.current, {
+          autoplay: true,
+          muted: true,
+          controls: true,
+          fluid: false,
+          fill: true,
+          liveui: true,
+          liveTracker: {
+            trackingThreshold: 15,
+            liveTolerance: 10,
+          },
+          controlBar: {
+            progressControl: false,
+            currentTimeDisplay: false,
+            timeDivider: false,
+            durationDisplay: false,
+            remainingTimeDisplay: false,
+            seekToLive: true
+          },
+          html5: {
+            vhs: {
+              enableLowInitialPlaylist: true,
+              smoothQualityChange: true,
+              overrideNative: true,
+              bandwidth: 4194304,
+              limitRenditionByPlayerDimensions: false,
+              playlistRetryCount: 3,
+              playlistRetryDelay: 500,
+              bufferBasedBitrateSelection: true,
+              liveSyncDurationCount: 3,
+              liveMaxLatencyDurationCount: 7,
+            },
+            nativeAudioTracks: false,
+            nativeVideoTracks: false
+          }
+        });
+
+        player.src({
+          src: playbackUrl,
+          type: 'application/x-mpegURL'
+        });
+
+        player.ready(() => {
+          player.play().catch(() => {
+            player.muted(true);
+            player.play();
+          });
+        });
+
+        playerRef.current = player;
+
+        // Auto reconnect on error
+        player.on('error', () => {
+          const err = player.error();
+          console.warn('VideoJS Error:', err);
+          if (err && (err.code === 2 || err.code === 3 || err.code === 4)) {
+            console.log('Đang thử khôi phục stream...');
+            setTimeout(() => {
+              if (player && !player.isDisposed()) {
+                player.src({
+                  src: playbackUrl,
+                  type: 'application/x-mpegURL'
+                });
+                player.play().catch(e => console.log('Auto-play prevented'));
+              }
+            }, 1500);
+          }
+        });
+
+        let wasPaused = false;
+        player.on('pause', () => { wasPaused = true; });
+        player.on('play', () => {
+          if (wasPaused) {
+            setTimeout(() => {
+              const liveTracker = player.liveTracker;
+              if (liveTracker?.seekToLiveEdge) liveTracker.seekToLiveEdge();
+            }, 100);
+            wasPaused = false;
+          }
+        });
+
+      } catch (error) {
+        console.error('[Video.js] Initialization error:', error);
+      }
+    };
+
+    // Delay để đảm bảo DOM đã render
+    const timer = setTimeout(initializePlayer, 100);
+
+    return () => {
+      clearTimeout(timer);
+      if (playerRef.current) {
+        try {
+          playerRef.current.dispose();
+        } catch (e) {
+          console.error('[Video.js] Dispose error:', e);
+        }
+        playerRef.current = null;
+      }
+    };
+  }, [showLiveModal, playbackUrl]);
 
   // Reports stats
   const pendingReportsCount = reports.filter(r => r.status === 'pending').length;
@@ -288,13 +524,26 @@ const LiveRoomManagement = () => {
           </h1>
           <p className="text-gray-400 mt-2">Giám sát và xử lý các phòng livestream</p>
         </div>
-        <button 
-          onClick={handleRefresh}
-          className="px-4 py-2 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 rounded-xl text-violet-400 flex items-center gap-2 transition-all"
-        >
-          <RefreshCw size={18} />
-          Làm mới
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Socket connection indicator */}
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${
+            socketConnected 
+              ? 'bg-green-500/10 border-green-500/30 text-green-400' 
+              : 'bg-red-500/10 border-red-500/30 text-red-400'
+          }`}>
+            <Wifi size={16} className={socketConnected ? 'animate-pulse' : ''} />
+            <span className="text-sm font-medium">
+              {socketConnected ? 'Realtime' : 'Offline'}
+            </span>
+          </div>
+          <button 
+            onClick={handleRefresh}
+            className="px-4 py-2 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 rounded-xl text-violet-400 flex items-center gap-2 transition-all"
+          >
+            <RefreshCw size={18} />
+            Làm mới
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -545,12 +794,11 @@ const LiveRoomManagement = () => {
                     {/* Nút xem live - luôn hiển thị nếu room đang live */}
                     {report.room?.status === 'live' && (
                       <button
-                        onClick={() => handleWatchLive(report.room._id)}
+                        onClick={() => handleWatchLive(report.room)}
                         className="px-4 py-2 bg-violet-500 hover:bg-violet-600 text-white rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2"
                       >
                         <Eye size={16} />
                         Xem Live
-                        <ExternalLink size={12} />
                       </button>
                     )}
                     
@@ -675,7 +923,7 @@ const LiveRoomManagement = () => {
                   {room.status === 'live' && (
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
-                        onClick={() => handleWatchLive(room._id)}
+                        onClick={() => handleWatchLive(room)}
                         className="px-4 py-2 bg-violet-500 rounded-lg flex items-center gap-2 shadow-lg shadow-violet-500/50 hover:scale-110 transition-transform text-white font-medium"
                       >
                         <Eye size={18} />
@@ -716,12 +964,11 @@ const LiveRoomManagement = () => {
                   <div className="flex gap-2 mt-4">
                     {room.status === 'live' && (
                       <button
-                        onClick={() => handleWatchLive(room._id)}
+                        onClick={() => handleWatchLive(room)}
                         className="flex-1 px-3 py-2 bg-violet-500 hover:bg-violet-600 text-white rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-1"
                       >
                         <Eye size={16} />
                         Xem Live
-                        <ExternalLink size={12} />
                       </button>
                     )}
                     {room.moderationStatus === 'active' && room.status === 'live' && (
@@ -784,6 +1031,81 @@ const LiveRoomManagement = () => {
           </div>
         </div>
       </div>
+
+      {/* Live Stream Modal */}
+      {showLiveModal && liveModalRoom && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-xl border border-gray-700 w-full max-w-7xl h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-700">
+              <div className="flex-1">
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Video className="text-violet-400" size={24} />
+                  {liveModalRoom.title || 'Livestream'}
+                </h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  Host: {liveModalRoom.hostId?.displayName || liveModalRoom.hostId?.username || 'Unknown'}
+                  {liveModalRoom.currentViewers !== undefined && (
+                    <span className="ml-3">
+                      <Users size={14} className="inline mr-1" />
+                      {liveModalRoom.currentViewers} viewers
+                    </span>
+                  )}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowLiveModal(false)}
+                className="p-2 hover:bg-gray-800 rounded-lg transition-colors text-gray-400 hover:text-white"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Video Player */}
+            <div className="flex-1 relative bg-black overflow-hidden">
+              {playbackUrl ? (
+                <>
+                  <div data-vjs-player style={{ width: '100%', height: '100%' }}>
+                    <video
+                      ref={videoRef}
+                      className="video-js vjs-big-play-centered vjs-16-9"
+                      playsInline
+                      preload="auto"
+                      style={{ width: '100%', height: '100%' }}
+                    />
+                  </div>
+                  {playerRef.current && (
+                    <LiveVideo 
+                      player={playerRef.current} 
+                      style={{ top: '20px', left: '20px' }} 
+                    />
+                  )}
+                </>
+              ) : (
+                <div className="w-full h-full flex items-center justify-center flex-col gap-4 text-gray-400">
+                  <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
+                  <div>Đang tải tín hiệu...</div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Info */}
+            <div className="p-4 border-t border-gray-700 bg-gray-900/50">
+              <div className="flex items-center gap-4 text-sm text-gray-400">
+                {liveModalRoom.description && (
+                  <p className="flex-1 line-clamp-2">{liveModalRoom.description}</p>
+                )}
+                {liveModalRoom.startedAt && (
+                  <div className="flex items-center gap-1">
+                    <Clock size={14} />
+                    <span>Bắt đầu: {formatDate(liveModalRoom.startedAt)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Ban Modal */}
       {showBanModal && banTarget && (

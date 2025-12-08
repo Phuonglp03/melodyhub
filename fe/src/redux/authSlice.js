@@ -133,16 +133,26 @@ const authSlice = createSlice({
     },
     updateTokens: (state, action) => {
       // Update tokens after refresh
-      if (state.user && action.payload) {
-        state.user = {
-          ...state.user,
-          token: action.payload.token,
-          refreshToken: action.payload.refreshToken,
-          user: {
-            ...state.user.user,
-            ...action.payload.user
-          }
-        };
+      if (action.payload) {
+        if (state.user) {
+          // Cập nhật user hiện tại với token mới
+          state.user = {
+            ...state.user,
+            token: action.payload.token,
+            refreshToken: action.payload.refreshToken,
+            user: {
+              ...state.user.user,
+              ...action.payload.user
+            }
+          };
+        } else {
+          // Nếu không có user (edge case), tạo mới từ payload
+          state.user = {
+            token: action.payload.token,
+            refreshToken: action.payload.refreshToken,
+            user: action.payload.user
+          };
+        }
         console.log('[authSlice] Tokens updated:', { 
           tokenPreview: action.payload.token?.substring(0, 20) + '...',
           hasRefreshToken: !!action.payload.refreshToken 

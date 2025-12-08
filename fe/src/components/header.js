@@ -292,7 +292,7 @@ const AppHeader = () => {
         setIsModalVisible(false);
         modal.error({ 
           title: 'Tài khoản bị cấm Livestream',
-          content: `Bạn đã bị cấm phát livestream do: ${banStatus.reason || 'Vi phạm quy định cộng đồng'}. Vui lòng liên hệ hỗ trợ nếu bạn cho rằng đây là nhầm lẫn.`,
+          content: `Bạn đã bị cấm phát livestream do: ${banStatus.reason || 'Vi phạm quy định cộng đồng'}.`,
           okText: 'Đóng'
         });
         setIsCreating(false);
@@ -360,13 +360,13 @@ const AppHeader = () => {
   const renderNavLinks = (variant = 'default') => (
     <div className={`app-header__nav ${variant === 'stacked' ? 'app-header__nav--stacked' : ''}`}>
       <Text className="app-header__nav-item" onClick={() => handleNavigate('/live')}>
-        Join Live
+        Phòng Live
       </Text>
       <Text
         className="app-header__nav-item app-header__nav-link"
         onClick={() => handleNavigate('/library/my-licks')}
       >
-        Library
+        Thư viện
       </Text>
     </div>
   );
@@ -619,11 +619,11 @@ const AppHeader = () => {
       </Dropdown>
 
       <Button className="app-header__cta" icon={<FireOutlined />} onClick={handleLiveStreamClick}>
-        LiveStream
+        Phát Trực Tiếp
       </Button>
 
       <Button className="app-header__cta app-header__cta--secondary" onClick={() => handleNavigate('/projects')}>
-        Create project
+      Tạo Bản Nhạc
       </Button>
     </div>
   );
@@ -686,6 +686,9 @@ const AppHeader = () => {
 
   return (
     <>
+      {/* Context holder cho Modal.useModal() hook - cần thiết để modal hiển thị */}
+      {contextHolder}
+      
       <Header className="app-header">
         <div className="app-header__content">
           <Text className="app-header__logo" onClick={() => handleNavigate('/')}>

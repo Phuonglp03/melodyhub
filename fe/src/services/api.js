@@ -3,7 +3,7 @@ import { store } from "../redux/store";
 import { logout, updateTokens } from "../redux/authSlice";
 
 // const API_BASE_URL = "https://localhost:9999/api", "https://api.melodyhub.website/api";
-const API_BASE_URL = "https://api.melodyhub.website/api";
+const API_BASE_URL = "http://localhost:9999/api";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -62,14 +62,6 @@ api.interceptors.response.use(
       error.response?.status === 403 && 
       error.response?.data?.message?.includes('Tài khoản của bạn đã bị khóa');
 
-    // Check if 403 is due to permission denied (not token expired)
-    const isPermissionDenied = 
-      error.response?.status === 403 && 
-      !isAccountLocked &&
-      (error.response?.data?.message?.includes('Không có quyền') || 
-       error.response?.data?.message?.includes('permission') ||
-       error.response?.data?.message?.includes('Yêu cầu quyền'));
-
     // If account is locked, logout immediately
     if (isAccountLocked) {
       console.error("[API] Account is locked, logging out...");
@@ -79,18 +71,23 @@ api.interceptors.response.use(
       return Promise.reject(new Error(error.response?.data?.message || "Tài khoản của bạn đã bị khóa"));
     }
 
-    // If 401 (Unauthorized) or 403 (Forbidden - token expired) and haven't retried yet
-    // Don't refresh token if it's a permission denied error
+    // Only refresh token for 401 (Unauthorized) errors
+    // 403 errors are typically permission issues, NOT token expiration
+    const currentState = store.getState();
+    const hasToken = !!currentState.auth?.user?.token;
+    
     const shouldRefreshToken =
-      (error.response?.status === 401 || (error.response?.status === 403 && !isPermissionDenied && !isAccountLocked)) &&
+      error.response?.status === 401 &&  // Only 401, NOT 403
       !originalRequest._retry &&
-      !isAuthEndpoint; // Don't retry for auth endpoints
+      !isAuthEndpoint && // Don't retry for auth endpoints
+      hasToken; // Chỉ refresh nếu user đã đăng nhập (có token)
 
     if (shouldRefreshToken) {
       originalRequest._retry = true;
 
       try {
         console.log("[API] Token expired, refreshing...");
+        console.log("[API] Current token preview:", currentState.auth?.user?.token?.substring(0, 20) + '...');
 
         // Call refresh token endpoint
         const response = await axios.post(
@@ -101,7 +98,12 @@ api.interceptors.response.use(
 
         const { token, refreshToken, user } = response.data;
 
+        if (!token) {
+          throw new Error('Refresh token response missing access token');
+        }
+
         console.log("[API] Token refreshed successfully");
+        console.log("[API] New token preview:", token.substring(0, 20) + '...');
 
         // ✅ Update Redux store immediately (this is the key!)
         store.dispatch(
@@ -116,21 +118,32 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${token}`;
         return api(originalRequest);
       } catch (refreshError) {
-        console.error("[API] Refresh token failed, logging out...");
+        console.error("[API] Refresh token failed:", refreshError?.response?.data?.message || refreshError.message);
 
-        // Clear everything and redirect to login
-        store.dispatch(logout());
-        localStorage.clear();
-        window.location.href = "/login";
+        // Chỉ logout nếu refresh token thực sự không hợp lệ (401/403)
+        // Không logout nếu chỉ là lỗi mạng
+        if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
+          console.error("[API] Refresh token invalid, logging out...");
+          store.dispatch(logout());
+          localStorage.clear();
+          window.location.href = "/login";
+        } else {
+          console.error("[API] Refresh failed due to network error, not logging out");
+        }
 
         return Promise.reject(refreshError);
       }
     }
+    
+    // Nếu là 401 nhưng không có token (chưa đăng nhập), không cần xử lý đặc biệt
+    if (error.response?.status === 401 && !hasToken && !isAuthEndpoint) {
+      console.log("[API] 401 received but user not logged in, skipping refresh");
+    }
 
-    // Handle permission denied errors - don't logout, just reject
-    if (isPermissionDenied) {
+    // Handle 403 permission/access denied errors - don't logout, just reject
+    if (error.response?.status === 403 && !isAccountLocked) {
       const message = error?.response?.data?.message || "Không có quyền truy cập";
-      console.warn("[API] Permission denied:", message);
+      console.warn("[API] Permission/Access denied (403):", message);
       return Promise.reject(new Error(message));
     }
 
