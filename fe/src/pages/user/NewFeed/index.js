@@ -498,14 +498,14 @@ const NewsFeed = () => {
         const base =
           typeof window !== "undefined" && window.location
             ? window.location.origin
-            : "https://melodyhub.app";
+            : "https://melodyhub.website";
         url = new URL(urlString, base);
       } else {
         // Try to parse as relative path
         const base =
           typeof window !== "undefined" && window.location
             ? window.location.origin
-            : "https://melodyhub.app";
+            : "https://melodyhub.website";
         url = new URL("/" + urlString, base);
       }
 
@@ -555,14 +555,14 @@ const NewsFeed = () => {
         const base =
           typeof window !== "undefined" && window.location
             ? window.location.origin
-            : "https://melodyhub.app";
+            : "https://melodyhub.website";
         url = new URL(urlString, base);
       } else {
         // Try to parse as relative path
         const base =
           typeof window !== "undefined" && window.location
             ? window.location.origin
-            : "https://melodyhub.app";
+            : "https://melodyhub.website";
         url = new URL("/" + urlString, base);
       }
 

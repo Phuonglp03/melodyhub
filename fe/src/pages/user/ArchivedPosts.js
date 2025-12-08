@@ -30,7 +30,10 @@ import {
 } from "../../services/user/post";
 import { useNavigate } from "react-router-dom";
 import PostLickEmbed from "../../components/PostLickEmbed";
-import { onPostDeleted, offPostDeleted } from "../../services/user/socketService";
+import {
+  onPostDeleted,
+  offPostDeleted,
+} from "../../services/user/socketService";
 import "./ArchivedPostsResponsive.css";
 
 const { Text } = Typography;
@@ -72,7 +75,7 @@ const parseSharedLickId = (urlString) => {
     const base =
       typeof window !== "undefined" && window.location
         ? window.location.origin
-        : "https://melodyhub.app";
+        : "https://melodyhub.website";
     const normalised = urlString.startsWith("http")
       ? new URL(urlString)
       : new URL(urlString, base);
@@ -118,7 +121,10 @@ const ArchivedPosts = () => {
       for (const post of posts) {
         try {
           const statsRes = await getPostStats(post._id);
-          setPostIdToStats((prev) => ({ ...prev, [post._id]: statsRes?.data || {} }));
+          setPostIdToStats((prev) => ({
+            ...prev,
+            [post._id]: statsRes?.data || {},
+          }));
         } catch (e) {
           // Ignore errors
         }
@@ -156,24 +162,29 @@ const ArchivedPosts = () => {
   // Listen for post deleted event (admin deleted permanently)
   useEffect(() => {
     const handler = (payload) => {
-      console.log('[ArchivedPosts] Received post:deleted event:', payload);
+      console.log("[ArchivedPosts] Received post:deleted event:", payload);
       if (!payload?.postId) {
-        console.warn('[ArchivedPosts] post:deleted event missing postId');
+        console.warn("[ArchivedPosts] post:deleted event missing postId");
         return;
       }
       const postId = payload.postId.toString();
-      console.log('[ArchivedPosts] Removing post from archived list:', postId);
-      
+      console.log("[ArchivedPosts] Removing post from archived list:", postId);
+
       // Remove post from archived list immediately
       setItems((prev) => {
         const filtered = prev.filter((p) => {
           const pId = p._id?.toString() || p._id;
           return pId !== postId;
         });
-        console.log('[ArchivedPosts] After filter, items count:', filtered.length, 'removed:', prev.length - filtered.length);
+        console.log(
+          "[ArchivedPosts] After filter, items count:",
+          filtered.length,
+          "removed:",
+          prev.length - filtered.length
+        );
         return filtered;
       });
-      
+
       // Clean up related state
       setPostIdToStats((prev) => {
         const newState = { ...prev };
@@ -190,14 +201,16 @@ const ArchivedPosts = () => {
         delete newState[postId];
         return newState;
       });
-      
-      message.warning('Một bài viết đã bị xóa vĩnh viễn bởi admin do vi phạm quy định cộng đồng');
+
+      message.warning(
+        "Một bài viết đã bị xóa vĩnh viễn bởi admin do vi phạm quy định cộng đồng"
+      );
     };
-    
-    console.log('[ArchivedPosts] Setting up post:deleted listener');
+
+    console.log("[ArchivedPosts] Setting up post:deleted listener");
     onPostDeleted(handler);
     return () => {
-      console.log('[ArchivedPosts] Cleaning up post:deleted listener');
+      console.log("[ArchivedPosts] Cleaning up post:deleted listener");
       offPostDeleted(handler);
     };
   }, []);
@@ -250,7 +263,8 @@ const ArchivedPosts = () => {
   const handlePermanentDelete = (postId) => {
     Modal.confirm({
       title: "Xác nhận xóa vĩnh viễn",
-      content: "Bạn có chắc chắn muốn xóa vĩnh viễn bài viết này? Hành động này không thể hoàn tác.",
+      content:
+        "Bạn có chắc chắn muốn xóa vĩnh viễn bài viết này? Hành động này không thể hoàn tác.",
       okText: "Xóa",
       cancelText: "Hủy",
       okButtonProps: { danger: true },
@@ -276,14 +290,15 @@ const ArchivedPosts = () => {
           icon={<ArrowLeftOutlined />}
           onClick={() => navigate(-1)}
           style={{ marginBottom: 16 }}
-            >
+        >
           Quay lại
         </Button>
         <Typography.Title level={2} style={{ color: "#fff", margin: 0 }}>
           Bài viết đã lưu trữ
         </Typography.Title>
         <Text style={{ color: "#9ca3af" }}>
-          Các bài viết đã lưu trữ sẽ bị xóa vĩnh viễn sau 30 ngày nếu không khôi phục
+          Các bài viết đã lưu trữ sẽ bị xóa vĩnh viễn sau 30 ngày nếu không khôi
+          phục
         </Text>
       </div>
 
@@ -308,7 +323,9 @@ const ArchivedPosts = () => {
       {!loading && !error && items.length === 0 && (
         <Empty
           description={
-            <span style={{ color: "#9ca3af" }}>Chưa có bài viết nào được lưu trữ</span>
+            <span style={{ color: "#9ca3af" }}>
+              Chưa có bài viết nào được lưu trữ
+            </span>
           }
         />
       )}
@@ -379,10 +396,19 @@ const ArchivedPosts = () => {
                     loading={restoringPostId === post._id}
                     onClick={() => handleRestore(post._id)}
                     disabled={post.archivedByReports}
-                    title={post.archivedByReports ? "Bài viết này bị ẩn do báo cáo. Chỉ admin mới có thể khôi phục." : ""}
-                    style={{ background: "#f0edefff", borderColor: "#f9faf9ff" }}
+                    title={
+                      post.archivedByReports
+                        ? "Bài viết này bị ẩn do báo cáo. Chỉ admin mới có thể khôi phục."
+                        : ""
+                    }
+                    style={{
+                      background: "#f0edefff",
+                      borderColor: "#f9faf9ff",
+                    }}
                   >
-                    {post.archivedByReports ? "Đã bị ẩn do báo cáo" : "Khôi phục"}
+                    {post.archivedByReports
+                      ? "Đã bị ẩn do báo cáo"
+                      : "Khôi phục"}
                   </Button>
                   <Button
                     danger
@@ -396,9 +422,7 @@ const ArchivedPosts = () => {
               </div>
 
               {post?.textContent && (
-                <div className="archived-post-content">
-                  {post.textContent}
-                </div>
+                <div className="archived-post-content">{post.textContent}</div>
               )}
 
               {sharedLickId && (
@@ -532,4 +556,3 @@ const ArchivedPosts = () => {
 };
 
 export default ArchivedPosts;
-
