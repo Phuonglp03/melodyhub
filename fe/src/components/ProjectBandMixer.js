@@ -95,7 +95,7 @@ export default function ProjectBandMixer({
   };
 
   return (
-    <div className="flex flex-col gap-3 h-full">
+    <div className="flex flex-col gap-3 h-full min-h-0">
       {/* Style Selector */}
       <div className="flex items-center gap-3">
         <div className="flex flex-col flex-1">

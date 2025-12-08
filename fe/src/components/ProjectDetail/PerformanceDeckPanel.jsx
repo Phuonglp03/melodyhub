@@ -53,7 +53,7 @@ const PerformanceDeckPanel = ({
         </div>
 
         <div
-          className={`bg-gray-950 border-t border-gray-800 flex-1 flex flex-col transition-opacity duration-200 ${
+          className={`bg-gray-950 border-t border-gray-800 flex-1 flex flex-col min-h-0 transition-opacity duration-200 ${
             sidePanelOpen ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
         >

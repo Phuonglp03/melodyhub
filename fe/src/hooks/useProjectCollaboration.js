@@ -7,6 +7,20 @@ import { fetchCollabState } from "../services/user/collabService";
 import { collabChannel } from "../utils/collabChannel";
 import { nanoid } from "nanoid";
 
+// Helper function to safely call nanoid (handles hot reload and module resolution issues)
+const generateId = () => {
+  try {
+    if (typeof nanoid === 'function') {
+      return nanoid();
+    }
+    // Fallback if nanoid is not a function (hot reload issue)
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  } catch (error) {
+    // Last resort fallback
+    return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+};
+
 const HEARTBEAT_INTERVAL =
   Number(process.env.REACT_APP_COLLAB_HEARTBEAT_MS) || 15000;
 const RESYNC_RETRY_MS = Number(process.env.REACT_APP_COLLAB_RESYNC_MS) || 5000;
@@ -42,6 +56,9 @@ export const useProjectCollaboration = (projectId, user) => {
   const isRemoteUpdate = useRef(false);
   const socketRef = useRef(null);
   const hasJoinedRef = useRef(false);
+  const isJoinConfirmedRef = useRef(false);
+  const currentProjectIdRef = useRef(null);
+  const currentUserIdRef = useRef(null);
   const versionRef = useRef(0);
   const heartbeatTimerRef = useRef(null);
   const resyncTimeoutRef = useRef(null);
@@ -267,6 +284,10 @@ export const useProjectCollaboration = (projectId, user) => {
       console.log(
         "[Collaboration] Skipping - missing projectId or resolvedUserId"
       );
+      // Reset state when projectId is missing (user left project)
+      hasJoinedRef.current = false;
+      isJoinConfirmedRef.current = false;
+      // DON'T clear currentProjectIdRef here - keep it to detect rejoin
       return;
     }
 
@@ -300,9 +321,176 @@ export const useProjectCollaboration = (projectId, user) => {
       connected: socket.connected,
     });
 
-    socketRef.current = socket;
-    hasJoinedRef.current = false;
+    // Always reset join state when projectId changes or socket changes
+    // This ensures clean state when user leaves and rejoins a project
+    const previousProjectId = currentProjectIdRef.current;
+    const isRejoin = previousProjectId === projectId;
+    
+    // CRITICAL: Remove ALL old listeners FIRST to prevent duplicate listeners
+    // This is especially important when projectId changes or useEffect re-runs
+    socket.off("project:update");
+    socket.off("project:joined");
+    socket.off("project:presence");
+    socket.off("project:cursor_update");
+    socket.off("project:editing_activity");
+    socket.off("project:error");
+    socket.off("project:resync:response");
+    socket.off("project:ack");
+    socket.off("connect");
+    socket.off("disconnect");
 
+    socketRef.current = socket;
+    
+    // Always update refs to current values first
+    currentProjectIdRef.current = projectId;
+    currentUserIdRef.current = resolvedUserId;
+    
+    // Track if we should skip joining (already confirmed and joined)
+    let shouldSkipJoin = false;
+    
+    // CRITICAL: When rejoining the same project, check if we need to rejoin
+    if (isRejoin && socketRef.current?.connected) {
+      // If already confirmed and joined, skip rejoin (useEffect just re-ran)
+      if (isJoinConfirmedRef.current && hasJoinedRef.current) {
+        console.log(
+          "[Collaboration] Already confirmed and joined for same project, skipping rejoin:",
+          projectId
+        );
+        shouldSkipJoin = true;
+      } else {
+        // Need to rejoin - leave first
+        console.log(
+          "[Collaboration] Rejoining same project, leaving first:",
+          projectId,
+          "currentConfirmed:",
+          isJoinConfirmedRef.current,
+          "currentJoined:",
+          hasJoinedRef.current
+        );
+        socketRef.current.emit("project:leave", { projectId });
+        // Reset all state for clean rejoin
+        hasJoinedRef.current = false;
+        isJoinConfirmedRef.current = false;
+      }
+    } else if (previousProjectId && previousProjectId !== projectId && socketRef.current?.connected && hasJoinedRef.current) {
+      // Different project - leave previous one
+      console.log(
+        "[Collaboration] Leaving previous project before join:",
+        previousProjectId,
+        "new project:",
+        projectId
+      );
+      socketRef.current.emit("project:leave", { projectId: previousProjectId });
+      // Reset join state immediately
+      hasJoinedRef.current = false;
+      isJoinConfirmedRef.current = false;
+    } else if (!previousProjectId) {
+      // First time joining - reset state
+      hasJoinedRef.current = false;
+      isJoinConfirmedRef.current = false;
+    }
+
+    // CRITICAL: Setup ALL listeners BEFORE defining joinProject
+    // This ensures listeners are ready to catch events immediately
+
+    // Setup project:joined listener FIRST to catch confirmation immediately
+    // CRITICAL: Use refs instead of closure values to handle rejoin correctly
+    socket.on("project:joined", ({ projectId: joinedProjectId, userId: joinedUserId, version: joinedVersion }) => {
+      console.log(
+        "[Collaboration] Received project:joined event:",
+        {
+          joinedProjectId,
+          joinedUserId,
+          joinedVersion,
+          currentProjectIdRef: currentProjectIdRef.current,
+          resolvedUserId,
+          socketId: socket.id,
+          currentVersion: versionRef.current,
+        }
+      );
+      
+      // Always check against refs to handle rejoin correctly
+      // This ensures we accept confirmation even if values changed during rejoin
+      const currentProjectId = currentProjectIdRef.current;
+      const currentUserId = currentUserIdRef.current; // Use ref instead of closure value
+      
+      const projectIdMatch = String(joinedProjectId) === String(currentProjectId);
+      const userIdMatch = String(joinedUserId) === String(currentUserId);
+      
+      console.log(
+        "[Collaboration] Checking confirmation match:",
+        {
+          projectIdMatch,
+          userIdMatch,
+          joinedProjectId,
+          currentProjectId,
+          joinedUserId,
+          currentUserId,
+          joinedVersion,
+          currentVersion: versionRef.current,
+        }
+      );
+      
+      if (projectIdMatch && userIdMatch) {
+        const wasConfirmed = isJoinConfirmedRef.current;
+        isJoinConfirmedRef.current = true;
+        hasJoinedRef.current = true; // Always set hasJoined when confirmed
+        
+        // CRITICAL: Sync version immediately to prevent version gap issues
+        // This ensures that when we receive project:update events, they won't be rejected
+        // as "version gap" and trigger unnecessary resyncs
+        if (typeof joinedVersion === "number" && joinedVersion > versionRef.current) {
+          console.log(
+            "[Collaboration] 🔄 Syncing version from server:",
+            {
+              oldVersion: versionRef.current,
+              newVersion: joinedVersion,
+            }
+          );
+          versionRef.current = joinedVersion;
+        }
+        
+        console.log(
+          "[Collaboration] ✅ Join confirmed by server for project:",
+          currentProjectId,
+          "socket:",
+          socket.id,
+          "wasConfirmed:",
+          wasConfirmed,
+          "nowConfirmed:",
+          isJoinConfirmedRef.current,
+          "hasJoined:",
+          hasJoinedRef.current,
+          "version:",
+          versionRef.current
+        );
+        
+        // Clear any pending confirmation timeouts
+        if (socketRef.current?._confirmationTimeouts) {
+          socketRef.current._confirmationTimeouts.forEach(timeout => clearTimeout(timeout));
+          socketRef.current._confirmationTimeouts = [];
+        }
+        
+        if (COLLAB_DEBUG) {
+          recordDebugEvent("recv:project:joined", { projectId: joinedProjectId, version: joinedVersion });
+        }
+      } else {
+        console.warn(
+          "[Collaboration] ⚠️ Ignoring project:joined confirmation - mismatch:",
+          { 
+            joinedProjectId, 
+            currentProjectId, 
+            projectIdMatch,
+            joinedUserId, 
+            currentUserId,
+            userIdMatch,
+            resolvedUserId
+          }
+        );
+      }
+    });
+
+    // Define joinProject function AFTER listeners are setup
     const joinProject = () => {
       if (!socket || !projectId || !resolvedUserId) {
         console.log("[Collaboration] Cannot join - missing:", {
@@ -313,39 +501,105 @@ export const useProjectCollaboration = (projectId, user) => {
         return;
       }
 
+      // CRITICAL: Don't join if already confirmed for this project AND already joined
+      // This prevents duplicate joins when useEffect runs multiple times
+      // But allow rejoin if hasJoined is false (e.g., after leave)
+      if (isJoinConfirmedRef.current && hasJoinedRef.current && currentProjectIdRef.current === projectId) {
+        console.log(
+          "[Collaboration] Already confirmed and joined for project, skipping join:",
+          projectId
+        );
+        return;
+      }
+
       if (socket.connected) {
         console.log("[Collaboration] Emitting project:join:", {
           projectId,
           userId: resolvedUserId,
           socketId: socket.id,
+          previousProjectId,
+          isRejoin: previousProjectId === projectId,
         });
 
         if (COLLAB_DEBUG) {
           console.log("[Collaboration] Joining project:", projectId);
         }
+        console.log("[Collaboration] About to emit project:join, current state:", {
+          projectId,
+          currentProjectIdRef: currentProjectIdRef.current,
+          hasJoined: hasJoinedRef.current,
+          isConfirmed: isJoinConfirmedRef.current,
+          socketId: socket.id,
+        });
+        
         socket.emit("project:join", { projectId, userId: resolvedUserId });
         hasJoinedRef.current = true;
+        // CRITICAL: Don't reset isJoinConfirmedRef if already confirmed for this project
+        // This prevents race condition where confirmation arrives before we reset it
+        if (currentProjectIdRef.current !== projectId) {
+          isJoinConfirmedRef.current = false; // Reset only if project changed
+        }
         startHeartbeat();
+
+        // Fallback: If we don't receive confirmation within 1.5 seconds, assume we're joined
+        // This handles cases where confirmation might be missed due to timing issues
+        const confirmationTimeoutRef = setTimeout(() => {
+          if (!isJoinConfirmedRef.current && socket.connected && currentProjectIdRef.current === projectId) {
+            console.warn(
+              "[Collaboration] Join confirmation timeout after 1.5s, assuming joined for project:",
+              projectId,
+              "currentProjectIdRef:",
+              currentProjectIdRef.current
+            );
+            isJoinConfirmedRef.current = true;
+          }
+        }, 1500);
+
+        // Store timeout ref for cleanup
+        if (!socketRef.current._confirmationTimeouts) {
+          socketRef.current._confirmationTimeouts = [];
+        }
+        socketRef.current._confirmationTimeouts.push(confirmationTimeoutRef);
 
         // Request initial presence after joining
         // Some servers may not automatically send presence on join
         setTimeout(() => {
-          if (socket.connected && projectId) {
+          if (socket.connected && projectId && currentProjectIdRef.current === projectId) {
             console.log("[Collaboration] Requesting presence after join");
             socket.emit("project:presence:request", { projectId });
           }
         }, 500);
+
+        // Perform initial resync after joining to get latest state
+        // This ensures new users receive all changes made before they joined
+        setTimeout(() => {
+          if (socket.connected && projectId && currentProjectIdRef.current === projectId) {
+            console.log("[Collaboration] Performing initial resync after join");
+            performResync();
+          }
+        }, 800);
       } else {
         console.log("[Collaboration] Cannot join - socket not connected");
       }
     };
 
-    if (socket.connected) {
-      joinProject();
-    }
-
+    // Setup remaining listeners
     socket.on("project:update", (payload) => {
       markActivity();
+      
+      console.log(
+        "[Collaboration] 📥 Received project:update:",
+        {
+          type: payload?.type,
+          senderId: payload?.senderId,
+          currentUserId: resolvedUserId,
+          version: payload?.version,
+          currentVersion: versionRef.current,
+          collabOpId: payload?.collabOpId,
+          isOwnAction: payload?.senderId === resolvedUserId,
+        }
+      );
+      
       if (COLLAB_DEBUG) {
         recordDebugEvent("recv:project:update", {
           type: payload?.type,
@@ -360,16 +614,22 @@ export const useProjectCollaboration = (projectId, user) => {
           ? payload.version
           : versionRef.current + 1;
       const currentVersion = versionRef.current;
-      if (incomingVersion <= currentVersion) return;
+      
+      if (incomingVersion <= currentVersion) {
+        console.log(
+          "[Collaboration] ⏭️ Skipping project:update - version too old:",
+          { incomingVersion, currentVersion }
+        );
+        return;
+      }
 
       // Only resync if version gap is significant (>1)
       if (incomingVersion > currentVersion + 1) {
+        console.warn(
+          "[Collaboration] ⚠️ Version gap detected, requesting resync",
+          { currentVersion, incomingVersion }
+        );
         if (COLLAB_DEBUG) {
-          console.warn(
-            "[Collaboration] Version gap detected, requesting resync",
-            currentVersion,
-            incomingVersion
-          );
           recordDebugEvent("recv:project:update:gap", {
             currentVersion,
             incomingVersion,
@@ -380,7 +640,18 @@ export const useProjectCollaboration = (projectId, user) => {
       }
 
       versionRef.current = incomingVersion;
-      if (payload.senderId === resolvedUserId) return;
+      if (payload.senderId === resolvedUserId) {
+        console.log(
+          "[Collaboration] ⏭️ Skipping project:update - own action",
+          { senderId: payload.senderId, currentUserId: resolvedUserId }
+        );
+        return;
+      }
+      
+      console.log(
+        "[Collaboration] ✅ Applying remote payload:",
+        { type: payload?.type, senderId: payload?.senderId }
+      );
       applyRemotePayload(payload);
     });
 
@@ -481,24 +752,20 @@ export const useProjectCollaboration = (projectId, user) => {
         recordDebugEvent("socket:connect", { socketId: socket.id });
       }
 
-      if (hasJoinedRef.current && projectId && resolvedUserId) {
+      // Always rejoin project on reconnect, even if hasJoinedRef is true
+      // because the new socket connection needs to join the room again
+      if (projectId && resolvedUserId) {
         if (COLLAB_DEBUG) {
           console.log(
-            "[Collaboration] Reconnecting, rejoining project:",
+            "[Collaboration] Socket connected, joining project:",
             projectId
           );
         }
-        socket.emit("project:join", { projectId, userId: resolvedUserId });
-        // Request presence after reconnecting
-        setTimeout(() => {
-          if (socket.connected && projectId) {
-            socket.emit("project:presence:request", { projectId });
-          }
-        }, 500);
-      } else if (!hasJoinedRef.current) {
+        // Reset join state - new socket needs to join again
+        hasJoinedRef.current = false;
+        isJoinConfirmedRef.current = false;
         joinProject();
       }
-      performResync();
     });
 
     socket.on("disconnect", (reason) => {
@@ -506,6 +773,8 @@ export const useProjectCollaboration = (projectId, user) => {
         console.log("[Collaboration] Socket disconnected:", reason);
       }
       hasJoinedRef.current = false;
+      isJoinConfirmedRef.current = false;
+      // Don't clear currentProjectIdRef on disconnect - it will be set on reconnect
       cleanupHeartbeat();
       cleanupActivityWatcher();
       emitChannelEvent("project:remote:connection", {
@@ -517,6 +786,8 @@ export const useProjectCollaboration = (projectId, user) => {
       }
     });
 
+    // Now that ALL listeners are setup, we can safely join the project
+    // This ensures we don't miss the project:joined confirmation event
     if (socket.connected) {
       emitChannelEvent("project:remote:connection", {
         connected: true,
@@ -524,6 +795,24 @@ export const useProjectCollaboration = (projectId, user) => {
       markActivity();
       if (COLLAB_DEBUG) {
         recordDebugEvent("socket:connected-initial", { socketId: socket.id });
+      }
+      // Join project AFTER all listeners are setup
+      // Skip if already confirmed and joined (useEffect just re-ran)
+      if (shouldSkipJoin) {
+        console.log("[Collaboration] Skipping join - already confirmed and joined");
+        return;
+      }
+      
+      // If rejoin, add small delay to ensure leave completes
+      if (isRejoin) {
+        setTimeout(() => {
+          if (socket.connected && currentProjectIdRef.current === projectId) {
+            console.log("[Collaboration] Rejoin delay complete, joining project");
+            joinProject();
+          }
+        }, 150);
+      } else {
+        joinProject();
       }
     }
 
@@ -560,9 +849,12 @@ export const useProjectCollaboration = (projectId, user) => {
         clearTimeout(resyncTimeoutRef.current);
         resyncTimeoutRef.current = null;
       }
-      if (hasJoinedRef.current) {
-        socket.emit("project:leave", { projectId });
+      if (hasJoinedRef.current && currentProjectIdRef.current) {
+        socket.emit("project:leave", { projectId: currentProjectIdRef.current });
         hasJoinedRef.current = false;
+        isJoinConfirmedRef.current = false;
+        // DON'T clear currentProjectIdRef here - we need it to detect rejoin
+        // It will be updated when new projectId is set in next useEffect
       }
       Object.values(throttleTimersRef.current).forEach((timer) => {
         if (timer) clearTimeout(timer);
@@ -571,6 +863,7 @@ export const useProjectCollaboration = (projectId, user) => {
       throttlePayloadRef.current = {};
       if (presenceRequestUnsub) presenceRequestUnsub();
       socket.off("project:update");
+      socket.off("project:joined");
       socket.off("project:presence");
       socket.off("project:cursor_update");
       socket.off("project:editing_activity");
@@ -594,33 +887,75 @@ export const useProjectCollaboration = (projectId, user) => {
   // OPTIMIZED: Direct Send (No Throttling Logic Overhead)
   const sendAction = useCallback(
     (type, data, options = {}) => {
+      const currentProjectId = currentProjectIdRef.current;
+      const currentUserId = currentUserIdRef.current;
+      
       if (!socketRef.current?.connected) {
-        if (COLLAB_DEBUG) {
-          console.warn(
-            "[Collaboration] Cannot broadcast - socket not connected",
-            type
-          );
-        }
+        console.warn(
+          "[Collaboration] ⚠️ Cannot broadcast - socket not connected",
+          { type, currentProjectId }
+        );
         return;
       }
+      
+      // Wait for join confirmation before allowing broadcasts
+      // This ensures socket.data is set on server side
+      if (!isJoinConfirmedRef.current) {
+        console.warn(
+          "[Collaboration] ⚠️ Cannot broadcast - join not confirmed yet",
+          {
+            type,
+            currentProjectId,
+            isConfirmed: isJoinConfirmedRef.current,
+            hasJoined: hasJoinedRef.current,
+            socketConnected: socketRef.current?.connected,
+            socketId: socketRef.current?.id,
+          }
+        );
+        return;
+      }
+      
+      // Double-check that we're still in the same project
+      // Use currentProjectIdRef instead of projectId from closure to avoid stale values
+      if (!currentProjectId) {
+        console.warn(
+          "[Collaboration] ⚠️ Cannot broadcast - no current project",
+          { type }
+        );
+        return;
+      }
+      
       markActivity();
-      // Remove heavy logging/debug overhead in production
+      
+      // Always log for debugging during this issue
+      console.log(
+        "[Collaboration] ✅ Broadcasting project:action:",
+        {
+          type,
+          projectId: currentProjectId,
+          userId: currentUserId,
+          socketId: socketRef.current?.id,
+          isConfirmed: isJoinConfirmedRef.current,
+          hasJoined: hasJoinedRef.current,
+        }
+      );
+      
       if (COLLAB_DEBUG) {
         recordDebugEvent("emit:project:action", {
           type,
           payloadBytes: data ? JSON.stringify(data).length : 0,
         });
       }
-      const collabOpId = options.collabOpId || nanoid();
+      const collabOpId = options.collabOpId || generateId();
       socketRef.current.emit("project:action", {
         type,
         data,
-        projectId,
+        projectId: currentProjectId,
         collabOpId,
       });
       return collabOpId;
     },
-    [projectId, markActivity, recordDebugEvent]
+    [markActivity, recordDebugEvent]
   );
 
   // OPTIMIZED: Smart Broadcast with Trailing Edge Throttling
@@ -644,7 +979,7 @@ export const useProjectCollaboration = (projectId, user) => {
       // This is "trailing edge" throttling - we always send the latest value.
       throttlePayloadRef.current[type] = {
         data,
-        collabOpId: nanoid(),
+        collabOpId: generateId(),
       };
 
       if (throttleTimersRef.current[type]) return; // Timer already running
