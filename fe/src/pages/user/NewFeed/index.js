@@ -2646,43 +2646,248 @@ const NewsFeed = () => {
               </Button>
             </div>
 
-            {isInitialLoading && (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "center",
-                  padding: 24,
-                }}
-              >
-                <Spin />
-              </div>
-            )}
-            {!loading && error && (
-              <Card
-                style={{
-                  marginBottom: 20,
-                  background: "#0f0f10",
-                  borderColor: "#1f1f1f",
-                }}
-              >
-                <Text style={{ color: "#fff" }}>{error}</Text>
-              </Card>
-            )}
-            {!isInitialLoading && !error && items.length === 0 && (
-              <Empty
-                description={
-                  <span style={{ color: "#9ca3af" }}>Chưa có bài đăng</span>
-                }
-              />
-            )}
-            <>
-              {items.map((post) => (
-                <Card
-                  key={post._id}
+            <Modal
+              open={isModalOpen}
+              title={
+                <span style={{ color: "#fff", fontWeight: 600 }}>
+                  Tạo bài đăng
+                </span>
+              }
+              onCancel={handleModalClose}
+              footer={
+                <div
                   style={{
-                    marginBottom: 20,
-                    background: "#0f0f10",
-                    borderColor: "#1f1f1f",
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <Button
+                    shape="round"
+                    onClick={handleModalClose}
+                    style={{
+                      height: 44,
+                      borderRadius: 22,
+                      padding: 0,
+                      width: 108,
+                      background: "#1f1f1f",
+                      color: "#e5e7eb",
+                      borderColor: "#303030",
+                    }}
+                  >
+                    Hủy
+                  </Button>
+                  <Button
+                    shape="round"
+                    loading={posting}
+                    onClick={handleCreatePost}
+                    style={{
+                      height: 44,
+                      borderRadius: 22,
+                      padding: 0,
+                      width: 108,
+                      background: "#7c3aed",
+                      borderColor: "#7c3aed",
+                    }}
+                  >
+                    Đăng
+                  </Button>
+                </div>
+              }
+              styles={{
+                content: { background: "#0f0f10" },
+                header: {
+                  background: "#0f0f10",
+                  borderBottom: "1px solid #1f1f1f",
+                },
+              }}
+            >
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 16 }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <Space size={12} align="center">
+                    <Avatar
+                      size={48}
+                      src={
+                        composerAvatarUrl &&
+                        typeof composerAvatarUrl === "string" &&
+                        composerAvatarUrl.trim() !== ""
+                          ? composerAvatarUrl
+                          : undefined
+                      }
+                      style={{ background: "#7c3aed" }}
+                    >
+                      {composerInitial}
+                    </Avatar>
+                    <div>
+                      <Text style={{ color: "#fff", fontWeight: 600 }}>
+                        {composerDisplayName}
+                      </Text>
+                      <div style={{ color: "#9ca3af", fontSize: 13 }}>
+                        Sẵn sàng chia sẻ cảm hứng với cộng đồng
+                      </div>
+                    </div>
+                  </Space>
+                  <Tag
+                    color="#7c3aed"
+                    style={{
+                      borderRadius: 999,
+                      margin: 0,
+                      color: "#fff",
+                      border: "none",
+                    }}
+                  >
+                    Bài viết mới
+                  </Tag>
+                </div>
+
+                <div
+                  style={{
+                    ...composerSectionStyle,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                >
+                  <Input.TextArea
+                    placeholder="Chia sẻ điều gì đó..."
+                    autoSize={{ minRows: 4, maxRows: 10 }}
+                    value={newText}
+                    onChange={(e) => setNewText(e.target.value)}
+                    allowClear
+                    style={{
+                      background: "#0b0b0f",
+                      border: "1px solid #222",
+                      borderRadius: 14,
+                      padding: 16,
+                      color: "#f8fafc",
+                      fontSize: 16,
+                      boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.02)",
+                    }}
+                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <span style={{ color: "#9ca3af", fontSize: 13 }}>
+                      Bạn có thể chèn link lick hoặc video để auto preview
+                    </span>
+                    <span style={{ color: "#fff", fontWeight: 600 }}>
+                      {usedChars}/{maxChars}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      height: 6,
+                      width: "100%",
+                      background: "#1f1f1f",
+                      borderRadius: 999,
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${charPercent}%`,
+                        background: charPercent > 80 ? "#f97316" : "#7c3aed",
+                        borderRadius: 999,
+                        transition: "width 0.2s ease",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    ...composerSectionStyle,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <div style={composerLabelStyle}>Đính kèm lick</div>
+                      <div style={composerHintStyle}>
+                        Chỉ hiển thị các lick đang active trong tài khoản. Chỉ
+                        chọn 1 trong 3: Project, Lick, hoặc Link.
+                      </div>
+                    </div>
+                    <Tag
+                      color="#1f1f1f"
+                      style={{
+                        borderRadius: 999,
+                        color: "#9ca3af",
+                        border: "none",
+                      }}
+                    >
+                      Tùy chọn
+                    </Tag>
+                  </div>
+                  <Select
+                    mode="multiple"
+                    placeholder="Tìm và chọn 1 lick để đính kèm..."
+                    value={selectedLickIds}
+                    onChange={(values) => {
+                      const next = Array.isArray(values)
+                        ? values.slice(0, 1)
+                        : [];
+                      setSelectedLickIds(next);
+                      if (next.length > 0) {
+                        setLinkPreview(null);
+                        setSelectedProjectId(null);
+                      }
+                    }}
+                    loading={loadingLicks}
+                    style={{
+                      width: "100%",
+                      backgroundColor: "#1a1a1a",
+                      border: "1px solid #3a3a3a",
+                      borderRadius: 8,
+                    }}
+                    options={availableLicks}
+                    notFoundContent={
+                      loadingLicks ? (
+                        <Spin size="small" />
+                      ) : (
+                        <Empty description="Không có lick active nào" />
+                      )
+                    }
+                    filterOption={(input, option) =>
+                      (option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                    }
+                    popupClassName="dark-select-dropdown"
+                    allowClear
+                    disabled={!!extractFirstUrl(newText) || !!selectedProjectId}
+                  />
+                </div>
+
+                <div
+                  className="composer-section"
+                  style={{
+                    ...composerSectionStyle,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 16,
+                    border: "1px solid #2a2a2a",
                   }}
                 >
                   <div
@@ -2690,645 +2895,156 @@ const NewsFeed = () => {
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "flex-start",
-                      marginBottom: 12,
+                      marginBottom: 4,
                     }}
                   >
-                    <Space align="start" size={14}>
+                    <div style={{ flex: 1 }}>
                       <div
-                        role="button"
-                        onClick={() => {
-                          const uid = getAuthorId(post);
-                          if (uid) navigate(`/users/${uid}/newfeeds`);
+                        style={{
+                          ...composerLabelStyle,
+                          marginBottom: 6,
+                          fontSize: 16,
                         }}
-                        style={{ cursor: "pointer" }}
                       >
-                        <Avatar
-                          size={40}
-                          src={
-                            post?.userId?.avatarUrl &&
-                            typeof post?.userId?.avatarUrl === "string" &&
-                            post?.userId?.avatarUrl.trim() !== ""
-                              ? post.userId.avatarUrl
-                              : undefined
-                          }
-                          style={{ background: "#2db7f5" }}
-                        >
-                          {post?.userId?.displayName?.[0] ||
-                            post?.userId?.username?.[0] ||
-                            "U"}
-                        </Avatar>
+                        Chọn project
                       </div>
-                      <div>
-                        <Space style={{ marginBottom: 4 }}>
-                          <span
-                            onClick={() => {
-                              const uid = getAuthorId(post);
-                              if (uid) navigate(`/users/${uid}/newfeeds`);
-                            }}
-                            style={{
-                              color: "#fff",
-                              fontSize: 16,
-                              fontWeight: 600,
-                              cursor: "pointer",
-                            }}
-                          >
-                            {post?.userId?.displayName ||
-                              post?.userId?.username ||
-                              "Người dùng"}
-                          </span>
-                          <Text
-                            type="secondary"
-                            style={{ color: "#9ca3af", fontSize: 13 }}
-                          >
-                            {formatTime(post?.createdAt)}
-                          </Text>
-                        </Space>
+                      <div style={{ ...composerHintStyle, lineHeight: "1.5" }}>
+                        Chỉ hiển thị các project có trạng thái active. Chỉ chọn
+                        1 trong 3: Project, Lick, hoặc Link.
                       </div>
-                    </Space>
-                    <Space>
-                      {(() => {
-                        const uid = getAuthorId(post);
-                        const isFollowing = !!userIdToFollowing[uid];
-                        const loading = !!userIdToFollowLoading[uid];
-                        if (
-                          uid &&
-                          currentUserId &&
-                          uid.toString() === currentUserId.toString()
-                        )
-                          return null;
-                        return (
-                          <Button
-                            size="middle"
-                            loading={loading}
-                            onClick={() => toggleFollow(uid)}
-                            style={{
-                              background: isFollowing ? "#111" : "#333",
-                              borderColor: isFollowing ? "#444" : "#333",
-                              color: "#fff",
-                            }}
-                          >
-                            {isFollowing ? "Đang theo dõi" : "Theo dõi"}
-                          </Button>
-                        );
-                      })()}
-                      {currentUserId &&
-                        (() => {
-                          const uid = getAuthorId(post);
-                          const isOwnPost =
-                            uid &&
-                            currentUserId &&
-                            uid.toString() === currentUserId.toString();
-
-                          if (isOwnPost) {
-                            // Menu for own posts: Edit and Hide
-                            return (
-                              <Dropdown
-                                menu={{
-                                  items: [
-                                    {
-                                      key: "edit",
-                                      label: "Chỉnh sửa bài post",
-                                      icon: <EditOutlined />,
-                                      onClick: () => openEditModal(post),
-                                    },
-                                    {
-                                      key: "hide",
-                                      label: "Ẩn bài post",
-                                      icon: <DeleteOutlined />,
-                                      danger: true,
-                                      loading: deletingPostId === post._id,
-                                      onClick: () => handleHidePost(post._id),
-                                    },
-                                  ],
-                                }}
-                                trigger={["click"]}
-                              >
-                                <Button
-                                  type="text"
-                                  icon={<MoreOutlined />}
-                                  style={{ color: "#9ca3af" }}
-                                  loading={deletingPostId === post._id}
-                                />
-                              </Dropdown>
-                            );
-                          }
-
-                          // Menu for other users' posts: Report
-                          return (
-                            <Dropdown
-                              menu={{
-                                items: [
-                                  {
-                                    key: "report",
-                                    label: postIdToReported[post._id]
-                                      ? "Đã báo cáo"
-                                      : "Báo cáo bài viết",
-                                    icon: <FlagOutlined />,
-                                    disabled: postIdToReported[post._id],
-                                    onClick: () => openReportModal(post._id),
-                                  },
-                                ],
-                              }}
-                              trigger={["click"]}
-                            >
-                              <Button
-                                type="text"
-                                icon={<MoreOutlined />}
-                                style={{ color: "#9ca3af" }}
-                              />
-                            </Dropdown>
-                          );
-                        })()}
-                    </Space>
-                  </div>
-
-                  {/* Added wrapper div for body content */}
-                  <div>
-                    {/* Chỉ hiển thị text, nhưng ẩn các dòng chỉ chứa URL (để không lộ link thô) */}
-                    {(() => {
-                      // Get user data with fallback to localStorage
-                      const user =
-                        currentUser ||
-                        (() => {
-                          try {
-                            const raw = localStorage.getItem("user");
-                            if (raw) {
-                              const obj = JSON.parse(raw);
-                              return obj?.user || obj;
-                            }
-                          } catch {}
-                          return null;
-                        })();
-
-                      const avatarUrl = user?.avatarUrl || user?.avatar_url;
-                      const displayName =
-                        user?.displayName || user?.username || "";
-                      const initial = displayName
-                        ? displayName[0].toUpperCase()
-                        : "U";
-
-                      // Only use src if avatarUrl is a valid non-empty string
-                      const validAvatarUrl =
-                        avatarUrl &&
-                        typeof avatarUrl === "string" &&
-                        avatarUrl.trim() !== "" &&
-                        avatarUrl !== ""
-                          ? avatarUrl.trim()
-                          : null;
-
-                      console.log("[NewsFeed] Avatar render:", {
-                        hasUser: !!user,
-                        avatarUrl,
-                        validAvatarUrl,
-                        displayName,
-                        initial,
-                      });
-
-                      return (
-                        <Avatar size={40} src={validAvatarUrl || undefined}>
-                          {initial}
-                        </Avatar>
-                      );
-                    })()}
-                    <Input.TextArea
-                      className="composer-input"
-                      placeholder="Có gì mới ?"
-                      autoSize={{ minRows: 2, maxRows: 8 }}
-                      style={{
-                        flex: 1,
-                        background: "#fff",
-                        border: "none",
-                        borderRadius: 10,
-                        minHeight: 56,
-                        fontSize: 16,
-                      }}
-                      readOnly
-                    />
-                    <Button
-                      className="composer-action-btn"
-                      type="primary"
-                      size="large"
-                      style={{
-                        borderRadius: 999,
-                        background: "#1890ff",
-                        padding: "0 22px",
-                        height: 44,
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleModalOpen();
-                      }}
-                    >
-                      Post
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-
-              <Modal
-                open={isModalOpen}
-                title={
-                  <span style={{ color: "#fff", fontWeight: 600 }}>
-                    Tạo bài đăng
-                  </span>
-                }
-                onCancel={handleModalClose}
-                footer={
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "flex-end",
-                      alignItems: "center",
-                      gap: 12,
-                    }}
-                  >
-                    <Button
-                      shape="round"
-                      onClick={handleModalClose}
-                      style={{
-                        height: 44,
-                        borderRadius: 22,
-                        padding: 0,
-                        width: 108,
-                        background: "#1f1f1f",
-                        color: "#e5e7eb",
-                        borderColor: "#303030",
-                      }}
-                    >
-                      Hủy
-                    </Button>
-                    <Button
-                      shape="round"
-                      loading={posting}
-                      onClick={handleCreatePost}
-                      style={{
-                        height: 44,
-                        borderRadius: 22,
-                        padding: 0,
-                        width: 108,
-                        background: "#7c3aed",
-                        borderColor: "#7c3aed",
-                      }}
-                    >
-                      Đăng
-                    </Button>
-                  </div>
-                }
-                styles={{
-                  content: { background: "#0f0f10" },
-                  header: {
-                    background: "#0f0f10",
-                    borderBottom: "1px solid #1f1f1f",
-                  },
-                }}
-              >
-                <div
-                  style={{ display: "flex", flexDirection: "column", gap: 16 }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <Space size={12} align="center">
-                      <Avatar
-                        size={48}
-                        src={
-                          composerAvatarUrl &&
-                          typeof composerAvatarUrl === "string" &&
-                          composerAvatarUrl.trim() !== ""
-                            ? composerAvatarUrl
-                            : undefined
-                        }
-                        style={{ background: "#7c3aed" }}
-                      >
-                        {composerInitial}
-                      </Avatar>
-                      <div>
-                        <Text style={{ color: "#fff", fontWeight: 600 }}>
-                          {composerDisplayName}
-                        </Text>
-                        <div style={{ color: "#9ca3af", fontSize: 13 }}>
-                          Sẵn sàng chia sẻ cảm hứng với cộng đồng
-                        </div>
-                      </div>
-                    </Space>
+                    </div>
                     <Tag
-                      color="#7c3aed"
+                      color="#1f1f1f"
                       style={{
                         borderRadius: 999,
-                        margin: 0,
-                        color: "#fff",
+                        color: "#9ca3af",
                         border: "none",
+                        marginLeft: 12,
                       }}
                     >
-                      Bài viết mới
+                      Tùy chọn
                     </Tag>
                   </div>
+                  <Select
+                    placeholder="Chọn project để đính kèm..."
+                    value={selectedProjectId}
+                    onChange={(value) => {
+                      setSelectedProjectId(value);
+                      if (value) {
+                        setSelectedLickIds([]);
+                        setLinkPreview(null);
+                      }
+                    }}
+                    loading={loadingProjects}
+                    style={{
+                      width: "100%",
+                      backgroundColor: "#1a1a1a",
+                      border: "1px solid #3a3a3a",
+                      borderRadius: 8,
+                    }}
+                    options={availableProjects}
+                    notFoundContent={
+                      loadingProjects ? (
+                        <Spin size="small" />
+                      ) : (
+                        <Empty description="Không có project active nào" />
+                      )
+                    }
+                    filterOption={(input, option) =>
+                      (option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                    }
+                    popupClassName="dark-select-dropdown"
+                    allowClear
+                    disabled={
+                      selectedLickIds.length > 0 || !!extractFirstUrl(newText)
+                    }
+                  />
+                </div>
 
+                {extractFirstUrl(newText) && selectedLickIds.length === 0 && (
                   <div
                     style={{
                       ...composerSectionStyle,
+                      border: "1px solid #303030",
+                      background: "#111",
+                      color: "#e5e7eb",
                       display: "flex",
                       flexDirection: "column",
                       gap: 12,
                     }}
                   >
-                    <Input.TextArea
-                      placeholder="Chia sẻ điều gì đó..."
-                      autoSize={{ minRows: 4, maxRows: 10 }}
-                      value={newText}
-                      onChange={(e) => setNewText(e.target.value)}
-                      allowClear
-                      style={{
-                        background: "#0b0b0f",
-                        border: "1px solid #222",
-                        borderRadius: 14,
-                        padding: 16,
-                        color: "#f8fafc",
-                        fontSize: 16,
-                        boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.02)",
-                      }}
-                    />
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                      }}
-                    >
-                      <span style={{ color: "#9ca3af", fontSize: 13 }}>
-                        Bạn có thể chèn link lick hoặc video để auto preview
-                      </span>
-                      <span style={{ color: "#fff", fontWeight: 600 }}>
-                        {usedChars}/{maxChars}
-                      </span>
-                    </div>
-                    <div
-                      style={{
-                        height: 6,
-                        width: "100%",
-                        background: "#1f1f1f",
-                        borderRadius: 999,
-                      }}
-                    >
+                    {linkLoading ? (
+                      <Text style={{ color: "#bfbfbf" }}>
+                        Đang tải preview…
+                      </Text>
+                    ) : (
                       <div
                         style={{
-                          height: "100%",
-                          width: `${charPercent}%`,
-                          background: charPercent > 80 ? "#f97316" : "#7c3aed",
-                          borderRadius: 999,
-                          transition: "width 0.2s ease",
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      ...composerSectionStyle,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 12,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                      }}
-                    >
-                      <div>
-                        <div style={composerLabelStyle}>Đính kèm lick</div>
-                        <div style={composerHintStyle}>
-                          Chỉ hiển thị các lick đang active trong tài khoản. Chỉ
-                          chọn 1 trong 3: Project, Lick, hoặc Link.
-                        </div>
-                      </div>
-                      <Tag
-                        color="#1f1f1f"
-                        style={{
-                          borderRadius: 999,
-                          color: "#9ca3af",
-                          border: "none",
+                          display: "flex",
+                          gap: 12,
+                          alignItems: "center",
                         }}
                       >
-                        Tùy chọn
-                      </Tag>
-                    </div>
-                    <Select
-                      mode="multiple"
-                      placeholder="Tìm và chọn 1 lick để đính kèm..."
-                      value={selectedLickIds}
-                      onChange={(values) => {
-                        const next = Array.isArray(values)
-                          ? values.slice(0, 1)
-                          : [];
-                        setSelectedLickIds(next);
-                        if (next.length > 0) {
-                          setLinkPreview(null);
-                          setSelectedProjectId(null);
-                        }
-                      }}
-                      loading={loadingLicks}
-                      style={{
-                        width: "100%",
-                        backgroundColor: "#1a1a1a",
-                        border: "1px solid #3a3a3a",
-                        borderRadius: 8,
-                      }}
-                      options={availableLicks}
-                      notFoundContent={
-                        loadingLicks ? (
-                          <Spin size="small" />
+                        {linkPreview?.thumbnailUrl ? (
+                          <img
+                            src={linkPreview.thumbnailUrl}
+                            alt="preview"
+                            style={{
+                              width: 64,
+                              height: 64,
+                              objectFit: "cover",
+                              borderRadius: 10,
+                            }}
+                          />
                         ) : (
-                          <Empty description="Không có lick active nào" />
-                        )
-                      }
-                      filterOption={(input, option) =>
-                        (option?.label ?? "")
-                          .toLowerCase()
-                          .includes(input.toLowerCase())
-                      }
-                      popupClassName="dark-select-dropdown"
-                      allowClear
-                      disabled={
-                        !!extractFirstUrl(newText) || !!selectedProjectId
-                      }
-                    />
-                  </div>
-
-                  <div
-                    className="composer-section"
-                    style={{
-                      ...composerSectionStyle,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 16,
-                      border: "1px solid #2a2a2a",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "flex-start",
-                        marginBottom: 4,
-                      }}
-                    >
-                      <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            ...composerLabelStyle,
-                            marginBottom: 6,
-                            fontSize: 16,
-                          }}
-                        >
-                          Chọn project
-                        </div>
-                        <div
-                          style={{ ...composerHintStyle, lineHeight: "1.5" }}
-                        >
-                          Chỉ hiển thị các project có trạng thái active. Chỉ
-                          chọn 1 trong 3: Project, Lick, hoặc Link.
-                        </div>
-                      </div>
-                      <Tag
-                        color="#1f1f1f"
-                        style={{
-                          borderRadius: 999,
-                          color: "#9ca3af",
-                          border: "none",
-                          marginLeft: 12,
-                        }}
-                      >
-                        Tùy chọn
-                      </Tag>
-                    </div>
-                    <Select
-                      placeholder="Chọn project để đính kèm..."
-                      value={selectedProjectId}
-                      onChange={(value) => {
-                        setSelectedProjectId(value);
-                        if (value) {
-                          setSelectedLickIds([]);
-                          setLinkPreview(null);
-                        }
-                      }}
-                      loading={loadingProjects}
-                      style={{
-                        width: "100%",
-                        backgroundColor: "#1a1a1a",
-                        border: "1px solid #3a3a3a",
-                        borderRadius: 8,
-                      }}
-                      options={availableProjects}
-                      notFoundContent={
-                        loadingProjects ? (
-                          <Spin size="small" />
-                        ) : (
-                          <Empty description="Không có project active nào" />
-                        )
-                      }
-                      filterOption={(input, option) =>
-                        (option?.label ?? "")
-                          .toLowerCase()
-                          .includes(input.toLowerCase())
-                      }
-                      popupClassName="dark-select-dropdown"
-                      allowClear
-                      disabled={
-                        selectedLickIds.length > 0 || !!extractFirstUrl(newText)
-                      }
-                    />
-                  </div>
-
-                  {extractFirstUrl(newText) && selectedLickIds.length === 0 && (
-                    <div
-                      style={{
-                        ...composerSectionStyle,
-                        border: "1px solid #303030",
-                        background: "#111",
-                        color: "#e5e7eb",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 12,
-                      }}
-                    >
-                      {linkLoading ? (
-                        <Text style={{ color: "#bfbfbf" }}>
-                          Đang tải preview…
-                        </Text>
-                      ) : (
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 12,
-                            alignItems: "center",
-                          }}
-                        >
-                          {linkPreview?.thumbnailUrl ? (
-                            <img
-                              src={linkPreview.thumbnailUrl}
-                              alt="preview"
-                              style={{
-                                width: 64,
-                                height: 64,
-                                objectFit: "cover",
-                                borderRadius: 10,
-                              }}
-                            />
-                          ) : (
-                            <div
-                              style={{
-                                width: 64,
-                                height: 64,
-                                borderRadius: 10,
-                                background: "#1f1f1f",
-                              }}
-                            />
-                          )}
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div
-                              style={{
-                                fontWeight: 600,
-                                color: "#fff",
-                                marginBottom: 4,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {linkPreview?.title || extractFirstUrl(newText)}
-                            </div>
-                            <div
-                              style={{
-                                color: "#9ca3af",
-                                fontSize: 12,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {extractFirstUrl(newText)}
-                            </div>
-                          </div>
-                          <Button
-                            size="small"
-                            onClick={() => setLinkPreview(null)}
+                          <div
+                            style={{
+                              width: 64,
+                              height: 64,
+                              borderRadius: 10,
+                              background: "#1f1f1f",
+                            }}
+                          />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              color: "#fff",
+                              marginBottom: 4,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
                           >
-                            Ẩn
-                          </Button>
+                            {linkPreview?.title || extractFirstUrl(newText)}
+                          </div>
+                          <div
+                            style={{
+                              color: "#9ca3af",
+                              fontSize: 12,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {extractFirstUrl(newText)}
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </Modal>
-            </>
+                        <Button
+                          size="small"
+                          onClick={() => setLinkPreview(null)}
+                        >
+                          Ẩn
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Modal>
             {isMobileSidebar && (
               <Button
                 block
