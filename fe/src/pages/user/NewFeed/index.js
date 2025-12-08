@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useSelector } from "react-redux";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   Card,
@@ -405,29 +406,12 @@ const NewsFeed = () => {
   const [leaderboardPlayingId, setLeaderboardPlayingId] = useState(null);
   const [leaderboardLoadingId, setLeaderboardLoadingId] = useState(null);
   const leaderboardAudioRef = React.useRef(null);
-  const [currentUserId] = useState(() => {
-    try {
-      const raw = localStorage.getItem("user");
-      if (!raw) return undefined;
-      const obj = JSON.parse(raw);
-      const u = obj?.user || obj;
-      return u?.id || u?.userId || u?._id;
-    } catch {
-      return undefined;
-    }
-  });
-
-  const [currentUser, setCurrentUser] = useState(() => {
-    // Initialize from localStorage immediately
-    try {
-      const raw = localStorage.getItem("user");
-      if (raw) {
-        const obj = JSON.parse(raw);
-        return obj?.user || obj;
-      }
-    } catch {}
-    return null;
-  });
+  const { user: authUser } = useSelector((state) => state.auth || {});
+  const currentUserId = useMemo(
+    () => authUser?._id || authUser?.id || authUser?.userId || null,
+    [authUser]
+  );
+  const [currentUser, setCurrentUser] = useState(authUser || null);
   const [loadingProfile, setLoadingProfile] = useState(false);
 
   const [modal, modalContextHolder] = Modal.useModal();
@@ -439,17 +423,9 @@ const NewsFeed = () => {
 
   const composerUser = useMemo(() => {
     if (currentUser && Object.keys(currentUser).length > 0) return currentUser;
-    try {
-      const raw = localStorage.getItem("user");
-      if (raw) {
-        const obj = JSON.parse(raw);
-        return obj?.user || obj;
-      }
-    } catch {
-      // ignore
-    }
+    if (authUser && Object.keys(authUser).length > 0) return authUser;
     return null;
-  }, [currentUser]);
+  }, [authUser, currentUser]);
 
   const composerAvatarUrl =
     composerUser?.avatarUrl || composerUser?.avatar_url || "";
@@ -2193,6 +2169,11 @@ const NewsFeed = () => {
     };
   }, [loading, hasMore, page, limit]);
 
+  // Keep local currentUser in sync with persisted auth user
+  useEffect(() => {
+    setCurrentUser(authUser || null);
+  }, [authUser]);
+
   // Fetch current user profile
   useEffect(() => {
     const fetchMyProfile = async () => {
@@ -2207,21 +2188,9 @@ const NewsFeed = () => {
         if (userData) {
           console.log("[NewsFeed] Setting currentUser from API:", userData);
           setCurrentUser(userData);
-        } else {
-          console.log(
-            "[NewsFeed] No user data from API, keeping localStorage value"
-          );
         }
       } catch (error) {
         console.error("[NewsFeed] Error fetching profile:", error);
-        // Fallback to localStorage
-        try {
-          const raw = localStorage.getItem("user");
-          if (raw) {
-            const obj = JSON.parse(raw);
-            setCurrentUser(obj?.user || obj);
-          }
-        } catch {}
       } finally {
         setLoadingProfile(false);
       }
@@ -2570,19 +2539,7 @@ const NewsFeed = () => {
               onClick={handleModalOpen}
             >
               {(() => {
-                // Get user data with fallback to localStorage
-                const user =
-                  currentUser ||
-                  (() => {
-                    try {
-                      const raw = localStorage.getItem("user");
-                      if (raw) {
-                        const obj = JSON.parse(raw);
-                        return obj?.user || obj;
-                      }
-                    } catch {}
-                    return null;
-                  })();
+                const user = currentUser || authUser || null;
 
                 const avatarUrl = user?.avatarUrl || user?.avatar_url;
                 const displayName = user?.displayName || user?.username || "";
