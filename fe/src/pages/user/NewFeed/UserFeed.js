@@ -2183,10 +2183,9 @@ const UserFeed = () => {
                     transition: "opacity 0.2s",
                   }}
                   onClick={() => {
-                    if (userId && profile?.followersCount > 0) {
-                      setFollowersModalOpen(true);
-                      fetchFollowers();
-                    }
+                    if (!userId) return;
+                    setFollowersModalOpen(true);
+                    fetchFollowers();
                   }}
                   onMouseEnter={(e) => {
                     if (profile?.followersCount > 0) {
@@ -2211,10 +2210,9 @@ const UserFeed = () => {
                     transition: "opacity 0.2s",
                   }}
                   onClick={() => {
-                    if (userId && profile?.followingCount > 0) {
-                      setFollowingModalOpen(true);
-                      fetchFollowing();
-                    }
+                    if (!userId) return;
+                    setFollowingModalOpen(true);
+                    fetchFollowing();
                   }}
                   onMouseEnter={(e) => {
                     if (profile?.followingCount > 0) {
@@ -2565,6 +2563,13 @@ const UserFeed = () => {
                           borderRadius: 8,
                         }}
                         options={availableLicks}
+                        dropdownMatchSelectWidth={false}
+                        dropdownStyle={{
+                          minWidth: 360,
+                          maxWidth: 520,
+                          whiteSpace: "normal",
+                        }}
+                        optionLabelProp="label"
                         notFoundContent={
                           loadingLicks ? (
                             <Spin size="small" />
@@ -2577,7 +2582,7 @@ const UserFeed = () => {
                             .toLowerCase()
                             .includes(input.toLowerCase())
                         }
-                        popupClassName="dark-select-dropdown"
+                        popupClassName="dark-select-dropdown project-select-dropdown"
                         allowClear
                         disabled={
                           !!extractFirstUrl(newText) || !!selectedProjectId
@@ -2650,6 +2655,13 @@ const UserFeed = () => {
                           borderRadius: 8,
                         }}
                         options={availableProjects}
+                        dropdownMatchSelectWidth={false}
+                        dropdownStyle={{
+                          minWidth: 360,
+                          maxWidth: 520,
+                          whiteSpace: "normal",
+                        }}
+                        optionLabelProp="label"
                         notFoundContent={
                           loadingProjects ? (
                             <Spin size="small" />
@@ -2662,7 +2674,7 @@ const UserFeed = () => {
                             .toLowerCase()
                             .includes(input.toLowerCase())
                         }
-                        popupClassName="dark-select-dropdown"
+                        popupClassName="dark-select-dropdown project-select-dropdown"
                         allowClear
                         disabled={
                           selectedLickIds.length > 0 ||
@@ -4856,6 +4868,13 @@ const UserFeed = () => {
                             borderRadius: 8,
                           }}
                           options={availableLicks}
+                          dropdownMatchSelectWidth={false}
+                          dropdownStyle={{
+                            minWidth: 360,
+                            maxWidth: 520,
+                            whiteSpace: "normal",
+                          }}
+                          optionLabelProp="label"
                           notFoundContent={
                             loadingLicks ? (
                               <Spin size="small" />
@@ -4868,7 +4887,7 @@ const UserFeed = () => {
                               .toLowerCase()
                               .includes(input.toLowerCase())
                           }
-                          popupClassName="dark-select-dropdown"
+                          popupClassName="dark-select-dropdown project-select-dropdown"
                           allowClear
                         />
                       </div>
@@ -4932,6 +4951,13 @@ const UserFeed = () => {
                             borderRadius: 8,
                           }}
                           options={availableProjects}
+                        dropdownMatchSelectWidth={false}
+                        dropdownStyle={{
+                          minWidth: 360,
+                          maxWidth: 520,
+                          whiteSpace: "normal",
+                        }}
+                        optionLabelProp="label"
                           notFoundContent={
                             loadingProjects ? (
                               <Spin size="small" />
@@ -4944,7 +4970,7 @@ const UserFeed = () => {
                               .toLowerCase()
                               .includes(input.toLowerCase())
                           }
-                          popupClassName="dark-select-dropdown"
+                          popupClassName="dark-select-dropdown project-select-dropdown"
                           allowClear
                           showSearch
                           optionFilterProp="label"

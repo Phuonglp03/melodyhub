@@ -35,6 +35,7 @@ import {
   CustomerServiceOutlined,
   LinkOutlined,
   MenuOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import {
   listPosts,
@@ -336,6 +337,15 @@ const limitToNewest3 = (comments) => {
   return sorted.slice(0, 3);
 };
 
+const sortPostsByCreatedAtDesc = (posts) => {
+  if (!Array.isArray(posts)) return [];
+  return [...posts].sort((a, b) => {
+    const timeA = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const timeB = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return timeB - timeA;
+  });
+};
+
 const NewsFeed = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -347,6 +357,12 @@ const NewsFeed = () => {
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(true);
   const loaderRef = React.useRef(null);
+  const mainScrollRef = React.useRef(null);
+  const itemsRef = React.useRef([]);
+  const [pendingNewPosts, setPendingNewPosts] = useState([]);
+  const [isNearTop, setIsNearTop] = useState(true);
+  const [lastSeenTopId, setLastSeenTopId] = useState(null);
+  const [lastSeenTopCreatedAt, setLastSeenTopCreatedAt] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newText, setNewText] = useState("");
   const [showMediaUpload, setShowMediaUpload] = useState(false);
@@ -407,11 +423,22 @@ const NewsFeed = () => {
   const [leaderboardLoadingId, setLeaderboardLoadingId] = useState(null);
   const leaderboardAudioRef = React.useRef(null);
   const { user: authUser } = useSelector((state) => state.auth || {});
-  const currentUserId = useMemo(
-    () => authUser?._id || authUser?.id || authUser?.userId || null,
-    [authUser]
+  const [currentUser, setCurrentUser] = useState(
+    authUser?.user || authUser || null
   );
-  const [currentUser, setCurrentUser] = useState(authUser || null);
+  const currentUserId = useMemo(() => {
+    const idFromAuthUser =
+      authUser?.user?._id ||
+      authUser?.user?.id ||
+      authUser?.user?.userId ||
+      authUser?._id ||
+      authUser?.id ||
+      authUser?.userId;
+    const idFromCurrentUser =
+      currentUser?._id || currentUser?.id || currentUser?.userId;
+
+    return idFromAuthUser || idFromCurrentUser || null;
+  }, [authUser, currentUser]);
   const [loadingProfile, setLoadingProfile] = useState(false);
 
   const [modal, modalContextHolder] = Modal.useModal();
@@ -428,9 +455,20 @@ const NewsFeed = () => {
   }, [authUser, currentUser]);
 
   const composerAvatarUrl =
-    composerUser?.avatarUrl || composerUser?.avatar_url || "";
+    composerUser?.avatarUrl ||
+    composerUser?.avatar_url ||
+    composerUser?.avatar ||
+    composerUser?.user?.avatarUrl ||
+    composerUser?.user?.avatar_url ||
+    composerUser?.user?.avatar ||
+    "";
+
   const composerDisplayName =
-    composerUser?.displayName || composerUser?.username || "Bạn";
+    composerUser?.displayName ||
+    composerUser?.username ||
+    composerUser?.user?.displayName ||
+    composerUser?.user?.username ||
+    "Bạn";
   const composerInitial = composerDisplayName
     ? composerDisplayName[0].toUpperCase()
     : "U";
@@ -440,6 +478,37 @@ const NewsFeed = () => {
     : 0;
   const isInitialLoading = loading && items.length === 0;
   const isLoadingMore = loading && items.length > 0;
+
+  // Keep a ref of the current items for polling without resetting intervals
+  useEffect(() => {
+    itemsRef.current = items;
+    if (Array.isArray(items) && items.length > 0) {
+      const top = items[0];
+      const topId = top?._id || top?.id;
+      const topCreatedAt = top?.createdAt || null;
+      setLastSeenTopId(topId || null);
+      setLastSeenTopCreatedAt(topCreatedAt || null);
+    }
+  }, [items]);
+
+  const handleMainScroll = (e) => {
+    const top = e?.target?.scrollTop || 0;
+    setIsNearTop(top < 120);
+  };
+
+  useEffect(() => {
+    const syncScrollPosition = () => {
+      const top =
+        (mainScrollRef.current && mainScrollRef.current.scrollTop) ||
+        window.scrollY ||
+        0;
+      setIsNearTop(top < 120);
+    };
+    window.addEventListener("scroll", syncScrollPosition, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", syncScrollPosition);
+    };
+  }, []);
 
   const extractFirstUrl = (text) => {
     if (!text) return null;
@@ -1806,7 +1875,8 @@ const NewsFeed = () => {
                 // Thêm post vào items nếu chưa có
                 setItems((prev) => {
                   const exists = prev.some((it) => it._id === postId);
-                  return exists ? prev : [result.data, ...prev];
+                  if (exists) return prev;
+                  return sortPostsByCreatedAtDesc([result.data, ...prev]);
                 });
                 openComment(postId, result.data);
               }
@@ -1847,7 +1917,8 @@ const NewsFeed = () => {
               // Thêm post vào items nếu chưa có
               setItems((prev) => {
                 const exists = prev.some((it) => it._id === postId);
-                return exists ? prev : [result.data, ...prev];
+                if (exists) return prev;
+                return sortPostsByCreatedAtDesc([result.data, ...prev]);
               });
               openComment(postId, result.data);
             }
@@ -2028,11 +2099,8 @@ const NewsFeed = () => {
     setError("");
     try {
       const res = await listPosts({ page: p, limit: l });
-      // Backend sorting strategy:
-      // 1) Ưu tiên bài post của những người mà current user đang follow (isFollowed = true).
-      // 2) Trong nhóm đã follow: sort theo thời gian tạo (createdAt mới nhất trước), sau đó mới tới engagement.
-      // 3) Nếu user không follow ai, fallback: sort theo engagement score (likes + comments) rồi createdAt.
-      // Frontend giữ nguyên thứ tự BE trả về, KHÔNG sắp xếp lại trên FE.
+      // Luôn ưu tiên hiển thị theo thời gian tạo (mới nhất lên đầu)
+      // bất kể chiến lược sắp xếp trên backend, để feed nhất quán cho người dùng.
       const posts = res?.data?.posts || [];
       const totalPosts = res?.data?.pagination?.totalPosts || 0;
 
@@ -2055,10 +2123,10 @@ const NewsFeed = () => {
       }
 
       if (p === 1) {
-        setItems(posts);
+        setItems(sortPostsByCreatedAtDesc(posts));
       } else {
-        // Append new posts to existing list (maintain backend order)
-        setItems((prev) => [...prev, ...posts]);
+        // Append and re-sort theo thời gian để đảm bảo thứ tự mới nhất trước
+        setItems((prev) => sortPostsByCreatedAtDesc([...prev, ...posts]));
       }
       setTotal(totalPosts);
       const totalPages = Math.ceil(totalPosts / l);
@@ -2113,10 +2181,115 @@ const NewsFeed = () => {
     }
   };
 
+  const handleRefreshWithNewPosts = async () => {
+    setPendingNewPosts([]);
+    setPage(1);
+    await fetchData(1, limit);
+    // Sau khi làm mới, cập nhật mốc bài mới nhất để tránh hiển thị nút ảo
+    if (itemsRef.current && itemsRef.current.length > 0) {
+      const top = itemsRef.current[0];
+      setLastSeenTopId(top?._id || top?.id || null);
+      setLastSeenTopCreatedAt(top?.createdAt || null);
+    }
+    if (mainScrollRef.current) {
+      mainScrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
   useEffect(() => {
     fetchData(1, limit);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Poll for new posts while user is browsing; surface a refresh CTA instead of auto-jumping the feed
+  useEffect(() => {
+    let cancelled = false;
+    let isChecking = false;
+
+    const checkForNewPosts = async () => {
+      if (cancelled || isChecking) return;
+      const currentItems = itemsRef.current || [];
+      // Nếu chưa có dữ liệu hiện tại (vừa vào trang hoặc đang refresh) thì không so sánh
+      if (!currentItems.length) return;
+      isChecking = true;
+      try {
+        // Use a slightly larger limit to avoid missing a new post that was pushed down
+        const pollLimit = Math.max(limit, 15);
+        const res = await listPosts({ page: 1, limit: pollLimit });
+        const latest = res?.data?.posts || [];
+        // Dùng createdAt của bài mới nhất hiện có làm mốc để tránh báo “mới” khi chỉ khác phân trang
+        const newestCurrent = currentItems[0]?.createdAt || null;
+        const newestCurrentTs = newestCurrent
+          ? new Date(newestCurrent).getTime()
+          : null;
+        const latestTopId =
+          (latest[0]?._id && latest[0]._id.toString
+            ? latest[0]._id.toString()
+            : latest[0]?._id) || null;
+        const latestTopCreatedAt = latest[0]?.createdAt || null;
+        const lastSeenTopIdStr = lastSeenTopId
+          ? lastSeenTopId.toString()
+          : null;
+        const lastSeenTs = lastSeenTopCreatedAt
+          ? new Date(lastSeenTopCreatedAt).getTime()
+          : newestCurrentTs; // fallback mốc hiện tại nếu chưa có lastSeen
+
+        // Nếu top hiện tại trùng với top đã thấy gần nhất, bỏ qua
+        if (latestTopId && lastSeenTopIdStr && latestTopId === lastSeenTopIdStr) {
+          return;
+        }
+        const existingIds = new Set(
+          currentItems
+            .map((p) => {
+              const id = p?._id && p._id.toString ? p._id.toString() : p?._id;
+              return id || null;
+            })
+            .filter(Boolean)
+        );
+        const fresh = latest.filter((p) => {
+          const id = p?._id && p._id.toString ? p._id.toString() : p?._id;
+          if (!id || existingIds.has(id)) return false;
+          const createdTs = p?.createdAt ? new Date(p.createdAt).getTime() : 0;
+          // Chỉ coi là mới nếu mới hơn mốc đã thấy (hoặc chưa có mốc)
+          if (lastSeenTs && createdTs <= lastSeenTs) return false;
+          if (newestCurrentTs && createdTs <= newestCurrentTs) return false;
+          return true;
+        });
+        if (!cancelled && fresh.length > 0) {
+          // Replace queue with latest fresh posts to ensure button appears promptly
+          setPendingNewPosts((prev) => {
+            const prevIds = new Set(
+              prev
+                .map((p) => {
+                  const id =
+                    p?._id && p._id.toString ? p._id.toString() : p?._id;
+                  return id || null;
+                })
+                .filter(Boolean)
+            );
+            const uniqueFresh = fresh.filter((p) => {
+              const id =
+                p?._id && p._id.toString ? p._id.toString() : p?._id;
+              return id && !prevIds.has(id);
+            });
+            return uniqueFresh.length > 0 ? uniqueFresh : prev;
+          });
+        }
+      } catch (e) {
+        // ignore polling failures to avoid breaking the feed
+      } finally {
+        isChecking = false;
+      }
+    };
+
+    const interval = setInterval(checkForNewPosts, 5000);
+    checkForNewPosts();
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [limit]);
 
   // Enrich loaded posts with preview thumbnails if missing
   useEffect(() => {
@@ -2251,7 +2424,21 @@ const NewsFeed = () => {
       setLoadingProjects(true);
       const res = await getUserProjects("all", "active");
       if (res?.success && Array.isArray(res.data)) {
-        const formattedProjects = res.data.map((project) => ({
+        const ownedProjects = res.data.filter((project) => {
+          const ownerId =
+            project?.creatorId?._id ||
+            project?.creatorId?.id ||
+            project?.creatorId ||
+            project?.creator?._id ||
+            project?.creator?.id ||
+            project?.creator;
+          return (
+            ownerId &&
+            currentUserId &&
+            ownerId.toString() === currentUserId.toString()
+          );
+        });
+        const formattedProjects = ownedProjects.map((project) => ({
           value: String(project._id), // Normalize ID thành string để đảm bảo match với editSelectedProjectId
           label: project.title || "Untitled Project",
           ...project,
@@ -2412,10 +2599,10 @@ const NewsFeed = () => {
             console.log("[UI] Post already exists, skipping");
             return prev;
           }
-          // Thêm post mới vào đầu danh sách
+          // Thêm post mới và sắp xếp theo thời gian (mới nhất lên đầu)
           // eslint-disable-next-line no-console
           console.log("[UI] Adding post to beginning of list");
-          return [newPost, ...prev];
+          return sortPostsByCreatedAtDesc([newPost, ...prev]);
         });
 
         // Hydrate following status cho author của post mới
@@ -2523,6 +2710,8 @@ const NewsFeed = () => {
               scrollbarWidth: "none", // Firefox
               msOverflowStyle: "none", // IE and Edge
             }}
+            ref={mainScrollRef}
+            onScroll={handleMainScroll}
           >
             <div
               className="composer-card"
@@ -2541,8 +2730,20 @@ const NewsFeed = () => {
               {(() => {
                 const user = currentUser || authUser || null;
 
-                const avatarUrl = user?.avatarUrl || user?.avatar_url;
-                const displayName = user?.displayName || user?.username || "";
+                const avatarUrl =
+                  user?.avatarUrl ||
+                  user?.avatar_url ||
+                  user?.avatar ||
+                  user?.user?.avatarUrl ||
+                  user?.user?.avatar_url ||
+                  user?.user?.avatar;
+
+                const displayName =
+                  user?.displayName ||
+                  user?.username ||
+                  user?.user?.displayName ||
+                  user?.user?.username ||
+                  "";
                 const initial = displayName
                   ? displayName[0].toUpperCase()
                   : "U";
@@ -2819,6 +3020,13 @@ const NewsFeed = () => {
                       borderRadius: 8,
                     }}
                     options={availableLicks}
+                    dropdownMatchSelectWidth={false}
+                    dropdownStyle={{
+                      minWidth: 360,
+                      maxWidth: 520,
+                      whiteSpace: "normal",
+                    }}
+                    optionLabelProp="label"
                     notFoundContent={
                       loadingLicks ? (
                         <Spin size="small" />
@@ -2831,7 +3039,7 @@ const NewsFeed = () => {
                         .toLowerCase()
                         .includes(input.toLowerCase())
                     }
-                    popupClassName="dark-select-dropdown"
+                    popupClassName="dark-select-dropdown project-select-dropdown"
                     allowClear
                     disabled={!!extractFirstUrl(newText) || !!selectedProjectId}
                   />
@@ -2900,6 +3108,13 @@ const NewsFeed = () => {
                       borderRadius: 8,
                     }}
                     options={availableProjects}
+                    dropdownMatchSelectWidth={false}
+                    dropdownStyle={{
+                      minWidth: 360,
+                      maxWidth: 520,
+                      whiteSpace: "normal",
+                    }}
+                    optionLabelProp="label"
                     notFoundContent={
                       loadingProjects ? (
                         <Spin size="small" />
@@ -2912,7 +3127,7 @@ const NewsFeed = () => {
                         .toLowerCase()
                         .includes(input.toLowerCase())
                     }
-                    popupClassName="dark-select-dropdown"
+                    popupClassName="dark-select-dropdown project-select-dropdown"
                     allowClear
                     disabled={
                       selectedLickIds.length > 0 || !!extractFirstUrl(newText)
@@ -3041,6 +3256,28 @@ const NewsFeed = () => {
                   <span style={{ color: "#9ca3af" }}>Chưa có bài đăng</span>
                 }
               />
+            )}
+            {pendingNewPosts.length > 0 && !isNearTop && (
+              <div
+                style={{
+                  position: "sticky",
+                  top: 12,
+                  zIndex: 30,
+                  display: "flex",
+                  justifyContent: "center",
+                  marginBottom: 12,
+                }}
+              >
+                <Button
+                  type="primary"
+                  shape="round"
+                  icon={<ReloadOutlined />}
+                  onClick={handleRefreshWithNewPosts}
+                  loading={loading}
+                >
+                  {pendingNewPosts.length} bài viết mới - Làm mới
+                </Button>
+              </div>
             )}
             {items.map((post) => (
               <Card
@@ -3249,17 +3486,41 @@ const NewsFeed = () => {
                   ) : null;
                 })()}
 
-                {/* Preview project đính kèm: dùng ProjectPlayer phát nhạc, không hiển thị trạng thái/updated */}
-                {post?.projectId?.audioUrl && (
-                  <div style={{ marginBottom: 12 }}>
-                    <ProjectPlayer
-                      audioUrl={post.projectId.audioUrl}
-                      waveformData={post.projectId.waveformData}
-                      audioDuration={post.projectId.audioDuration}
-                      projectName={post.projectId.title}
-                    />
-                  </div>
-                )}
+                {/* Preview project đính kèm: ưu tiên dữ liệu populate; fallback fetch bằng PostProjectEmbed */}
+                {(() => {
+                  const projectId =
+                    post?.projectId?._id ||
+                    post?.projectId?.id ||
+                    (typeof post?.projectId === "string"
+                      ? post.projectId
+                      : null);
+                  const hasInlineProject =
+                    post?.projectId &&
+                    typeof post.projectId === "object" &&
+                    post.projectId.audioUrl;
+
+                  if (hasInlineProject) {
+                    return (
+                      <div style={{ marginBottom: 12 }}>
+                        <ProjectPlayer
+                          audioUrl={post.projectId.audioUrl}
+                          waveformData={post.projectId.waveformData}
+                          audioDuration={post.projectId.audioDuration}
+                          projectName={post.projectId.title}
+                        />
+                      </div>
+                    );
+                  }
+
+                  if (projectId) {
+                    return (
+                      <div style={{ marginBottom: 12 }}>
+                        <PostProjectEmbed projectId={projectId} />
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
                 {/* Hiển thị attached licks với waveform */}
                 {post?.attachedLicks &&
                   Array.isArray(post.attachedLicks) &&
@@ -4580,7 +4841,7 @@ const NewsFeed = () => {
                           .toLowerCase()
                           .includes(input.toLowerCase())
                       }
-                      popupClassName="dark-select-dropdown"
+                    popupClassName="dark-select-dropdown project-select-dropdown"
                       allowClear
                       disabled={
                         !!extractFirstUrl(editText) || !!editSelectedProjectId
@@ -4655,6 +4916,13 @@ const NewsFeed = () => {
                         borderRadius: 8,
                       }}
                       options={availableProjects}
+                    dropdownMatchSelectWidth={false}
+                    dropdownStyle={{
+                      minWidth: 360,
+                      maxWidth: 520,
+                      whiteSpace: "normal",
+                    }}
+                    optionLabelProp="label"
                       notFoundContent={
                         loadingProjects ? (
                           <Spin size="small" />

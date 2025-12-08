@@ -12,6 +12,7 @@ import {
 import {
   getUserProjects,
   deleteProject,
+  updateProject,
 } from "../../../services/user/projectService";
 import {
   acceptProjectInvitation,
@@ -170,6 +171,11 @@ const ProjectListPage = () => {
     try {
       setSharing(true);
       setSharingProjectId(shareProject._id);
+
+      // Bật public để người khác có thể xem/nghe khi embed trên feed
+      if (!shareProject?.isPublic) {
+        await updateProject(shareProject._id, { isPublic: true });
+      }
 
       // Generate project preview URL
       const previewUrl = `${window.location.origin}/projects/${shareProject._id}`;

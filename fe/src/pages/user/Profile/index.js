@@ -413,7 +413,7 @@ const ProfilePage = () => {
           </Form.Item> */}
 
           <Form.Item label={<Text style={{ color: '#e5e7eb', fontWeight: 700 }}>Địa chỉ </Text>} name="location">
-            <Input placeholder="Search City" style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
+            <Input disabled placeholder="Search City" style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }} />
           </Form.Item>
 
           <Form.Item
@@ -421,7 +421,7 @@ const ProfilePage = () => {
             name="addressLine"
           >
             <Input
-              placeholder="House number, street name, etc."
+               placeholder="House number, street name, etc."
               style={{ background: '#111', borderColor: '#303030', color: '#e5e7eb' }}
             />
           </Form.Item>
