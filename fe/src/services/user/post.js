@@ -170,7 +170,7 @@ export const getAllPostComments = async (postId, { parentCommentId } = {}) => {
   return all;
 };
 
-export default {
+const postService = {
   listPosts,
   listMyPosts,
   getPostById,
@@ -189,3 +189,5 @@ export default {
   getAllPostComments,
   getStoredUserId,
 };
+
+export default postService;

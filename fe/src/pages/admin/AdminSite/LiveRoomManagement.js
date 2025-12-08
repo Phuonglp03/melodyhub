@@ -535,14 +535,14 @@ const LiveRoomManagement = () => {
             <span className="text-sm font-medium">
               {socketConnected ? 'Realtime' : 'Offline'}
             </span>
-          </div>
-          <button 
-            onClick={handleRefresh}
-            className="px-4 py-2 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 rounded-xl text-violet-400 flex items-center gap-2 transition-all"
-          >
-            <RefreshCw size={18} />
-            Làm mới
-          </button>
+        </div>
+        <button 
+          onClick={handleRefresh}
+          className="px-4 py-2 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 rounded-xl text-violet-400 flex items-center gap-2 transition-all"
+        >
+          <RefreshCw size={18} />
+          Làm mới
+        </button>
         </div>
       </div>
 

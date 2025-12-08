@@ -130,6 +130,18 @@ export const searchUsers = async (query, limit = 10) => {
   return res.data;
 };
 
-export default { getMyProfile, updateMyProfile, uploadMyAvatar, uploadMyCoverPhoto, followUser, unfollowUser, getFollowSuggestions, getFollowingList, searchUsers };
+const profileService = { 
+  getMyProfile, 
+  updateMyProfile, 
+  uploadMyAvatar, 
+  uploadMyCoverPhoto, 
+  followUser, 
+  unfollowUser, 
+  getFollowSuggestions, 
+  getFollowingList, 
+  searchUsers 
+};
+
+export default profileService;
 
 

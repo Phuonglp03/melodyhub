@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Layout, Input, Button, Space, Typography, Modal, Avatar,
+  Layout, Input, Button, Typography, Modal, Avatar,
   Popover, Badge, Spin, Empty, Dropdown, Drawer, AutoComplete
 } from 'antd';
 import {
-  FireOutlined, BellOutlined, MessageOutlined, SearchOutlined,
-  UserOutlined, EditOutlined, MoreOutlined, ExpandOutlined,
-  LogoutOutlined, FolderOutlined, MenuOutlined
+  FireOutlined, MessageOutlined, SearchOutlined,
+  UserOutlined, LogoutOutlined, FolderOutlined, MenuOutlined
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';

@@ -78,7 +78,7 @@ const NotificationToast = ({ notification, onClose, duration = 10000 }) => {
   // Extract projectId from linkUrl
   const extractProjectId = (linkUrl) => {
     if (!linkUrl) return null;
-    const match = linkUrl.match(/\/projects\/([^\/]+)/);
+    const match = linkUrl.match(/\/projects\/([^/]+)/);
     return match ? match[1] : null;
   };
 
@@ -146,7 +146,7 @@ const NotificationToast = ({ notification, onClose, duration = 10000 }) => {
     // Khi click vào toast, trigger event để mở modal (giống như trong NotificationBell)
     if (notification.type === 'like_post' || notification.type === 'comment_post') {
       if (notification.linkUrl) {
-        const match = notification.linkUrl.match(/\/posts\/([^\/]+)/);
+        const match = notification.linkUrl.match(/\/posts\/([^/]+)/);
         if (match && match[1]) {
           const postId = match[1];
           handleClose();

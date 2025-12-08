@@ -229,7 +229,7 @@ const NotificationBell = () => {
   // Extract projectId from linkUrl
   const extractProjectId = (linkUrl) => {
     if (!linkUrl) return null;
-    const match = linkUrl.match(/\/projects\/([^\/]+)/);
+    const match = linkUrl.match(/\/projects\/([^/]+)/);
     return match ? match[1] : null;
   };
 
@@ -251,7 +251,7 @@ const NotificationBell = () => {
     ) {
       if (notification.linkUrl) {
         // Extract postId from linkUrl (format: /posts/{postId})
-        const match = notification.linkUrl.match(/\/posts\/([^\/]+)/);
+        const match = notification.linkUrl.match(/\/posts\/([^/]+)/);
         if (match && match[1]) {
           const postId = match[1];
           setVisible(false);

@@ -51,7 +51,7 @@ export const markSeen = async (conversationId) => {
   return res.data;
 };
 
-export default {
+const dmService = {
   ensureConversationWith,
   acceptConversation,
   declineConversation,
@@ -60,6 +60,8 @@ export default {
   sendMessage,
   markSeen,
 };
+
+export default dmService;
 
 
 

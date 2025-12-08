@@ -1,12 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import { Card, Form, Input, Button, Typography, message, Avatar, Space, Select, Upload, Modal, Divider } from 'antd';
+import { Card, Form, Input, Button, Typography, message, Avatar, Space, Select, Upload, Modal } from 'antd';
 import { ArrowLeftOutlined, UserOutlined, KeyOutlined, DeleteOutlined } from '@ant-design/icons';
-import { InfoCircleOutlined, SmileOutlined } from '@ant-design/icons';
 import { getMyProfile, updateMyProfile, uploadMyAvatar, uploadMyCoverPhoto } from '../../../services/user/profile';
 import { useNavigate } from 'react-router-dom';
 import './profileResponsive.css';
 import api from '../../../services/api';
-import { changePassword } from '../../../services/authService';
 
 const { Title, Text } = Typography;
 
@@ -17,7 +15,6 @@ const ProfilePage = () => {
   const [modalApi, modalContextHolder] = Modal.useModal();
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
-  const [aboutCount, setAboutCount] = React.useState(0);
   const [profile, setProfile] = React.useState(null);
   const [uploadingAvatar, setUploadingAvatar] = React.useState(false);
   const [uploadingCoverPhoto, setUploadingCoverPhoto] = React.useState(false);
@@ -33,8 +30,6 @@ const ProfilePage = () => {
   const [wards, setWards] = React.useState([]);
   const [selectedProvince, setSelectedProvince] = React.useState(null);
   const [selectedDistrict, setSelectedDistrict] = React.useState(null);
-  const [changingPassword, setChangingPassword] = React.useState(false);
-  const changePasswordCardRef = useRef(null);
 
   const revokeAvatarPreview = () => {
     if (avatarObjectUrlRef.current) {
@@ -92,6 +87,7 @@ const ProfilePage = () => {
     };
 
     fetchProvinces();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const load = async () => {
@@ -113,7 +109,6 @@ const ProfilePage = () => {
       setCoverPreviewValue(u.coverPhotoUrl || '');
       setPendingAvatarFile(null);
       setPendingCoverFile(null);
-      setAboutCount((u.bio || '').length);
     } catch (e) {
       messageApi.error(e.message || 'Không tải được hồ sơ');
     } finally {
@@ -121,7 +116,7 @@ const ProfilePage = () => {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!profile || provinces.length === 0) return;
@@ -166,18 +161,6 @@ const ProfilePage = () => {
 
   const handleWardChange = () => {
     // No additional logic needed for now, but function retained for clarity
-  };
-
-  const handleChangePassword = async (values) => {
-    try {
-      setChangingPassword(true);
-      await changePassword(values.currentPassword, values.newPassword);
-      messageApi.success('Đổi mật khẩu thành công');
-    } catch (error) {
-      messageApi.error(error.message || 'Đổi mật khẩu thất bại');
-    } finally {
-      setChangingPassword(false);
-    }
   };
 
   const handleBackToProfile = () => {
@@ -592,10 +575,3 @@ const ProfilePage = () => {
 };
 
 export default ProfilePage;
-
-const Info = ({ label, value }) => (
-  <div style={{ background: '#111', border: '1px solid #1f1f1f', borderRadius: 8, padding: 12 }}>
-    <div style={{ color: '#9ca3af', fontSize: 12 }}>{label}</div>
-    <div style={{ color: '#fff', fontWeight: 600, marginTop: 2, wordBreak: 'break-word' }}>{value ?? '-'}</div>
-  </div>
-);

@@ -82,12 +82,6 @@ const safeOn = (event, callback) => {
   }
 };
 
-const safeOff = (event) => {
-  const s = getSocket();
-  if (s) {
-    s.off(event);
-  }
-};
 export const onStreamPreviewReady = (callback) => {
   safeOn("stream-preview-ready", callback);
 };

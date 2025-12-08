@@ -2,9 +2,7 @@ import React, { useState } from "react";
 import {
   FaMusic,
   FaPlay,
-  FaPlus,
   FaMagic,
-  FaTrash,
   FaCheck,
   FaTimes,
 } from "react-icons/fa";
