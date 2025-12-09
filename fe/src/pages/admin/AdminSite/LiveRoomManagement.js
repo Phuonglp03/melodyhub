@@ -287,9 +287,8 @@ const LiveRoomManagement = () => {
   };
 
   const handleWatchLive = (room) => {
-    // Lấy playbackUrl từ room object (đã được backend trả về)
-    const hlsUrl = room.playbackUrls?.hls || 
-      (room.streamKey ? `${process.env.REACT_APP_MEDIA_SERVER_HTTP_URL || 'http://localhost:8000'}/live/${room.streamKey}/index.m3u8` : null);
+    // Lấy playbackUrl từ room object (backend đã trả về playbackUrls)
+    const hlsUrl = room.playbackUrls?.hls;
     
     if (!hlsUrl) {
       alert('Không thể lấy URL phát livestream. Vui lòng thử lại.');
