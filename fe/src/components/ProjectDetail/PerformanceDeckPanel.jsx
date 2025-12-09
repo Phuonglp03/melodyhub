@@ -26,7 +26,15 @@ const PerformanceDeckPanel = ({
         bottom: 0,
       }}
     >
-      <div className="h-full flex flex-col shadow-2xl shadow-black/50">
+      <div className="h-full flex flex-col shadow-2xl shadow-black/50 relative">
+        {/* Drag handle across the top of the deck for easier resizing */}
+        {sidePanelOpen && (
+          <div
+            onMouseDown={onStartResize}
+            className="absolute -top-1 left-0 right-0 h-2 cursor-n-resize z-10"
+            title="Drag to resize the deck"
+          />
+        )}
         <div className="flex items-center justify-between h-11 px-4 bg-gray-950 border-t border-gray-800">
           <div className="flex items-center gap-2 text-sm font-semibold text-white">
             <FaPalette size={12} className="text-orange-400" />
@@ -37,7 +45,7 @@ const PerformanceDeckPanel = ({
               <button
                 onMouseDown={onStartResize}
                 className="text-gray-500 hover:text-white px-2 py-1 rounded-md border border-gray-700 text-[11px]"
-                title="Drag to resize"
+                title="Drag to resize (or drag the thin bar above)"
               >
                 Resize
               </button>
@@ -47,7 +55,11 @@ const PerformanceDeckPanel = ({
               className="text-gray-400 hover:text-white p-1 rounded-md border border-gray-700"
               title={sidePanelOpen ? "Collapse panel" : "Expand panel"}
             >
-              {sidePanelOpen ? <FaChevronDown size={12} /> : <FaChevronUp size={12} />}
+              {sidePanelOpen ? (
+                <FaChevronDown size={12} />
+              ) : (
+                <FaChevronUp size={12} />
+              )}
             </button>
           </div>
         </div>
@@ -77,4 +89,3 @@ const PerformanceDeckPanel = ({
 };
 
 export default PerformanceDeckPanel;
-
