@@ -242,7 +242,7 @@ const LickDetail = ({
             marginBottom: "20px",
             boxShadow: "0 12px 32px rgba(15, 23, 42, 0.25)",
           }}
-          bodyStyle={{ padding: "20px" }}
+          styles={{ body: { padding: "20px" } }}
         >
           {/* Audio Player */}
           {showPlayer && (
@@ -600,13 +600,15 @@ const LickDetail = ({
               borderRadius: "16px",
               boxShadow: "0 12px 32px rgba(15, 23, 42, 0.2)",
             }}
-            headStyle={{
-              color: "#e2e8f0",
-              borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
-              background: "rgba(15, 23, 42, 0.55)",
-              padding: "14px 20px",
+            styles={{
+              header: {
+                color: "#e2e8f0",
+                borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
+                background: "rgba(15, 23, 42, 0.55)",
+                padding: "14px 20px",
+              },
+              body: { padding: "20px" }
             }}
-            bodyStyle={{ padding: "20px" }}
           >
             <div style={{ color: "white" }}>
               {canEditTab ? (

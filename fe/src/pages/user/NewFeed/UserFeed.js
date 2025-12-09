@@ -2563,12 +2563,8 @@ const UserFeed = () => {
                           borderRadius: 8,
                         }}
                         options={availableLicks}
-                        dropdownMatchSelectWidth={false}
-                        dropdownStyle={{
-                          minWidth: 360,
-                          maxWidth: 520,
-                          whiteSpace: "normal",
-                        }}
+                        popupMatchSelectWidth={false}
+                        styles={{ popup: { root: { minWidth: 360, maxWidth: 520, whiteSpace: "normal" } } }}
                         optionLabelProp="label"
                         notFoundContent={
                           loadingLicks ? (
@@ -2655,12 +2651,8 @@ const UserFeed = () => {
                           borderRadius: 8,
                         }}
                         options={availableProjects}
-                        dropdownMatchSelectWidth={false}
-                        dropdownStyle={{
-                          minWidth: 360,
-                          maxWidth: 520,
-                          whiteSpace: "normal",
-                        }}
+                        popupMatchSelectWidth={false}
+                        styles={{ popup: { root: { minWidth: 360, maxWidth: 520, whiteSpace: "normal" } } }}
                         optionLabelProp="label"
                         notFoundContent={
                           loadingProjects ? (
@@ -3715,7 +3707,7 @@ const UserFeed = () => {
             width={320}
             destroyOnClose
             className="newsfeed-sidebar-drawer"
-            bodyStyle={{ padding: 0, background: "#0a0a0a" }}
+            styles={{ body: { padding: 0, background: "#0a0a0a" } }}
           >
             <div className="newsfeed-sidebar-drawer-content hide-scrollbar">
               {sidebarContent}
@@ -4868,12 +4860,8 @@ const UserFeed = () => {
                             borderRadius: 8,
                           }}
                           options={availableLicks}
-                          dropdownMatchSelectWidth={false}
-                          dropdownStyle={{
-                            minWidth: 360,
-                            maxWidth: 520,
-                            whiteSpace: "normal",
-                          }}
+                          popupMatchSelectWidth={false}
+                          styles={{ popup: { root: { minWidth: 360, maxWidth: 520, whiteSpace: "normal" } } }}
                           optionLabelProp="label"
                           notFoundContent={
                             loadingLicks ? (
@@ -4951,12 +4939,8 @@ const UserFeed = () => {
                             borderRadius: 8,
                           }}
                           options={availableProjects}
-                        dropdownMatchSelectWidth={false}
-                        dropdownStyle={{
-                          minWidth: 360,
-                          maxWidth: 520,
-                          whiteSpace: "normal",
-                        }}
+                        popupMatchSelectWidth={false}
+                        styles={{ popup: { root: { minWidth: 360, maxWidth: 520, whiteSpace: "normal" } } }}
                         optionLabelProp="label"
                           notFoundContent={
                             loadingProjects ? (
