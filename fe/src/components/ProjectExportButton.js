@@ -3,7 +3,10 @@
 import React, { useState } from "react";
 import { FaDownload } from "react-icons/fa";
 import { exportFullProjectAudio } from "../services/projectExportService";
-import { saveProjectExport, updateProject } from "../services/user/projectService";
+import {
+  saveProjectExport,
+  updateProject,
+} from "../services/user/projectService";
 
 export default function ProjectExportButton({
   projectId,
@@ -12,10 +15,7 @@ export default function ProjectExportButton({
   bpm = 120,
   projectKey = "C",
   style = "Swing",
-  bandSettings = {
-    volumes: { drums: 0.8, bass: 0.8, piano: 0.8 },
-    mutes: { drums: false, bass: false, piano: false },
-  },
+  bandSettings = null, // Now comes from project's populated bandSettingsId
   status = "draft",
   timeSignature = { numerator: 4, denominator: 4 }, // Default 4/4
   variant = "default",

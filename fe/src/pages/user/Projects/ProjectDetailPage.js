@@ -31,6 +31,9 @@ import {
   generateBackingTrack as generateBackingTrackAPI,
   generateAIBackingTrack,
 } from "../../../services/user/projectService";
+import {
+  updateBandSettings as updateBandSettingsAPI,
+} from "../../../services/user/bandSettingsService";
 import BackingTrackPanel from "../../../components/BackingTrackPanel";
 import MidiEditor from "../../../components/MidiEditor";
 import AIGenerationLoadingModal from "../../../components/AIGenerationLoadingModal";
@@ -486,19 +489,37 @@ const ProjectDetailPage = () => {
   });
 
   // Helper functions
-  const updateBandSettings = (updater) => {
+  const updateBandSettings = async (updater) => {
     setBandSettings((prev) => {
       const next =
         typeof updater === "function" ? updater(prev) : { ...prev, ...updater };
       const members = next.members || prev.members || [];
       const legacy = deriveLegacyMixFromMembers(members);
-      return {
+      const updated = {
         ...prev,
         ...next,
         members,
         volumes: legacy.volumes,
         mutes: legacy.mutes,
       };
+      
+      // Save to BandSettings API if project has bandSettingsId
+      if (project?.bandSettingsId && typeof project.bandSettingsId === 'object' && project.bandSettingsId._id) {
+        const bandSettingsId = project.bandSettingsId._id;
+        // Extract only the fields that should be saved to BandSettings
+        const bandSettingsData = {
+          style: updated.style,
+          swingAmount: updated.swingAmount,
+          members: updated.members,
+        };
+        
+        // Save asynchronously (don't block UI)
+        updateBandSettingsAPI(bandSettingsId, bandSettingsData).catch((err) => {
+          console.error("Error saving band settings:", err);
+        });
+      }
+      
+      return updated;
     });
   };
 

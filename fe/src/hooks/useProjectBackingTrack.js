@@ -294,8 +294,11 @@ export const useProjectBackingTrack = ({
   // Handle generating full backing track with audio generation
   const handleGenerateBackingTrack = useCallback(
     async (data) => {
+      // Get bandSettings from populated bandSettingsId
+      const bandSettings = project?.bandSettingsId || project?.bandSettings;
+      
       // Validate bandSettings is required for audio generation
-      const hasBandSettings = project?.bandSettings?.members?.length > 0;
+      const hasBandSettings = bandSettings?.members?.length > 0;
 
       if (!hasBandSettings) {
         alert(
@@ -304,7 +307,7 @@ export const useProjectBackingTrack = ({
         return;
       }
 
-      if (!project?.bandSettings?.style) {
+      if (!bandSettings?.style) {
         alert(
           "Band style is required for backing track generation. Please set a style (Swing, Bossa, Latin, Ballad, Funk, or Rock)."
         );

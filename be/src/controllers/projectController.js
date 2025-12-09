@@ -7,6 +7,7 @@ import User from "../models/User.js";
 import Lick from "../models/Lick.js";
 import Instrument from "../models/Instrument.js";
 import PlayingPattern from "../models/PlayingPattern.js";
+import BandSettings from "../models/BandSettings.js";
 import { uploadToCloudinary } from "../middleware/file.js";
 import { notifyProjectCollaboratorInvited } from "../utils/notificationHelper.js";
 import {
@@ -195,6 +196,10 @@ const normalizeProjectResponse = (projectDoc) => {
   plain.swingAmount = clampSwingAmount(
     plain.swingAmount !== undefined ? plain.swingAmount : 0
   );
+  // Include populated bandSettings if available
+  if (projectDoc.bandSettingsId && typeof projectDoc.bandSettingsId === 'object') {
+    plain.bandSettings = projectDoc.bandSettingsId;
+  }
   return plain;
 };
 
@@ -220,6 +225,57 @@ export const createProject = async (req, res) => {
       });
     }
 
+    // Find or create default BandSettings for new projects
+    let defaultBandSettings = await BandSettings.findOne({ isDefault: true });
+    if (!defaultBandSettings) {
+      // Create default BandSettings if it doesn't exist
+      defaultBandSettings = new BandSettings({
+        name: "Default Band Settings",
+        description: "System default band settings",
+        creatorId: creatorId, // Use project creator as BandSettings creator
+        style: "Swing",
+        swingAmount: 0.6,
+        members: [
+          {
+            instanceId: "default-drums",
+            name: "Drums",
+            type: "drums",
+            role: "rhythm",
+            soundBank: "jazz-kit",
+            volume: 0.8,
+            pan: 0,
+            isMuted: false,
+            isSolo: false,
+          },
+          {
+            instanceId: "default-bass",
+            name: "Bass",
+            type: "bass",
+            role: "bass",
+            soundBank: "upright",
+            volume: 0.8,
+            pan: 0,
+            isMuted: false,
+            isSolo: false,
+          },
+          {
+            instanceId: "default-piano",
+            name: "Piano",
+            type: "piano",
+            role: "comping",
+            soundBank: "grand-piano",
+            volume: 0.8,
+            pan: 0,
+            isMuted: false,
+            isSolo: false,
+          },
+        ],
+        isPublic: false,
+        isDefault: true,
+      });
+      await defaultBandSettings.save();
+    }
+
     // Create project
     const project = new Project({
       creatorId,
@@ -233,6 +289,7 @@ export const createProject = async (req, res) => {
       ),
       status: "draft",
       isPublic: isPublic || false,
+      bandSettingsId: defaultBandSettings._id,
     });
 
     await project.save();
@@ -259,8 +316,9 @@ export const createProject = async (req, res) => {
     });
     await collaborator.save();
 
-    // Populate creator info
+    // Populate creator info and bandSettings
     await project.populate("creatorId", "username displayName avatarUrl");
+    await project.populate("bandSettingsId");
 
     res.status(201).json({
       success: true,
@@ -365,6 +423,7 @@ export const getUserProjects = async (req, res) => {
 
     const projects = await Project.find(matchQuery)
       .populate("creatorId", "username displayName avatarUrl")
+      .populate("bandSettingsId")
       .sort({ updatedAt: -1 });
 
     // Fetch project details for pending invitations so the UI can render cards
@@ -435,10 +494,9 @@ export const getProjectById = async (req, res) => {
     const userId = req.userId;
 
     // Check if user has access to this project
-    const project = await Project.findById(projectId).populate(
-      "creatorId",
-      "username displayName avatarUrl"
-    );
+    const project = await Project.findById(projectId)
+      .populate("creatorId", "username displayName avatarUrl")
+      .populate("bandSettingsId");
 
     if (!project) {
       return res.status(404).json({
@@ -576,9 +634,34 @@ export const updateProject = async (req, res) => {
       }
       project.backingInstrumentId = backingInstrumentId || null;
     }
+    if (req.body.bandSettingsId !== undefined) {
+      // Validate BandSettings exists
+      if (req.body.bandSettingsId) {
+        const bandSettings = await BandSettings.findById(req.body.bandSettingsId);
+        if (!bandSettings) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid band settings ID",
+          });
+        }
+        // Check if user has access to this BandSettings
+        const hasAccess =
+          bandSettings.creatorId.toString() === userId ||
+          bandSettings.isPublic ||
+          bandSettings.isDefault;
+        if (!hasAccess) {
+          return res.status(403).json({
+            success: false,
+            message: "You do not have access to this band settings",
+          });
+        }
+      }
+      project.bandSettingsId = req.body.bandSettingsId || null;
+    }
 
     ensureProjectCoreFields(project);
     await project.save();
+    await project.populate("bandSettingsId");
 
     res.json({
       success: true,
@@ -643,6 +726,30 @@ export const patchProject = async (req, res) => {
     if (updates.swingAmount !== undefined) {
       updates.swingAmount = clampSwingAmount(updates.swingAmount);
     }
+    if (updates.bandSettingsId !== undefined) {
+      // Validate BandSettings exists
+      if (updates.bandSettingsId) {
+        const bandSettings = await BandSettings.findById(updates.bandSettingsId);
+        if (!bandSettings) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid band settings ID",
+          });
+        }
+        // Check if user has access to this BandSettings
+        const hasAccess =
+          bandSettings.creatorId.toString() === userId ||
+          bandSettings.isPublic ||
+          bandSettings.isDefault;
+        if (!hasAccess) {
+          return res.status(403).json({
+            success: false,
+            message: "You do not have access to this band settings",
+          });
+        }
+      }
+      // bandSettingsId will be set in updates object
+    }
 
     let updatedProject;
     if (clientVersion !== undefined) {
@@ -663,6 +770,11 @@ export const patchProject = async (req, res) => {
         { $set: updates, $inc: { version: 1 } },
         { new: true }
       );
+    }
+
+    // Populate bandSettingsId for response
+    if (updatedProject) {
+      await updatedProject.populate("bandSettingsId");
     }
 
     res.json({
@@ -1071,7 +1183,7 @@ export const getProjectTimelineForExport = async (req, res) => {
     const { projectId } = req.params;
     const userId = req.userId;
 
-    const project = await Project.findById(projectId);
+    const project = await Project.findById(projectId).populate("bandSettingsId");
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -1275,9 +1387,7 @@ export const getProjectTimelineForExport = async (req, res) => {
       }
     );
 
-    // Include band settings in response
-    const projectPlain = project.toObject ? project.toObject() : project;
-
+    // Include band settings in response (from populated bandSettingsId)
     const responseData = {
       success: true,
       data: {
@@ -1290,8 +1400,7 @@ export const getProjectTimelineForExport = async (req, res) => {
           status: project.status,
           chordProgression: chordProgression, // Explicitly include
           swingAmount: project.swingAmount,
-          bandSettings:
-            projectPlain.bandSettings || project.bandSettings || null,
+          bandSettings: project.bandSettingsId || null,
         },
         timeline: {
           durationSeconds: maxEndTime,
@@ -2398,7 +2507,7 @@ export const generateBackingTrack = async (req, res) => {
       });
     }
 
-    const project = await Project.findById(projectId);
+    const project = await Project.findById(projectId).populate("bandSettingsId");
     if (!project) {
       return res.status(404).json({
         success: false,
@@ -2406,11 +2515,22 @@ export const generateBackingTrack = async (req, res) => {
       });
     }
 
+    // Get bandSettings from populated reference
+    const bandSettings = project.bandSettingsId;
+
     // Require bandSettings for audio generation
     if (generateAudio) {
+      if (!bandSettings) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "bandSettings is required for backing track audio generation. Please configure your band settings first.",
+        });
+      }
+
       const hasBandSettings =
-        project.bandSettings?.members &&
-        project.bandSettings.members.length > 0;
+        bandSettings?.members &&
+        bandSettings.members.length > 0;
 
       if (!hasBandSettings) {
         return res.status(400).json({
@@ -2421,7 +2541,7 @@ export const generateBackingTrack = async (req, res) => {
       }
 
       // Require bandSettings.style for rhythm pattern
-      if (!project.bandSettings?.style) {
+      if (!bandSettings?.style) {
         return res.status(400).json({
           success: false,
           message:
@@ -2769,8 +2889,8 @@ export const generateBackingTrack = async (req, res) => {
       let finalInstrumentProgram = instrumentProgram;
 
       const hasBandSettings =
-        project.bandSettings?.members &&
-        project.bandSettings.members.length > 0;
+        bandSettings?.members &&
+        bandSettings.members.length > 0;
 
       console.log(
         "(IS $) [Backing Track] Using bandSettings - extracting instruments from members"
@@ -2783,7 +2903,7 @@ export const generateBackingTrack = async (req, res) => {
         );
 
         // Find comping or rhythm member (typically used for backing track)
-        const compingMember = project.bandSettings.members.find(
+        const compingMember = bandSettings.members.find(
           (m) => m.role === "comping" || m.role === "rhythm"
         );
 
@@ -2820,17 +2940,17 @@ export const generateBackingTrack = async (req, res) => {
         }
 
         // Convert bandSettings.style to rhythm pattern if available
-        if (project.bandSettings?.style && !finalRhythmPatternId) {
-          const stylePattern = styleToRhythmPattern(project.bandSettings.style);
+        if (bandSettings?.style && !finalRhythmPatternId) {
+          const stylePattern = styleToRhythmPattern(bandSettings.style);
           console.log(
-            `(IS $) [Backing Track] Converted style "${project.bandSettings.style}" to rhythm pattern with ${stylePattern.noteEvents.length} events`
+            `(IS $) [Backing Track] Converted style "${bandSettings.style}" to rhythm pattern with ${stylePattern.noteEvents.length} events`
           );
           // Style pattern will be passed via bandSettings to audio generator
         }
 
         // If no comping member, try to get from first non-muted member
         if (!compingMember) {
-          const activeMember = project.bandSettings.members.find(
+          const activeMember = bandSettings.members.find(
             (m) => !m.isMuted
           );
           if (activeMember && activeMember.soundBank) {
@@ -2858,7 +2978,7 @@ export const generateBackingTrack = async (req, res) => {
 
       // Define activeBandMembers (non-muted members) for audio generation
       const activeBandMembers =
-        project.bandSettings?.members?.filter((m) => !m.isMuted) || [];
+        bandSettings?.members?.filter((m) => !m.isMuted) || [];
 
       // Log band settings and project settings
       console.log(
@@ -2869,10 +2989,10 @@ export const generateBackingTrack = async (req, res) => {
           key: project.key,
           timeSignature: project.timeSignature,
           swingAmount: project.swingAmount,
-          bandSettings: project.bandSettings || null,
-          bandSettingsStyle: project.bandSettings?.style,
-          bandSettingsSwingAmount: project.bandSettings?.swingAmount,
-          bandSettingsMembers: project.bandSettings?.members?.length || 0,
+          bandSettings: bandSettings || null,
+          bandSettingsStyle: bandSettings?.style,
+          bandSettingsSwingAmount: bandSettings?.swingAmount,
+          bandSettingsMembers: bandSettings?.members?.length || 0,
           activeBandMembers: activeBandMembers.length,
           bandMembers: activeBandMembers.map((m) => ({
             type: m.type,
@@ -2907,10 +3027,10 @@ export const generateBackingTrack = async (req, res) => {
           projectId: project._id.toString(),
           instrumentProgram: finalInstrumentProgram,
           // bandSettings is required for audio generation
-          bandSettings: project.bandSettings,
+          bandSettings: bandSettings,
           swingAmount:
             project.swingAmount ||
-            project.bandSettings?.swingAmount ||
+            bandSettings?.swingAmount ||
             undefined,
         };
 
@@ -3034,16 +3154,16 @@ export const generateBackingTrack = async (req, res) => {
                 cloudinaryFolder: `${cloudinaryFolder}/chords/${i}/members`, // Organize by chord and member
                 projectId: project._id.toString(),
                 // Don't pass rhythmPatternId when using style-based pattern
-                rhythmPatternId: project.bandSettings?.style
+                rhythmPatternId: bandSettings?.style
                   ? null
                   : finalRhythmPatternId,
                 instrumentId: memberInstrumentId || finalInstrumentId,
                 instrumentProgram:
                   memberInstrumentProgram || finalInstrumentProgram,
-                bandSettings: project.bandSettings || undefined,
+                bandSettings: bandSettings || undefined,
                 swingAmount:
                   project.swingAmount ||
-                  project.bandSettings?.swingAmount ||
+                  bandSettings?.swingAmount ||
                   undefined,
                 // Apply member volume
                 volume: member.volume || 0.8,

@@ -1,45 +1,6 @@
 import mongoose from "mongoose";
 import { DEFAULT_KEY, DEFAULT_TIME_SIGNATURE } from "../utils/musicTheory.js";
-
-const BandMemberSchema = new mongoose.Schema(
-  {
-    instanceId: { type: String, required: true },
-    name: { type: String, default: "New Instrument" },
-    type: {
-      type: String,
-      enum: [
-        "drums",
-        "bass",
-        "piano",
-        "guitar",
-        "pad",
-        "strings",
-        "percussion",
-      ],
-      required: true,
-    },
-    soundBank: { type: String, default: "grand-piano" },
-    role: {
-      type: String,
-      enum: ["rhythm", "bass", "comping", "lead", "pad", "arpeggiator"],
-      default: "comping",
-    },
-    volume: { type: Number, default: 0.8, min: 0, max: 1 },
-    pan: { type: Number, default: 0, min: -1, max: 1 },
-    isMuted: { type: Boolean, default: false },
-    isSolo: { type: Boolean, default: false },
-  },
-  { _id: false }
-);
-
-const BandSettingsSchema = new mongoose.Schema(
-  {
-    style: { type: String, default: "Swing" },
-    swingAmount: { type: Number, default: 0.6, min: 0, max: 1 },
-    members: [BandMemberSchema],
-  },
-  { _id: false }
-);
+import BandSettings from "./BandSettings.js";
 
 const BarSchema = new mongoose.Schema(
   {
@@ -169,35 +130,10 @@ const projectSchema = new mongoose.Schema(
     },
     isPublic: { type: Boolean, default: false, required: true },
     structure: { type: [SectionSchema], default: [] },
-    bandSettings: {
-      type: BandSettingsSchema,
-      default: () => ({
-        style: "Swing",
-        swingAmount: 0.6,
-        members: [
-          {
-            instanceId: "default-drums",
-            type: "drums",
-            role: "rhythm",
-            soundBank: "jazz-kit",
-            name: "Drums",
-          },
-          {
-            instanceId: "default-bass",
-            type: "bass",
-            role: "bass",
-            soundBank: "upright",
-            name: "Bass",
-          },
-          {
-            instanceId: "default-piano",
-            type: "piano",
-            role: "comping",
-            soundBank: "grand-piano",
-            name: "Piano",
-          },
-        ],
-      }),
+    bandSettingsId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BandSettings",
+      default: null,
     },
     lickLanes: {
       type: [TimelineLaneSchema],
@@ -216,10 +152,6 @@ const projectSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Instrument",
     },
-    backingPlayingPatternId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "PlayingPattern",
-    },
   },
   { timestamps: true }
 );
@@ -227,6 +159,7 @@ const projectSchema = new mongoose.Schema(
 projectSchema.index({ creatorId: 1, updatedAt: -1 });
 projectSchema.index({ "collaborators.user": 1 });
 projectSchema.index({ isPublic: 1, status: 1 });
+projectSchema.index({ bandSettingsId: 1 });
 
 const Project = mongoose.model("Project", projectSchema);
 export default Project;
