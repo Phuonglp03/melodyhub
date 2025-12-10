@@ -428,6 +428,46 @@ export const getUserProjects = async (req, res) => {
   }
 };
 
+// Get projects by user ID (for viewing other users' profiles)
+// Only returns active projects that are publicly visible
+export const getUserProjectsById = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    // Validate userId format
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user ID format",
+      });
+    }
+
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
+    // Only get active projects created by this user
+    // For public profiles, we only show active projects
+    const projects = await Project.find({
+      creatorId: userObjectId,
+      status: "active",
+    })
+      .populate("creatorId", "username displayName avatarUrl")
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    res.json({
+      success: true,
+      data: projects.map((project) => normalizeProjectResponse(project)),
+    });
+  } catch (error) {
+    console.error("Error fetching user projects by ID:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch projects",
+      error: error.message,
+    });
+  }
+};
+
 // Get project by ID with full details
 export const getProjectById = async (req, res) => {
   try {

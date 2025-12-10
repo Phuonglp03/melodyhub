@@ -620,7 +620,7 @@ const AppHeader = () => {
       </Button>
 
       <Button className="app-header__cta app-header__cta--secondary" onClick={() => handleNavigate('/projects')}>
-      Tạo Bản Nhạc
+      Tạo Project
       </Button>
     </div>
   );
