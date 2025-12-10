@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import {
   Card,
   Avatar,
@@ -68,7 +68,7 @@ import {
   getPlaylistsByUser,
   getPlaylistById,
 } from "../../../services/user/playlistService";
-import { getUserProjects } from "../../../services/user/projectService";
+import { getUserProjects, getUserProjectsById } from "../../../services/user/projectService";
 import SimpleWaveform from "../../../components/SimpleWaveform";
 import LickCard from "../../../components/LickCard";
 import {
@@ -435,8 +435,11 @@ const UserFeed = () => {
   const [playlistDetail, setPlaylistDetail] = useState(null);
   const [playingLickId, setPlayingLickId] = useState(null);
   const playlistAudioRef = React.useRef(null);
-  const isOwnProfile =
-    !!currentUserId && userId && currentUserId.toString() === userId.toString();
+  const isOwnProfile = useMemo(
+    () =>
+      !!currentUserId && userId && currentUserId.toString() === userId.toString(),
+    [currentUserId, userId]
+  );
   const [followersModalOpen, setFollowersModalOpen] = useState(false);
   const [followingModalOpen, setFollowingModalOpen] = useState(false);
   const [followersList, setFollowersList] = useState([]);
@@ -1864,11 +1867,11 @@ const UserFeed = () => {
 
   // ----- Profile tabs data loaders -----
 
-  const fetchUserLicks = async () => {
-    if (!userId) return;
+  const fetchUserLicks = async (targetUserId) => {
+    if (!targetUserId) return;
     try {
       setUserLicksLoading(true);
-      const res = await getLicksByUser(userId, { status: "active", limit: 20 });
+      const res = await getLicksByUser(targetUserId, { status: "active", limit: 20 });
       const list = Array.isArray(res?.data) ? res.data : res?.licks || [];
       setUserLicks(list);
     } catch (e) {
@@ -1879,13 +1882,15 @@ const UserFeed = () => {
     }
   };
 
-  const fetchUserPlaylists = async () => {
-    if (!userId) return;
+  const fetchUserPlaylists = async (targetUserId) => {
+    if (!targetUserId) return;
     try {
       setUserPlaylistsLoading(true);
-      const res = await getPlaylistsByUser(userId, { page: 1, limit: 20 });
+      const res = await getPlaylistsByUser(targetUserId, { page: 1, limit: 20, isPublic: true });
       const list = Array.isArray(res?.data) ? res.data : res?.playlists || [];
-      setUserPlaylists(list);
+      // Filter to only show public playlists
+      const publicPlaylists = list.filter(pl => pl.is_public !== false && pl.isPublic !== false);
+      setUserPlaylists(publicPlaylists);
     } catch (e) {
       console.error("Error loading user playlists:", e);
       setUserPlaylists([]);
@@ -1947,35 +1952,41 @@ const UserFeed = () => {
     }
   };
 
-  const fetchUserProjectsForProfile = async () => {
-    // Backend chỉ hỗ trợ dự án của chính user đăng nhập
-    if (!isOwnProfile) {
-      setUserProjectsState([]);
-      return;
-    }
-    try {
-      setUserProjectsLoading(true);
-      const res = await getUserProjects("all");
-      const list = Array.isArray(res?.data) ? res.data : res?.projects || [];
-      setUserProjectsState(list);
-    } catch (e) {
-      console.error("Error loading user projects:", e);
-      setUserProjectsState([]);
-    } finally {
-      setUserProjectsLoading(false);
-    }
-  };
-
   useEffect(() => {
+    if (!userId) return;
+    
     if (activeTab === "licks") {
-      fetchUserLicks();
+      fetchUserLicks(userId);
     } else if (activeTab === "playlists") {
-      fetchUserPlaylists();
+      fetchUserPlaylists(userId);
     } else if (activeTab === "projects") {
-      fetchUserProjectsForProfile();
+      // Fetch projects based on whether it's own profile or not
+      const fetchProjects = async () => {
+        try {
+          setUserProjectsLoading(true);
+          let res;
+          // Calculate isOwnProfile directly here to avoid dependency issues
+          const ownProfile = !!currentUserId && userId && currentUserId.toString() === userId.toString();
+          if (ownProfile) {
+            // Lấy tất cả projects của chính user đăng nhập
+            res = await getUserProjects("all");
+          } else {
+            // Lấy chỉ active projects của user khác
+            res = await getUserProjectsById(userId);
+          }
+          const list = Array.isArray(res?.data) ? res.data : res?.projects || [];
+          setUserProjectsState(list);
+        } catch (e) {
+          console.error("Error loading user projects:", e);
+          setUserProjectsState([]);
+        } finally {
+          setUserProjectsLoading(false);
+        }
+      };
+      fetchProjects();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, userId, isOwnProfile]);
+  }, [activeTab, userId]);
 
   // Stop audio when component unmounts or modal is closed
   useEffect(() => {

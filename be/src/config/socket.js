@@ -277,10 +277,13 @@ export const socketServer = (httpServer) => {
         );
         convo.lastMessage = storageResult.textPreview;
         convo.lastMessageAt = msg.createdAt;
+        // Tăng unreadCount cho peer (người nhận)
         const currentUnread = Number(
           convo.unreadCounts?.get(String(peer)) || 0
         );
         convo.unreadCounts.set(String(peer), currentUnread + 1);
+        // Reset unreadCount về 0 cho sender (người gửi) vì họ đã trả lời
+        convo.unreadCounts.set(String(tempUserId), 0);
         await convo.save();
 
         console.log(
