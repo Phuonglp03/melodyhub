@@ -3,7 +3,7 @@ import Conversation from '../models/Conversation.js';
 import DirectMessage from '../models/DirectMessage.js';
 import UserFollow from '../models/UserFollow.js';
 import { getSocketIo } from '../config/socket.js';
-import { uploadMessageText, downloadMessageText } from '../services/messageStorageService.js';
+import { uploadMessageText, downloadMessageText } from '../utils/messageStorageService.js';
 
 const isObjectIdEqual = (a, b) => String(a) === String(b);
 

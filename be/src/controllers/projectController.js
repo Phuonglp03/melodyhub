@@ -12,7 +12,7 @@ import { notifyProjectCollaboratorInvited } from "../utils/notificationHelper.js
 import {
   getAllInstruments,
   getInstrumentById,
-} from "../services/instrumentService.js";
+} from "../utils/instrumentService.js";
 import {
   normalizeKeyPayload,
   normalizeTimeSignaturePayload,

@@ -9,19 +9,19 @@ import User from "../models/User.js";
 import {
   uploadMessageText,
   downloadMessageText,
-} from "../services/messageStorageService.js";
+} from "../utils/messageStorageService.js";
 import {
   applyOperation,
   getCollabState,
   getMissingOps,
-} from "../services/collabStateService.js";
+} from "../utils/collabStateService.js";
 import {
   addCollaboratorPresence,
   removeCollaboratorPresence,
   listCollaborators,
   updateCursorPosition,
   heartbeatPresence,
-} from "../services/collabPresenceService.js";
+} from "../utils/collabPresenceService.js";
 import { createClient } from "redis";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { recordCollabMetric } from "../utils/collabMetrics.js";
