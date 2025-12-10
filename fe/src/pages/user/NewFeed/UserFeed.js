@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
   Card,
   Avatar,
@@ -12,6 +12,7 @@ import {
   Modal,
   Upload,
   Select,
+  Slider,
   List,
   Dropdown,
   Radio,
@@ -58,6 +59,8 @@ import {
   onPostArchived,
   offPostArchived,
   joinRoom,
+  onPostLikeUpdate,
+  offPostLikeUpdate,
 } from "../../../services/user/socketService";
 import {
   getMyLicks,
@@ -376,6 +379,12 @@ const UserFeed = () => {
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
   const [uploadingCoverPhoto, setUploadingCoverPhoto] = useState(false);
+  const [coverPosition, setCoverPosition] = useState(50);
+  const [coverCropModalOpen, setCoverCropModalOpen] = useState(false);
+  const [coverCropPreview, setCoverCropPreview] = useState("");
+  const [coverCropOffsetY, setCoverCropOffsetY] = useState(50);
+  const [coverCropFile, setCoverCropFile] = useState(null);
+  const coverCropObjectUrlRef = useRef(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingPost, setEditingPost] = useState(null);
   const [editText, setEditText] = useState("");
@@ -485,6 +494,48 @@ const UserFeed = () => {
       }
     } catch (e) {
       console.warn("Load profile failed:", e);
+    }
+  };
+
+  const revokeCoverCropPreview = () => {
+    if (coverCropObjectUrlRef.current) {
+      URL.revokeObjectURL(coverCropObjectUrlRef.current);
+      coverCropObjectUrlRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      revokeCoverCropPreview();
+    };
+  }, []);
+
+  const closeCoverCropModal = () => {
+    revokeCoverCropPreview();
+    setCoverCropPreview("");
+    setCoverCropOffsetY(50);
+    setCoverCropFile(null);
+    setCoverCropModalOpen(false);
+  };
+
+  const handleConfirmCoverCrop = async () => {
+    if (!coverCropFile) return;
+    try {
+      setUploadingCoverPhoto(true);
+      const res = await uploadMyCoverPhoto(coverCropFile);
+      const url = res?.data?.coverPhotoUrl || res?.data?.user?.coverPhotoUrl;
+      if (url) {
+        setProfile((prev) => (prev ? { ...prev, coverPhotoUrl: url } : prev));
+        setCoverPosition(coverCropOffsetY);
+        message.success("Cập nhật ảnh bìa thành công");
+        closeCoverCropModal();
+      } else {
+        message.error("Không nhận được URL ảnh bìa");
+      }
+    } catch (e) {
+      message.error(e.message || "Tải ảnh bìa thất bại");
+    } finally {
+      setUploadingCoverPhoto(false);
     }
   };
 
@@ -933,6 +984,34 @@ const UserFeed = () => {
       offPostCommentNew(handler);
     };
   }, []);
+
+  // Realtime like count + self-like toggle
+  useEffect(() => {
+    const handler = (payload) => {
+      if (!payload?.postId) return;
+      const { postId, likesCount, userId: actorId, liked } = payload;
+      setPostIdToStats((prev) => {
+        const cur = prev[postId] || { likesCount: 0, commentsCount: 0 };
+        const nextLikes =
+          typeof likesCount === "number" ? likesCount : cur.likesCount || 0;
+        return {
+          ...prev,
+          [postId]: { ...cur, likesCount: nextLikes },
+        };
+      });
+      if (
+        actorId &&
+        currentUserId &&
+        actorId.toString() === currentUserId.toString()
+      ) {
+        setPostIdToLiked((prev) => ({ ...prev, [postId]: !!liked }));
+      }
+    };
+    onPostLikeUpdate(handler);
+    return () => {
+      offPostLikeUpdate(handler);
+    };
+  }, [currentUserId]);
 
   useEffect(() => {
     if (!commentOpen || !commentPostId) return;
@@ -2028,6 +2107,7 @@ const UserFeed = () => {
               src={profile.coverPhotoUrl}
               alt="Cover"
               className="profile-cover__image"
+              style={{ objectPosition: `50% ${coverPosition}%` }}
             />
           )}
           {isOwnProfile && (
@@ -2045,29 +2125,22 @@ const UserFeed = () => {
                   return;
                 }
 
-                if (file?.status === "done" || file?.status === "uploading") {
-                  return;
+                // đánh dấu đã xử lý để antd không hiển thị tiến trình
+                if (file) {
+                  file.status = "done";
                 }
 
+                // mở modal chọn vùng hiển thị
                 try {
-                  setUploadingCoverPhoto(true);
-                  const res = await uploadMyCoverPhoto(fileToUpload);
-                  const url =
-                    res?.data?.coverPhotoUrl || res?.data?.user?.coverPhotoUrl;
-                  if (url) {
-                    setProfile((prev) =>
-                      prev ? { ...prev, coverPhotoUrl: url } : prev
-                    );
-                    message.success("Cập nhật ảnh bìa thành công");
-                    if (file) file.status = "done";
-                  } else {
-                    if (file) file.status = "error";
-                  }
+                  revokeCoverCropPreview();
+                  const previewUrl = URL.createObjectURL(fileToUpload);
+                  coverCropObjectUrlRef.current = previewUrl;
+                  setCoverCropPreview(previewUrl);
+                  setCoverCropOffsetY(50);
+                  setCoverCropFile(fileToUpload);
+                  setCoverCropModalOpen(true);
                 } catch (e) {
-                  message.error(e.message || "Tải ảnh bìa thất bại");
-                  if (file) file.status = "error";
-                } finally {
-                  setUploadingCoverPhoto(false);
+                  message.error(e.message || "Không xem trước được ảnh");
                 }
               }}
             >
@@ -3726,6 +3799,95 @@ const UserFeed = () => {
           </Drawer>
         )}
       </div>
+
+      <Modal
+        centered
+        open={coverCropModalOpen}
+        onCancel={() => closeCoverCropModal()}
+        footer={[
+          <Button key="cancel" onClick={() => closeCoverCropModal()}>
+            Hủy
+          </Button>,
+          <Button
+            key="ok"
+            type="primary"
+            loading={uploadingCoverPhoto}
+            onClick={handleConfirmCoverCrop}
+          >
+            Lưu ảnh bìa
+          </Button>,
+        ]}
+        title="Chọn vùng hiển thị ảnh bìa"
+        width={720}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              height: 320,
+              borderRadius: 12,
+              overflow: "hidden",
+              background: "#0f0f10",
+              border: "1px solid #1f1f1f",
+            }}
+          >
+            {coverCropPreview ? (
+              <img
+                src={coverCropPreview}
+                alt="Preview"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  objectPosition: `50% ${coverCropOffsetY}%`,
+                  display: "block",
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#9ca3af",
+                }}
+              >
+                Không có ảnh xem trước
+              </div>
+            )}
+          </div>
+          <div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 8,
+                color: "#e5e7eb",
+                fontWeight: 600,
+              }}
+            >
+              <span>Vị trí ảnh (dọc)</span>
+              <span>{Math.round(coverCropOffsetY)}%</span>
+            </div>
+            <Slider
+              min={0}
+              max={100}
+              value={coverCropOffsetY}
+              onChange={setCoverCropOffsetY}
+              tooltip={{ formatter: (v) => `${v}%` }}
+            />
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         title={

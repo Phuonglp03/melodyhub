@@ -68,6 +68,8 @@ import {
   onPostArchived,
   offPostArchived,
   joinRoom,
+  onPostLikeUpdate,
+  offPostLikeUpdate,
 } from "../../../services/user/socketService";
 import {
   getMyLicks,
@@ -1558,19 +1560,6 @@ const NewsFeed = () => {
                         {user.displayName || user.username || "Người dùng"}
                       </Text>
                     }
-                    description={
-                      <Text style={{ color: "#9ca3af", fontSize: 12 }}>
-                        {user.isOnline ? (
-                          <span style={{ color: "#52c41a" }}>
-                            ● Đang hoạt động
-                          </span>
-                        ) : user.lastSeen ? (
-                          `Hoạt động ${formatTimeAgo(user.lastSeen)}`
-                        ) : (
-                          "Offline"
-                        )}
-                      </Text>
-                    }
                   />
                 </List.Item>
               );
@@ -1732,6 +1721,34 @@ const NewsFeed = () => {
       offPostCommentNew(handler);
     };
   }, []);
+
+  // Listen for realtime like updates
+  useEffect(() => {
+    const handler = (payload) => {
+      if (!payload?.postId) return;
+      const { postId, likesCount, userId: actorId, liked } = payload;
+      setPostIdToStats((prev) => {
+        const cur = prev[postId] || { likesCount: 0, commentsCount: 0 };
+        const nextLikes =
+          typeof likesCount === "number" ? likesCount : cur.likesCount || 0;
+        return {
+          ...prev,
+          [postId]: { ...cur, likesCount: nextLikes },
+        };
+      });
+      if (
+        actorId &&
+        currentUserId &&
+        actorId.toString() === currentUserId.toString()
+      ) {
+        setPostIdToLiked((prev) => ({ ...prev, [postId]: !!liked }));
+      }
+    };
+    onPostLikeUpdate(handler);
+    return () => {
+      offPostLikeUpdate(handler);
+    };
+  }, [currentUserId]);
 
   // Listen for post archived event (realtime removal from feed)
   useEffect(() => {
@@ -3795,12 +3812,22 @@ const NewsFeed = () => {
                     >
                       {limitToNewest3(postIdToComments[post._id]).map((c) => {
                         const canDelete = canDeleteComment(c, post);
+                        const avatarSrc =
+                          c?.userId?.avatarUrl &&
+                          typeof c?.userId?.avatarUrl === "string" &&
+                          c?.userId?.avatarUrl.trim() !== ""
+                            ? c.userId.avatarUrl
+                            : undefined;
                         return (
                           <div
                             key={c._id}
                             style={{ display: "flex", gap: 8, marginBottom: 8 }}
                           >
-                            <Avatar size={28} style={{ background: "#555" }}>
+                            <Avatar
+                              size={28}
+                              src={avatarSrc}
+                              style={{ background: "#555" }}
+                            >
                               {c?.userId?.displayName?.[0] ||
                                 c?.userId?.username?.[0] ||
                                 "U"}

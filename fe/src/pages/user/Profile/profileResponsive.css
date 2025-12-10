@@ -38,6 +38,32 @@
   display: block;
 }
 
+.cover-position-control {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  width: 230px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 12px;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.cover-position-control__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #e5e7eb;
+  margin-bottom: 6px;
+}
+
+.cover-position-control .ant-slider {
+  margin: 0;
+}
+
 .profile-form-grid {
   display: grid;
   grid-template-columns: 200px 1fr;

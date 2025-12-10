@@ -327,6 +327,7 @@ const GuitarTabNotation = ({
         <div className="flex items-center space-x-2">
           {/* Zoom Controls */}
           <button
+            type="button"
             onClick={handleZoomOut}
             className="p-2 bg-gray-800 hover:bg-gray-700 text-white rounded-md transition-colors"
             title="Zoom Out"
@@ -337,6 +338,7 @@ const GuitarTabNotation = ({
             {Math.round(zoom * 100)}%
           </span>
           <button
+            type="button"
             onClick={handleZoomIn}
             className="p-2 bg-gray-800 hover:bg-gray-700 text-white rounded-md transition-colors"
             title="Zoom In"
@@ -347,6 +349,7 @@ const GuitarTabNotation = ({
           {/* Edit Button */}
           {isEditable && (
             <button
+              type="button"
               className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors ml-2"
               title="Edit Tab"
             >
@@ -361,6 +364,7 @@ const GuitarTabNotation = ({
         <div className="flex items-center space-x-4">
           {/* Play/Pause Button */}
           <button
+            type="button"
             onClick={handlePlayPause}
             className={`p-2.5 ${
               playbackMode === "instrument"
@@ -376,6 +380,7 @@ const GuitarTabNotation = ({
           {audioRef && (
             <div className="flex bg-gray-900 rounded-md overflow-hidden border border-gray-700">
               <button
+                type="button"
                 onClick={() => setPlaybackMode("audio")}
                 className={`px-3 py-2 text-xs transition-colors ${
                   playbackMode === "audio"
@@ -388,6 +393,7 @@ const GuitarTabNotation = ({
                 Audio
               </button>
               <button
+                type="button"
                 onClick={() => setPlaybackMode("instrument")}
                 className={`px-3 py-2 text-xs transition-colors ${
                   playbackMode === "instrument"
