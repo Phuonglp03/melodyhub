@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Card, Form, Input, Button, Typography, message, Avatar, Space, Select, Upload, Modal } from 'antd';
+import { Card, Form, Input, Button, Typography, message, Avatar, Space, Select, Upload, Modal, Slider } from 'antd';
 import { ArrowLeftOutlined, UserOutlined, KeyOutlined, DeleteOutlined } from '@ant-design/icons';
 import { getMyProfile, updateMyProfile, uploadMyAvatar, uploadMyCoverPhoto } from '../../../services/user/profile';
 import { useNavigate } from 'react-router-dom';
@@ -20,6 +20,7 @@ const ProfilePage = () => {
   const [uploadingCoverPhoto, setUploadingCoverPhoto] = React.useState(false);
   const [avatarPreview, setAvatarPreview] = React.useState('');
   const [coverPreview, setCoverPreview] = React.useState('');
+  const [coverOffsetY, setCoverOffsetY] = React.useState(50);
   const [pendingAvatarFile, setPendingAvatarFile] = React.useState(null);
   const [pendingCoverFile, setPendingCoverFile] = React.useState(null);
   const avatarObjectUrlRef = useRef(null);
@@ -69,6 +70,10 @@ const ProfilePage = () => {
       revokeCoverPreview();
     };
   }, []);
+
+  useEffect(() => {
+    setCoverOffsetY(50);
+  }, [coverPreview]);
 
   useEffect(() => {
     const fetchProvinces = async () => {
@@ -317,65 +322,7 @@ const ProfilePage = () => {
           <Title level={2} style={{ color: '#fff', marginBottom: 16 }}>Hồ sơ</Title>
           <Card loading={loading} style={{ background: '#0f0f10', borderColor: '#1f1f1f' }}>
             {/* Cover Photo Section */}
-            <div style={{ marginBottom: 24 }}>
-              <div className="profile-cover-wrapper">
-                {coverPreview ? (
-                  <img 
-                    src={coverPreview} 
-                    alt="Cover" 
-                    className="profile-cover-wrapper__image"
-                  />
-                ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>
-                    No cover photo
-                  </div>
-                )}
-                <Upload
-                  showUploadList={false}
-                  accept="image/*"
-                  beforeUpload={() => {
-                    return false;
-                  }}
-                  onChange={async (info) => {
-                    const { file } = info;
-                    const fileToUpload = file?.originFileObj || file;
 
-                    if (!fileToUpload) {
-                      return;
-                    }
-
-                    if (file) {
-                      file.status = 'done';
-                    }
-
-                    const previewUrl = URL.createObjectURL(fileToUpload);
-                    setCoverPreviewValue(previewUrl, { isObjectUrl: true });
-                    setPendingCoverFile(fileToUpload);
-                    messageApi.info('Ảnh bìa mới sẽ được lưu sau khi bấm Save changes');
-                  }}
-                >
-                  <Button 
-                    loading={uploadingCoverPhoto && saving}
-                    type="primary"
-                    style={{ 
-                      position: 'absolute', 
-                      bottom: 16, 
-                      right: 16,
-                      background: 'rgba(0, 0, 0, 0.6)',
-                      borderColor: '#fff',
-                      color: '#fff'
-                    }}
-                  >
-                    {coverPreview ? 'Đổi ảnh bìa' : 'Thêm ảnh bìa'}
-                  </Button>
-                </Upload>
-                {pendingCoverFile && (
-                  <div style={{ marginTop: 8, color: '#d1d5db' }}>
-                    Ảnh bìa chờ lưu: <strong>{pendingCoverFile.name}</strong>
-                  </div>
-                )}
-              </div>
-            </div>
 
             <div className="profile-form-grid">
               <div className="profile-avatar-block">

@@ -1,10 +1,10 @@
 // Cloudinary Configuration
 export const CLOUDINARY_CONFIG = {
-  cloud_name: process.env.REACT_APP_CLOUDINARY_CLOUD_NAME || "drjavmnsk",
-  api_key: process.env.REACT_APP_CLOUDINARY_API_KEY || "566469121428313",
+  cloud_name: process.env.REACT_APP_CLOUDINARY_CLOUD_NAME || "dsrahn5bg",
+  api_key: process.env.REACT_APP_CLOUDINARY_API_KEY || "343778731864161",
   api_secret:
     process.env.REACT_APP_CLOUDINARY_API_SECRET ||
-    "4cQ4Zt86wbymtuADMT0IhU_FoZY",
+    "a2ZgkZUy9UgSGXEaqmm2GLEmNdU",
   secure: true,
 };
 

@@ -228,6 +228,14 @@ export const offPostCommentNew = (callback) => {
   getSocket()?.off("post:comment:new", callback);
 };
 
+// Post like update event
+export const onPostLikeUpdate = (callback) => {
+  getSocket()?.on("post:like:update", callback);
+};
+export const offPostLikeUpdate = (callback) => {
+  getSocket()?.off("post:like:update", callback);
+};
+
 // Post archived event
 export const onPostArchived = (callback) => {
   const socket = getSocket();
