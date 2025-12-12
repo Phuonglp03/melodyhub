@@ -6,13 +6,16 @@ import { ConfigProvider } from 'antd';
 import { store, persistor } from './redux/store';
 import AppRoutes from './routes/appRoutes';
 import { PersistGate } from 'redux-persist/integration/react';
+import TokenManager from './components/TokenManager';
 
 const App = () => (
   <Provider store={store}>
     <PersistGate loading={null} persistor={persistor}>
-      <ConfigProvider theme={{ token: { colorPrimary: '#1890ff' } }}>
-        <AppRoutes />
-      </ConfigProvider>
+      <TokenManager>
+        <ConfigProvider theme={{ token: { colorPrimary: '#1890ff' } }}>
+          <AppRoutes />
+        </ConfigProvider>
+      </TokenManager>
     </PersistGate>
   </Provider>
 );
