@@ -350,10 +350,28 @@ export default function ProjectBandEngine({
       const beat = beatRef.current;
       const beatInBar = beat % 4;
       const chordIndex = Math.floor(beat / 4) % chordProgression.length;
-      const chord =
+      let chord =
         chordProgression[chordIndex]?.chordName ||
         chordProgression[chordIndex]?.chord ||
         "";
+
+      // Resolve "%" to previous chord
+      if (chord === "%") {
+        for (let i = chordIndex - 1; i >= 0; i--) {
+          const prevChord =
+            chordProgression[i]?.chordName || chordProgression[i]?.chord || "";
+          if (
+            prevChord &&
+            prevChord !== "%" &&
+            prevChord !== "N.C." &&
+            prevChord !== ""
+          ) {
+            chord = prevChord;
+            break;
+          }
+        }
+      }
+
       const notes = chordToNotes(chord);
 
       membersRef.current.forEach((member) => {

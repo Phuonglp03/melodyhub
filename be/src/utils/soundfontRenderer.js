@@ -261,7 +261,20 @@ export const renderChordsWithSoundfont = async (chords = [], options = {}) => {
     });
 
     chords.forEach((chord, index) => {
-      const midiNotes = getChordMidiNotes(chord);
+      // Resolve "%" to previous chord
+      let resolvedChord = chord;
+      if (chord?.chordName === "%") {
+        for (let i = index - 1; i >= 0; i--) {
+          const prevChord = chords[i];
+          const prevChordName = prevChord?.chordName || "";
+          if (prevChordName && prevChordName !== "%" && prevChordName !== "N.C." && prevChordName !== "") {
+            resolvedChord = { ...prevChord, chordName: prevChordName };
+            break;
+          }
+        }
+      }
+      
+      const midiNotes = getChordMidiNotes(resolvedChord);
       if (!midiNotes.length) return;
 
       const startTime = index * chordDurationSeconds;

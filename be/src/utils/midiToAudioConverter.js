@@ -338,12 +338,25 @@ export const generateAudioFromChords = async (chords, options = {}) => {
 
     // Generate audio for each chord
     chords.forEach((chord, chordIndex) => {
+      // Resolve "%" to previous chord
+      let resolvedChord = chord;
+      if (chord?.chordName === "%") {
+        for (let i = chordIndex - 1; i >= 0; i--) {
+          const prevChord = chords[i];
+          const prevChordName = prevChord?.chordName || "";
+          if (prevChordName && prevChordName !== "%" && prevChordName !== "N.C." && prevChordName !== "") {
+            resolvedChord = { ...prevChord, chordName: prevChordName };
+            break;
+          }
+        }
+      }
+      
       // Get MIDI notes from chord - if not present, convert from chord name
-      let midiNotes = Array.isArray(chord.midiNotes) ? chord.midiNotes : [];
+      let midiNotes = Array.isArray(resolvedChord.midiNotes) ? resolvedChord.midiNotes : [];
 
       // If no midiNotes, try to convert from chordName
-      if (midiNotes.length === 0 && chord.chordName) {
-        midiNotes = chordNameToMidiNotes(chord.chordName);
+      if (midiNotes.length === 0 && resolvedChord.chordName) {
+        midiNotes = chordNameToMidiNotes(resolvedChord.chordName);
         console.log(
           `[Audio Generator] Converted chord "${chord.chordName}" to MIDI notes:`,
           midiNotes
