@@ -364,6 +364,8 @@ const TimelineView = ({
         <div
           ref={playheadRef}
           className="absolute top-0 bottom-0 w-[2px] bg-orange-400 z-30 cursor-ew-resize shadow-[0_0_14px_rgba(251,191,36,0.6)]"
+          // Use the current playbackPosition for initial render; ongoing motion is
+          // driven by the animation loop in useProjectPlayback via playheadRef.
           style={{
             left: `${
               TRACK_COLUMN_WIDTH + playbackPosition * pixelsPerSecond

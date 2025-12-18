@@ -37,6 +37,7 @@ export const useProjectPlayback = ({
   const audioEngine = useAudioEngine();
   const { schedulePlayback } = useAudioScheduler();
   const playbackPositionRef = useRef(playbackPosition);
+  const isSchedulingRef = useRef(false); // Flag to prevent auto-reschedule during initial play
 
   // Update playback position ref
   useEffect(() => {
@@ -92,26 +93,83 @@ export const useProjectPlayback = ({
       return;
     }
 
-    // Set transport position to current playhead (use current state value, not ref)
-    // This ensures we use the position the user dragged to, not a stale ref value
-    audioEngine.setPosition(playbackPosition);
-    playbackPositionRef.current = playbackPosition; // Ensure ref is in sync
+    // #region agent log
+    console.log("(NO $) [DEBUG][Playback] H1 beforeSetPosition:", {
+      playbackPositionState: playbackPosition,
+      playbackPositionRef: playbackPositionRef.current,
+      transportSecondsBefore: audioEngine.getPosition?.() ?? null,
+      transportStateBefore: audioEngine.transport?.state ?? null,
+    });
+    // #endregion agent log
+
+    // Set BPM first
     audioEngine.setBpm(bpm);
+
+    // Lock the playhead visually at current position BEFORE any async work
+    // This prevents the visual jump during scheduling
+    if (playheadRef.current) {
+      playheadRef.current.style.left = `${TRACK_COLUMN_WIDTH + playbackPosition * pixelsPerSecond}px`;
+    }
+
+    // Mark that we're in the middle of scheduling (prevent auto-reschedule effect)
+    isSchedulingRef.current = true;
 
     setIsPlaying(true);
 
-    // Schedule audio clips
+    // Schedule audio clips FIRST (this may reset transport position)
     await scheduleAudioPlayback();
+
+    // Set transport position AFTER scheduling, right before starting
+    // This ensures the position isn't reset by unsyncAllPlayers() in schedulePlayback
+    audioEngine.setPosition(playbackPosition);
+    playbackPositionRef.current = playbackPosition;
+    
+    isSchedulingRef.current = false;
+
+    // #region agent log
+    console.log("(NO $) [DEBUG][Playback] H2 afterSetPosition:", {
+      playbackPositionState: playbackPosition,
+      playbackPositionRef: playbackPositionRef.current,
+      transportSecondsAfterSet: audioEngine.getPosition?.() ?? null,
+      transportStateAfterSet: audioEngine.transport?.state ?? null,
+    });
+    // #endregion agent log
 
     // Start transport
     audioEngine.startTransport();
+
+    // #region agent log
+    console.log("(NO $) [DEBUG][Playback] H3 afterStartTransport:", {
+      playbackPositionState: playbackPosition,
+      playbackPositionRef: playbackPositionRef.current,
+      transportSecondsAfterStart: audioEngine.getPosition?.() ?? null,
+      transportStateAfterStart: audioEngine.transport?.state ?? null,
+    });
+    // #endregion agent log
   }, [audioEngine, bpm, scheduleAudioPlayback, setIsPlaying, playbackPosition]);
 
   const handlePause = useCallback(() => {
+    // Capture current position BEFORE stopping
+    const currentPos = audioEngine.getPosition();
+    
+    // #region agent log
+    console.log("(NO $) [DEBUG][Pause] handlePause called:", {
+      currentPos,
+      playbackPositionRef: playbackPositionRef.current,
+    });
+    // #endregion agent log
+    
     setIsPlaying(false);
     audioEngine.pauseTransport();
     audioEngine.stopAllPlayers();
-  }, [audioEngine, setIsPlaying]);
+    
+    // Ensure playhead stays at paused position (prevent visual jump)
+    setPlaybackPosition(currentPos);
+    playbackPositionRef.current = currentPos;
+    if (playheadRef.current) {
+      playheadRef.current.style.left = `${TRACK_COLUMN_WIDTH + currentPos * pixelsPerSecond}px`;
+    }
+  }, [audioEngine, setIsPlaying, setPlaybackPosition, playheadRef, TRACK_COLUMN_WIDTH, pixelsPerSecond]);
 
   const handleStop = useCallback(() => {
     setIsPlaying(false);
@@ -140,9 +198,19 @@ export const useProjectPlayback = ({
       const animate = () => {
         // Sync position with audioEngine transport
         const transportPos = audioEngine.getPosition();
-        const position = loopEnabled
+        let position = loopEnabled
           ? transportPos % loopLenSeconds
           : transportPos;
+
+        // Prevent visual jumps backwards (e.g., brief reset to 0 when resuming)
+        // by never letting the visual playhead go behind the last known ref position.
+        if (
+          typeof playbackPositionRef.current === "number" &&
+          playbackPositionRef.current > 0 &&
+          position < playbackPositionRef.current
+        ) {
+          position = playbackPositionRef.current;
+        }
 
         // 1. Direct DOM update for smooth 60fps animation without re-renders
         if (playheadRef.current) {
@@ -212,9 +280,16 @@ export const useProjectPlayback = ({
 
   // Auto-reschedule audio when tracks change during playback
   useEffect(() => {
+    // Skip if we're in the middle of initial scheduling (handlePlay)
+    if (isSchedulingRef.current) return;
+    
     if (isPlaying && audioEngine.players.size > 0) {
-      const timeoutId = setTimeout(() => {
-        scheduleAudioPlayback();
+      const timeoutId = setTimeout(async () => {
+        // Save current position before rescheduling
+        const currentPos = audioEngine.getPosition();
+        await scheduleAudioPlayback();
+        // Restore position after rescheduling (unsyncAllPlayers may reset it)
+        audioEngine.setPosition(currentPos);
       }, 50);
       return () => clearTimeout(timeoutId);
     }

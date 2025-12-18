@@ -136,6 +136,15 @@ export const useAudioScheduler = () => {
         );
       }
 
+      // #region agent log
+      console.log("(NO $) [DEBUG][Playback] H4 schedulePlayback summary:", {
+        scheduledCount,
+        scheduledClipIds: Array.from(scheduledClipsRef.current || []),
+        transportSecondsAtSchedule: audioEngine.getPosition?.() ?? null,
+        transportStateAtSchedule: audioEngine.transport?.state ?? null,
+      });
+      // #endregion agent log
+
       return scheduledCount;
     },
     [audioEngine, loadClipAudio, scheduleClip]
